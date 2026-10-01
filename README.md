@@ -5,10 +5,11 @@ the open Code OSS editor through VSCodium's downstream build approach. It will
 bundle Moderado's provider-independent agent, model routing, workspace tools,
 and approval UI. End users will not need to install Moderado CLI.
 
-**Status:** Project documentation and repository scaffold only. No editor
-source, runnable application, installer, or release has been created. The
-`VERSION` file identifies this new project; it does not announce a published
-Desktop build.
+**Status:** A local Windows x64 editor package and installers build
+successfully and have passed editor-host, install/uninstall, and clean-account
+checks; see [HANDOFF.md](HANDOFF.md) for evidence. There is no published
+release, no signature, and no Moderado agent integration. `VERSION` does not
+announce a published Desktop build.
 
 ## Relationship to Moderado CLI
 
@@ -51,6 +52,25 @@ records the current state.
 
 The project will preserve upstream license notices and use its own name, icons,
 application identifiers, and update endpoints before any distribution.
+
+## Build the Windows editor locally
+
+Install Git Bash, Node 24.18.0, Python 3.11, jq, 7-Zip, Rust, and Visual Studio
+Build Tools with the x64 Spectre libraries. The build uses the immutable source
+revisions in [sources.lock.json](sources.lock.json). From PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-m1.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-m1.ps1
+```
+
+Preparation fetches Code OSS through pinned VSCodium scripts and installs its
+dependencies. Build outputs are under `.cache/vscodium/assets/`, with source
+revisions, Desktop version, checksums, and sizes in `build-manifest.json`.
+The build script verifies both editor source revisions before packaging. If a
+prepared checkout already exists, run only `build-m1.ps1`. These are local
+unsigned test artifacts, not a release. The build does not bundle the Moderado
+agent; that is Milestone 2.
 
 ## Repository development
 

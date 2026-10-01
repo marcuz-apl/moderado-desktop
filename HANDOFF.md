@@ -2,14 +2,15 @@
 
 Updated: 2026-10-01 UTC
 Branch: master  
-Commit: initial scaffold (resolve with `git log -1`)  
-Status: planning scaffold reviewed; initial commit ready for push
+Commit: `9ab865c` (resolve with `git log -1`)  
+Status: M1 evidence complete; documentation and commit in progress
 
 ## Summary
 
 Moderado Desktop is an independent, self-contained IDE project planned around
-Code OSS/VSCodium build inputs and the pinned Moderado agent packages. No app
-source, build, installer, or release exists yet.
+Code OSS/VSCodium build inputs and the pinned Moderado agent packages. A local
+Windows x64 editor package and installers have been built and verified. Nothing
+is published or signed, and no Moderado agent integration exists yet.
 
 ## Completed
 
@@ -20,22 +21,23 @@ source, build, installer, or release exists yet.
 
 ## In progress
 
-- Exact source revisions are recorded in `sources.lock.json`, and the Desktop
-  product overlay is prepared. Spectre libraries are installed; `npm ci` is
-  running in the pinned Code OSS checkout. No editor packaging command has run.
+- M1 documentation and version control only; the build and all verification
+  steps have completed (see the M1 verification evidence below).
 
 ## Working tree
 
-- Independent Git repository initialized. Initial project files are untracked;
-  no commit yet.
+- Independent Git repository; M1 scripts, branding, and documentation are being
+  committed on `master`.
 
 ## Checks
 
-- `VERSION` format, required files, local document links, placeholder scan,
-  and all 14 copied file hashes â€” PASS in the sibling project.
-- `git -c safe.directory=D:/projects/moderado-desktop -C D:\projects\moderado-desktop status --short --branch` â€” PASS; no commits yet on `master`.
-- `git status --short --branch` in the CLI repository â€” PASS; clean after staging cleanup.
-- Build and tests â€” not run; no application source or test runner exists.
+- Build artifacts and their SHA-256 values verified against
+  `.cache/vscodium/assets/build-manifest.json`.
+- Editor-host launch, open-folder, and terminal: PASS.
+- Install and uninstall on the build account: PASS.
+- Clean-account install/uninstall in Windows Sandbox: PASS.
+- Build and tests — no Desktop application source or test runner exists yet;
+  Milestone 2 introduces the agent packages and their offline suites.
 
 ## Decisions and context
 
@@ -132,11 +134,74 @@ Then verify with:
   directories were empty. After installation, they contain libraries under
   `VC\Tools\MSVC\14.51.36231\lib\spectre`; the 14.51 x86/x64 Spectre
   component is the one matching this installed toolset.
-- `npm ci` was restarted from the pinned Code OSS checkout with Node 24.18.0.
-  The native dependency build has passed the earlier MSB8040 failure and the
-  install is continuing through postinstall work. Final command outcome is
-  pending; no editor artifact exists yet.
-- Gate 1 is **not complete**. Launch, folder, terminal, install/uninstall, and
-  clean-account checks have not run. Once `npm ci` finishes, continue the
-  pinned VSCodium Windows packaging steps, inspect the artifact, and run those
-  checks before declaring the milestone complete.
+- `npm ci` completed successfully from the pinned Code OSS checkout with Node
+  24.18.0 and the Visual Studio 2026 MSVC 14.51 Spectre libraries.
+- The main Code OSS source compilation and native/non-native extension bundles
+  passed. VSCodium packaging attempts exposed environment and invocation
+  issues: the tested package tree was built from the inner Code OSS checkout,
+  and an early packaging attempt ran with Electron downloads disabled, leaving
+  a Node executable in place of the Electron launcher. These outputs are
+  diagnostic only and are not M1 artifacts.
+- The locally cached Electron 42.8.1 x64 archive matches the pinned
+  `build/checksums/electron.txt` SHA-256 (`7a1aff619f94ead8a377d82e1f59bfd9a31a17db5b948f82fc5e60d576fe9304`).
+  This verifies the archive only; it does not validate an assembled Desktop
+  package.
+- M1 is **functionally complete**; the evidence below was produced on
+  2026-10-01 from the pinned revisions. No agent integration is claimed at this
+  gate, and nothing is published or signed.
+
+### M1 verification evidence (2026-10-01)
+
+Build artifacts, with SHA-256 and sizes recorded in
+`.cache/vscodium/assets/build-manifest.json`:
+
+| Artifact | Bytes | SHA-256 (first 16) |
+| --- | --- | --- |
+| `Moderado Desktop-win32-x64-1.135.06055.zip` | 312528587 | `F61E6FFEEF6E03C2` |
+| `Moderado DesktopSetup-x64-1.135.06055.exe` | 212996704 | `1693D0AEA0AA1288` |
+| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 212996967 | `AAABB391CA8FD775` |
+
+The manifest records `desktopVersion v0.1.0+2610013`, VSCodium
+`5a73682ca091082675b10c9dc3f348c1d824d94f`, Code OSS
+`08d4889f9ec4a1685d257b9b95de036c8e1ce1e5`, and the pinned Moderado
+reference `a293c1d84d28d1b126fc7054a0f57011edc9d62c`. `scripts/build-m1.ps1`
+re-checks both editor revisions against `sources.lock.json` and rejects stale
+artifacts before writing the manifest.
+
+Distinct identity confirmed in the packaged
+`VSCode-win32-x64/resources/app/product.json`: `Moderado Desktop`,
+`.moderado-desktop` data folder, `moderado-desktop` URL scheme,
+`Moderado.Desktop` AUMID, `moderadodesktop` mutex, Desktop-specific AppIDs and
+CLSIDs, Open VSX gallery, and empty update/download URLs.
+
+Real editor-host check, `.cache/m1-final-check/`:
+
+- `extension-result.json` — folder opened and a live terminal PID returned.
+- `terminal-result.txt` — `terminal-ok`.
+- `host-profile/logs/20261001T160305/` — extension host started and
+  `moderado.moderado-m1-smoke` activated, confirming a real host rather than a
+  mocked `vscode` module.
+
+Install/uninstall on the build account:
+
+- `install.log` — UserSetup installed to a scratch directory and launched
+  `Moderado Desktop.exe`.
+- `uninstall.log` — "Uninstallation process succeeded… Removed all? Yes".
+
+Clean-account check in a Windows Sandbox VM under `WDAGUtilityAccount`,
+`sandbox-shared/result.json`:
+
+```json
+{ "account": "25A58DCF-2085-4\\WDAGUtilityAccount", "installExit": 0,
+  "installed": true, "productName": "Moderado Desktop",
+  "uninstallExit": 0, "executableRemoved": true }
+```
+
+### M1 follow-ups before M2
+
+- Windows AppIDs and context-menu CLSIDs in `branding/product.json` were
+  hand-authored placeholders. They have been replaced with freshly generated
+  GUIDs, but the packages verified above were built with the placeholder values
+  and must be rebuilt before those identities are treated as final.
+- Artifacts are unsigned and local-only. Signing, provenance, and the update
+  channel remain M4 work.

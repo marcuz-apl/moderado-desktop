@@ -1,5 +1,6 @@
 node_modules/
 .cache/
+branding/generated/
 dist/
 out/
 .build/
