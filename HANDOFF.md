@@ -2,8 +2,8 @@
 
 Updated: 2026-10-01 UTC
 Branch: master  
-Commit: `9ab865c` (resolve with `git log -1`)  
-Status: M1 evidence complete; documentation and commit in progress
+Commit: `e007516` (resolve with `git log -1`)  
+Status: M1 evidence complete and committed; rebuild pending for final AppIDs
 
 ## Summary
 
