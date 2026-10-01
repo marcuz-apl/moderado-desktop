@@ -5,6 +5,11 @@ dist/
 out/
 .build/
 artifacts/
+vendor/moderado/**/dist/
+vendor/moderado/node_modules/
+vendor/moderado/tsconfig.tsbuildinfo
+vendor/moderado/packages/*/tsconfig.tsbuildinfo
+vendor/moderado/workspace-package.json
 *.log
 .env
 .env.*

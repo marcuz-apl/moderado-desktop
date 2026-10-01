@@ -3,7 +3,7 @@
 Updated: 2026-10-01 UTC
 Branch: master  
 Commit: `e007516` (resolve with `git log -1`)  
-Status: M1 evidence complete and committed; rebuild pending for final AppIDs
+Status: M1 evidence complete and committed; M2 agent integrated and verified
 
 ## Summary
 
@@ -196,6 +196,70 @@ Clean-account check in a Windows Sandbox VM under `WDAGUtilityAccount`,
   "installed": true, "productName": "Moderado Desktop",
   "uninstallExit": 0, "executableRemoved": true }
 ```
+
+### Milestone 2 evidence (agent integration)
+
+**Vendored agent.** `scripts/vendor-moderado.ps1` exports the pinned packages
+with `git archive` at commit `a293c1d84d28d1b126fc7054a0f57011edc9d62c`
+(53 files, tree hash `5c279cc86652fe179fb585af6edc4a237f4d8f4a1c674f4efe31a3c9f7dded14`,
+recorded in `vendor/moderado/VENDORED.json`). The CLI working tree was verified
+clean and unmodified before and after. All four packages compile with
+`npm run build` in `vendor/moderado`.
+
+**Fail-closed approval boundary.** `extensions/moderado-agent/src/approval.ts`
+closes the gaps the PRD records against the current core:
+
+- A decision is honoured only when its `requestId` matches the pending request;
+  a mismatch, a malformed shape, a closed view, a host-enforced timeout,
+  cancellation, or a non-interactive context all **deny**.
+- The host owns an explicit deadline because the core's `timeoutSeconds` field
+  is not enforced.
+- A write or command without a complete preview is denied rather than approved.
+
+**Offline suite.** `npx vitest run` in `extensions/moderado-agent`:
+**17 passed / 17** across 2 files. Coverage includes approval deny on denial,
+timeout, mismatch, closed UI, cancellation and non-interactive contexts; that no
+file is written when approval fails; workspace-jail traversal refusal; and a
+bounded agent turn against the vendored core using its fake provider, asserting
+free-first routing selects `mock/free-tool-model` rather than the paid model.
+
+**Typecheck and bundle.** `npx tsc --noEmit` exits 0. `npm run compile`
+(esbuild) emits `dist/extension.js` + `dist/agent-core.js`, about 256 KiB total,
+with `vscode` external and the vendored agent inlined.
+
+**Real editor-host check.** The bundle was loaded by the M1 Windows editor in a
+real extension host (`exthost.log` shows
+`ExtensionService#_doActivateExtension moderado.moderado-agent`), and the host
+check reported:
+
+```json
+{ "ok": true,
+  "checks": { "found": true, "isActive": true, "expectedCommandsPresent": true,
+    "commands": ["moderado.cancelRun", "moderado.configureProvider",
+      "moderado.openChat", "moderado.selectModel", "moderado.togglePlanMode"] } }
+```
+
+Three bundling defects were found and fixed by making the build fail loudly
+rather than silently shipping an unusable bundle: esbuild emitted ESM exports as
+dead code (`0 && (module.exports = …)`), the entry resolved `require` against
+esbuild's generated `main.node_modules` directory, and the exported global was
+never defined. `scripts/bundle.mjs` now asserts a reachable `module.exports` and
+smoke-loads the bundle against a stubbed host before exiting.
+
+### Milestone 2 follow-ups
+
+- The chat UI is not built. `moderado.openChat` prompts via an input box and
+  reports the run result; there is no streaming transcript view, no diff
+  renderer, and no webview approval surface. Approvals currently use a modal
+  dialog so they remain keyboard- and screen-reader-reachable.
+- `moderado.selectModel`, `moderado.configureProvider`, and
+  `moderado.togglePlanMode` are placeholders. Provider setup, Credential Manager
+  key resolution, and model discovery/selection are not wired, and no real
+  provider adapter is connected — runs use the vendored fake provider.
+- Sessions are not persisted or resumed; that is Milestone 3.
+- The rebuilt editor package that would carry the final AppIDs and this
+  extension has not been produced. The extension is verified against the
+  unpacked M1 editor, not a newly installed Desktop package.
 
 ### M1 follow-ups before M2
 

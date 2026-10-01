@@ -1,0 +1,6 @@
+import { FindReferencesParams, FindReferencesParamsSchema, GetDefinitionParams, GetDefinitionParamsSchema, IToolDefinition, ToolExecutionContext, ToolResult } from '@moderado/contracts';
+import { requestLanguageServer } from '../lsp.js';
+const executable=()=>process.env.MODERADO_TYPESCRIPT_LANGUAGE_SERVER ?? 'typescript-language-server';
+function tool(name:string, schema:any, method:'textDocument/definition'|'textDocument/references'):IToolDefinition<any>{return {name,description:`Find TypeScript ${name === 'get_definition' ? 'definition' : 'references'}.`,requiresApproval:false,parametersSchema:schema,async execute(params:FindReferencesParams|GetDefinitionParams,context:ToolExecutionContext):Promise<ToolResult>{try{const locations=await requestLanguageServer(context.workspaceRoot,executable(),method,params);return {toolName:name,status:'success',output:locations.length?locations.map(x=>`${x.path}:${x.line}:${x.column}`).join('\n'):'No locations found.',metadata:{locations}};}catch(err:any){return {toolName:name,status:'error',output:err.message};}}};}
+export const GetDefinitionTool=tool('get_definition',GetDefinitionParamsSchema,'textDocument/definition');
+export const FindReferencesTool=tool('find_references',FindReferencesParamsSchema,'textDocument/references');

@@ -1,0 +1,84 @@
+{
+  "name": "moderado-agent",
+  "displayName": "Moderado Agent",
+  "description": "Moderado's provider-independent agent, hosted inside Moderado Desktop.",
+  "version": "0.1.0",
+  "publisher": "moderado",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.135.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "moderado.openChat",
+        "title": "Moderado: Open Agent Chat"
+      },
+      {
+        "command": "moderado.selectModel",
+        "title": "Moderado: Select Model"
+      },
+      {
+        "command": "moderado.configureProvider",
+        "title": "Moderado: Configure Provider Connection"
+      },
+      {
+        "command": "moderado.cancelRun",
+        "title": "Moderado: Cancel Current Run"
+      },
+      {
+        "command": "moderado.togglePlanMode",
+        "title": "Moderado: Toggle Plan Mode"
+      }
+    ],
+    "configuration": {
+      "title": "Moderado",
+      "properties": {
+        "moderado.approvalTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "description": "Seconds a human approval request stays open before it is denied. A closed view, timeout, or cancellation denies the action."
+        },
+        "moderado.allowPaidModels": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow routing to models classified as paid. Off by default so the free-first rule is preserved."
+        },
+        "moderado.allowUnknownModels": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow routing to models with an unknown access tier. Off by default."
+        },
+        "moderado.requireApprovalByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require an explicit human decision for file mutations, commands, diagnostics, and MCP calls. Disabling this is not recommended."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node ./scripts/bundle.mjs",
+    "watch": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@types/vscode": "1.136.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

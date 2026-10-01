@@ -22,6 +22,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Icon generation failed.' }
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'apply-branding.ps1') -Checkout $checkout
 if ($LASTEXITCODE -ne 0) { throw 'Branding failed.' }
 
+# Build the bundled agent extension and install it into the editor checkout so
+# the packaged Desktop ships with it. A failure must not silently produce an
+# editor without the agent.
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-agent-extension.ps1') -Checkout $checkout
+if ($LASTEXITCODE -ne 0) { throw 'Agent extension build or install failed.' }
+
 $env:APP_NAME = 'Moderado Desktop'
 $env:BINARY_NAME = 'moderado-desktop'
 $env:CI_BUILD = 'no'

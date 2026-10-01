@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+import { Diagnostic } from '@moderado/contracts';
+import { resolveInJail } from './jail.js';
+import { getSanitizedEnv } from './tools/run_command.js';
+const allowed = ['typecheck', 'lint', 'test'] as const;
+export type DiagnosticScript = typeof allowed[number];
+export function discoverDiagnosticScripts(root: string): DiagnosticScript[] { const file=resolveInJail(root,'package.json'); const parsed=JSON.parse(fs.readFileSync(file,'utf8')); if(!parsed || typeof parsed!=='object' || !parsed.scripts || typeof parsed.scripts!=='object') return []; return allowed.filter((name)=>typeof parsed.scripts[name]==='string'); }
+export function parseTypeScriptDiagnostics(output: string): Diagnostic[] { const found: Diagnostic[]=[]; for(const line of output.split(/\r?\n/)){ const m=line.match(/^(.+?)(?:\((\d+),(\d+)\)|:(\d+):(\d+)\s+-)\s*:?[ ]*(error|warning|info)\s+(TS\d+)?\s*:?\s*(.+)$/i); if(m) found.push({file:m[1],line:Number(m[2]||m[4]),column:Number(m[3]||m[5]),severity:m[6].toLowerCase() as Diagnostic['severity'],code:m[7],message:m[8]}); } return found; }
+export async function runDiagnosticScript(root:string, script:DiagnosticScript):Promise<{exitCode:number;output:string}> { if(!discoverDiagnosticScripts(root).includes(script)) throw new Error(`Diagnostic script '${script}' is not available.`); return new Promise((resolve,reject)=>{let output=''; const child=spawn('npm',['run',script],{cwd:resolveInJail(root,'.'),env:getSanitizedEnv(),shell:false,windowsHide:true}); const timer=setTimeout(()=>{child.kill();reject(new Error('Diagnostic command timed out after 60 seconds.'));},60000); const add=(b:Buffer)=>{if(output.length<65536)output+=b.toString().slice(0,65536-output.length);}; child.stdout?.on('data',add); child.stderr?.on('data',add); child.on('error',reject); child.on('close',(code)=>{clearTimeout(timer);resolve({exitCode:code??1,output:output.trim()});});}); }

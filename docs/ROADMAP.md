@@ -31,6 +31,20 @@ repository is independent, and no application is represented as shipped.
 - Enforce explicit human approval by default for mutations and commands;
   Plan mode blocks writes in core policy.
 
+## M2 status (integrated; agent wiring verified)
+
+`vendor/moderado/` holds the pinned CLI agent packages exported at the
+immutable revision in `sources.lock.json` (commit `a293c1d…`, 53 files, tree hash
+recorded in `vendor/moderado/VENDORED.json`). The export uses `git archive`, so
+the sibling CLI working tree is never modified.
+
+`extensions/moderado-agent/` bundles those packages with Desktop's host into a
+single CommonJS bundle for the editor host. Verification is recorded in
+[HANDOFF.md](HANDOFF.md).
+
+Provider configuration, session persistence, and the streaming chat UI remain
+unbuilt; they are listed under Milestone 2 follow-ups.
+
 ## M3 — Shared profile compatibility
 
 - Round-trip config, skills, Windows Credential Manager references, and
