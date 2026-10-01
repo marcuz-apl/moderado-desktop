@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "status": "pinned",
+  "recordedAt": "2026-09-30",
+  "target": "windows-x64",
+  "sources": {
+    "vscodium": {
+      "repository": "https://github.com/VSCodium/vscodium.git",
+      "tag": "1.135.06055",
+      "commit": "5a73682ca091082675b10c9dc3f348c1d824d94f",
+      "version": "1.135.06055",
+      "role": "build-scripts-and-downstream-configuration",
+      "verification": "Verified with git ls-remote and a full Desktop-local clone; tag resolves directly to this commit."
+    },
+    "codeOss": {
+      "repository": "https://github.com/microsoft/vscode.git",
+      "tag": "1.135.0",
+      "commit": "08d4889f9ec4a1685d257b9b95de036c8e1ce1e5",
+      "version": "1.135.0",
+      "role": "editor-source",
+      "verification": "Commit recorded by VSCodium 1.135.06055 at upstream/stable.json; independently confirmed with git ls-remote."
+    },
+    "moderado": {
+      "repository": "https://github.com/marcuz-apl/moderado.git",
+      "tag": "v0.3.10",
+      "tagObject": "638008f99eb59209d0d2830b95d9b0cd2a09b225",
+      "commit": "a293c1d84d28d1b126fc7054a0f57011edc9d62c",
+      "version": "v0.3.10+260930e",
+      "role": "contracts-core-providers-tools",
+      "verification": "Annotated tag object and peeled commit verified with git ls-remote and full Desktop-local clone. This is not the earlier 44251dce bootstrap snapshot."
+    }
+  },
+  "buildUse": "Source identities are verified. Use these revisions for the Windows x64 build with branding/product.json as the Desktop product overlay."
+}

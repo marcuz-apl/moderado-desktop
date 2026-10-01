@@ -1,0 +1,36 @@
+{
+  "nameShort": "Moderado Desktop",
+  "nameLong": "Moderado Desktop",
+  "applicationName": "moderado-desktop",
+  "dataFolderName": ".moderado-desktop",
+  "quality": "stable",
+  "urlProtocol": "moderado-desktop",
+  "serverApplicationName": "moderado-desktop-server",
+  "serverDataFolderName": ".moderado-desktop-server",
+  "win32AppUserModelId": "Moderado.Desktop",
+  "win32DirName": "Moderado Desktop",
+  "win32MutexName": "moderadodesktop",
+  "win32NameVersion": "Moderado Desktop",
+  "win32RegValueName": "ModeradoDesktop",
+  "win32ShellNameShort": "Moderado Desktop",
+  "win32AppId": "{{B03F1B1C-7399-4561-9A79-000000000001}",
+  "win32x64AppId": "{{B03F1B1C-7399-4561-9A79-000000000002}",
+  "win32arm64AppId": "{{B03F1B1C-7399-4561-9A79-000000000003}",
+  "win32UserAppId": "{{B03F1B1C-7399-4561-9A79-000000000004}",
+  "win32x64UserAppId": "{{B03F1B1C-7399-4561-9A79-000000000005}",
+  "win32arm64UserAppId": "{{B03F1B1C-7399-4561-9A79-000000000006}",
+  "win32ContextMenu": {
+    "x64": { "clsid": "B03F1B1C-7399-4561-9A79-000000000007" },
+    "arm64": { "clsid": "B03F1B1C-7399-4561-9A79-000000000008" }
+  },
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "latestUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
+    "controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
+  },
+  "licenseUrl": "https://github.com/marcuz-apl/moderado-desktop/blob/master/LICENSE",
+  "reportIssueUrl": "https://github.com/marcuz-apl/moderado-desktop/issues",
+  "updateUrl": "",
+  "downloadUrl": ""
+}
