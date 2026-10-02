@@ -42,7 +42,13 @@ $env:SHOULD_BUILD_REH = 'no'
 $env:SHOULD_BUILD_REH_WEB = 'no'
 $env:VSCODE_ARCH = 'x64'
 $env:VSCODE_QUALITY = 'stable'
-$env:NODE_OPTIONS = '--max-old-space-size=8192'
+# The prepack/packing gulp process holds every extension stream in memory at once.
+# At 8192 MiB it intermittently died with "JavaScript heap out of memory", which
+# surfaced as several unrelated failures (tsgo exit 1/2 with no diagnostics,
+# `npm list` failing inside vsce, esbuild failing). Raise it; override with
+# MODERADO_BUILD_HEAP_MB when the machine has less headroom.
+$heapMb = if ($env:MODERADO_BUILD_HEAP_MB) { $env:MODERADO_BUILD_HEAP_MB } else { '12288' }
+$env:NODE_OPTIONS = "--max-old-space-size=$heapMb"
 $env:VSCODE_SKIP_NODE_VERSION_CHECK = 'yes'
 $env:Path = 'C:\Program Files\7-Zip;' + $env:Path
 Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue

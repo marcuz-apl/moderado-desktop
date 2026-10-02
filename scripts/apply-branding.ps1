@@ -38,3 +38,50 @@ Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\branding\generated') -Fi
   $target = Join-Path $editor ('resources\win32\' + $_.Name)
   Copy-Item -LiteralPath $_.FullName -Destination $target -Force
 }
+
+# Limit concurrent extension typechecks.
+#
+# The upstream prepack task starts every extension's `tsgo` process at once via
+# `es.merge(...map(typeCheckExtensionStream))`. On this machine that reliably
+# exhausts the TS7 processes and `tsgo` exits 1 or 2 with no diagnostics emitted,
+# while running the identical projects one at a time reports zero errors. The
+# patch is idempotent and only caps concurrency; it changes no compiler flag.
+$tsgo = Join-Path $editor 'build\lib\tsgo.ts'
+if (!(Test-Path -LiteralPath $tsgo)) { throw "Typecheck helper not found at $tsgo" }
+$tsgoText = Get-Content -Raw -LiteralPath $tsgo
+if (!($tsgoText -match 'MODERADO_TSGO_CONCURRENCY')) {
+  $anchor = 'export function createTsgoStream('
+  if (!($tsgoText.Contains($anchor))) { throw 'Could not locate createTsgoStream in the pinned checkout.' }
+  $limit = @'
+/**
+ * Desktop patch: cap how many typecheck processes run at once.
+ *
+ * Upstream merges one `tsgo` stream per extension, which on this machine
+ * saturates the compiler and makes `tsgo` exit non-zero with no diagnostics.
+ * Running the same projects sequentially reports zero errors, so the failure is
+ * resource exhaustion rather than a source defect.
+ */
+const TSGO_CONCURRENCY = Math.max(1, Number(process.env.MODERADO_TSGO_CONCURRENCY ?? '4'));
+let tsgoActive = 0;
+const tsgoQueue: (() => void)[] = [];
+
+async function withTsgoSlot<T>(fn: () => Promise<T>): Promise<T> {
+	if (tsgoActive >= TSGO_CONCURRENCY) {
+		await new Promise<void>((resolve) => tsgoQueue.push(resolve));
+	}
+	tsgoActive++;
+	try {
+		return await fn();
+	} finally {
+		tsgoActive--;
+		tsgoQueue.shift()?.();
+	}
+}
+
+'@
+  $tsgoText = $tsgoText.Replace($anchor, ($limit + $anchor))
+  $tsgoText = $tsgoText.Replace(
+    'spawnTsgo(projectPath, config, onComplete).then(() => {',
+    'withTsgoSlot(() => spawnTsgo(projectPath, config, onComplete)).then(() => {')
+  [System.IO.File]::WriteAllText($tsgo, $tsgoText, $utf8)
+}
