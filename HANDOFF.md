@@ -36,8 +36,8 @@ is published or signed, and no Moderado agent integration exists yet.
 - Editor-host launch, open-folder, and terminal: PASS.
 - Install and uninstall on the build account: PASS.
 - Clean-account install/uninstall in Windows Sandbox: PASS.
-- Agent extension offline suite: 58/58 passing; typecheck clean.
-- `scripts/verify-release.ps1`: 17/17 checks pass against the 2026-10-02
+- Agent extension offline suite: 65/65 passing; typecheck clean.
+- `scripts/verify-release.ps1`: 19/19 checks pass against the 2026-10-02
   artifacts, including that the shipped zip actually contains the agent.
 
 ## Decisions and context
@@ -354,14 +354,14 @@ identity, license notices, and the bundled agent. It writes
 `release-verification.json` with `signed: false` and `published: false`, and
 fails loudly rather than reporting a clean run.
 
-All 17 checks pass against the artifacts built on 2026-10-02 for
-`v0.1.0+2610023`:
+All 19 checks pass against the artifacts built on 2026-10-02 for
+`v0.1.0+2610026`:
 
 | Artifact | Bytes | SHA-256 (first 16) |
 | --- | --- | --- |
-| `Moderado Desktop-win32-x64-1.135.06055.zip` | 312750536 | `6AC67FD55B36EE10` |
-| `Moderado DesktopSetup-x64-1.135.06055.exe` | 213116731 | `DF1BB2D3B8A8DB79` |
-| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 213117106 | `75E969D132C860FA` |
+| `Moderado Desktop-win32-x64-1.135.06055.zip` | 312763436 | `BBDB3BB046760EFF` |
+| `Moderado DesktopSetup-x64-1.135.06055.exe` | 213115206 | `57D66351F425C34A` |
+| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 213115578 | `4D830B853596FAEB` |
 
 **Two defects found and fixed while finishing M4.**
 
@@ -400,24 +400,41 @@ with the extension taken from the packaged output.
 `exthost.log` records `ExtensionService#_doActivateExtension
 moderado.moderado-agent`, confirming a real host rather than a stub.
 
-**Build flakiness observed (not a source defect).** Three consecutive full
-rebuilds failed before one succeeded, each with a different upstream error and
-none reproducible in isolation:
+**Root cause of the repeated build failures: heap exhaustion.** Seven rebuilds
+failed before one succeeded, each with a *different* error and none reproducible
+in isolation — `npm list` failing inside vsce, `tsgo exited with code 2` or `1`
+with no diagnostics emitted, and `css-language-features\esbuild.mts` failing
+when it builds cleanly on its own. Running every extension `tsconfig.json`
+through TS7 sequentially reported `FAILCOUNT=0` each time, which ruled out a
+source defect and pointed at resources.
 
-1. `npm list --production` exiting non-zero inside `@vscodium/vsce` while
-   packaging extensions (`ELSPROBLEMS`, `tslib` reported missing). Re-running
-   all 65 non-esbuild extensions through the identical `vsce.listFiles` call
-   produced 0 failures.
-2. `tsgo exited with code 2` during `vscode-min-prepack`. Running the same
-   TS7 project typecheck directly over every extension `tsconfig.json`
-   produced `FAILCOUNT=0`.
+The final failed run printed the actual cause:
+`FATAL ERROR: MarkCompactCollector ... JavaScript heap out of memory`. The gulp
+process was dying from exhaustion at whichever step happened to be running, so
+the visible error was effectively random.
 
-Clearing stale `*.tsbuildinfo` under `extensions/` before the rebuild, then
-retrying, succeeded. Treat a single `build-m1.ps1` failure as inconclusive
-until the same command has been retried and the failing step has been
-reproduced directly.
+Two fixes:
 
-**Suites.** `npx vitest run` 58/58 passed; `tsc --noEmit` exits 0.
+- `scripts/apply-branding.ps1` patches `build/lib/tsgo.ts` (the overlay already
+  owns the reviewed downstream edits) to cap concurrent tsgo processes at 4.
+  Upstream merges one typecheck stream per extension and starts them all at
+  once. The patch is idempotent and changes no compiler flag; tune with
+  `MODERADO_TSGO_CONCURRENCY`.
+- `build-m1.ps1` raises `max-old-space-size` from 8192 to 12288, overridable with
+  `MODERADO_BUILD_HEAP_MB`.
+
+A full rebuild then completed with no heap exhaustion and no tsgo failure.
+
+**Version/provenance loop closed.** The version hook bumps `VERSION` on every
+commit, so the old `manifest:desktopVersion` check could never stay green: any
+commit after a build reported a good build as stale. `build-m1.ps1` now records
+`builtFromCommit`, and `verify-release.ps1` gates on that commit being an
+ancestor of HEAD plus a clean source tree, with the version string reported as
+informational only. Both new gates were confirmed to fail correctly — against a
+diverged tree and against uncommitted source edits — before the build was
+accepted.
+
+**Suites.** `npx vitest run` 65/65 passed; `tsc --noEmit` exits 0.
 
 **Still not done.** No code signing, no provenance attestation, no update
 channel, and no publication. Publishing requires the owner's explicit
