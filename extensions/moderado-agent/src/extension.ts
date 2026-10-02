@@ -15,6 +15,12 @@ import {
   emptySettings,
   parseSettingsForm,
 } from './settings-view.js';
+import {
+  ProviderConnectionRecord,
+  buildProviderChoices,
+  buildProviderConnection,
+} from './provider-setup.js';
+import type { ConnectProviderPresetId, ConnectProvidersConfig } from '@moderado/providers';
 
 export interface ModeradoApi {
   /** Starts one bounded agent turn. Any mutation still requires human approval. */
@@ -204,12 +210,28 @@ async function openDiffTab(requestId: string): Promise<void> {
     settings.models = [];
     if (status) settings.status = status;
 
+    // The picker is built from the engine's own preset metadata, so Desktop
+    // offers the same providers the CLI does and cannot drift from the pin.
+    const connectConfig = readConnectProviders(state);
+    settings.providers = buildProviderChoices(connectConfig).map((choice) => ({
+      value: choice.value,
+      label: choice.label,
+      description: choice.description,
+      tag: choice.tag,
+      baseUrl: choice.baseUrl,
+      defaultModel: choice.defaultModel,
+      requiresApiKey: choice.requiresApiKey,
+      custom: choice.value === 'openai-compatible' || choice.value.startsWith('custom:'),
+    }));
+
     if (state.kind === 'invalid') {
       settings.connections = [];
       settings.activeConnectionId = '';
       settings.baseUrl = '';
+      settings.displayName = '';
       settings.apiKeyStored = false;
       settings.defaultModel = '';
+      settings.preset = settings.providers[0]?.value ?? '';
       settings.profileError = state.error;
       render();
       return;
@@ -221,11 +243,16 @@ async function openDiffTab(requestId: string): Promise<void> {
       typeof config.activeConnectionId === 'string' ? config.activeConnectionId : '';
     settings.defaultModel = typeof config.defaultModel === 'string' ? config.defaultModel : '';
 
+    // Preselect the provider that is already connected, so reopening the pane
+    // shows the current state rather than resetting the user to the first entry.
+    settings.preset = settings.activeConnectionId ||
+      settings.providers[0]?.value ||
+      '';
+
     const record = (config.connections ?? {}) as Record<string, Record<string, unknown>>;
-    const active =
-      settings.connections.find((c) => c.id === settings.activeConnectionId) ??
-      settings.connections[0];
-    const activeRecord = active ? record[active.id] : undefined;
+    const activeRecord = record[settings.activeConnectionId];
+    settings.displayName =
+      typeof activeRecord?.displayName === 'string' ? activeRecord.displayName : '';
     settings.baseUrl = typeof activeRecord?.baseUrl === 'string' ? activeRecord.baseUrl : '';
 
     // Only the *presence* of a credential reaches the renderer. The key itself
@@ -250,17 +277,43 @@ async function openDiffTab(requestId: string): Promise<void> {
     render();
   }
 
+  /** Reads `connectProviders` defensively; the CLI ignores anything malformed. */
+  function readConnectProviders(state: ReturnType<typeof readConfig>): ConnectProvidersConfig | undefined {
+    if (state.kind !== 'ok') return undefined;
+    const raw = state.config.connectProviders;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const record = raw as Record<string, unknown>;
+    const custom = Array.isArray(record.custom)
+      ? record.custom.filter(
+        (item): item is { id: string; name: string; baseUrl: string; defaultModel?: string } =>
+          !!item && typeof item === 'object' &&
+          typeof (item as Record<string, unknown>).id === 'string' &&
+          typeof (item as Record<string, unknown>).name === 'string' &&
+          typeof (item as Record<string, unknown>).baseUrl === 'string',
+      )
+      : undefined;
+    const enabled = Array.isArray(record.enabled)
+      ? (record.enabled.filter((id) => typeof id === 'string') as ConnectProviderPresetId[])
+      : undefined;
+    return { ...(enabled ? { enabled } : {}), ...(custom ? { custom } : {}) };
+  }
+
   async function openSettingsPane(): Promise<void> {
     await loadSettingsState();
   }
 
   /**
-   * Applies a submitted settings form.
-   *
-   * The API key is written to Windows Credential Manager first and only the
-   * *reference* goes into config.json. If the credential write fails, nothing is
-   * written to the profile at all, so the two can never disagree.
-   */
+ * Applies a submitted settings form.
+ *
+ * The connection is built by `buildProviderConnection`, which carries the CLI's
+ * rule set. That guarantees the stored entry has the id, kind, and baseUrl the
+ * CLI's reader requires — an entry missing any of those is silently dropped on
+ * the CLI's next read, which is exactly the failure this replaces.
+ *
+ * The API key is written to Windows Credential Manager first and only the
+ * *reference* goes into config.json. If the credential write fails, nothing is
+ * written to the profile at all, so the two can never disagree.
+ */
   async function saveSettings(message: unknown): Promise<void> {
     const parsed = parseSettingsForm(message);
     if (!parsed.ok) {
@@ -268,7 +321,21 @@ async function openDiffTab(requestId: string): Promise<void> {
       render();
       return;
     }
-    const { connectionId, baseUrl, apiKey, modelId } = parsed.value;
+    const { preset, displayName, baseUrl, apiKey, modelId } = parsed.value;
+
+    let connection: ProviderConnectionRecord;
+    try {
+      connection = buildProviderConnection(
+        { preset, apiKey, baseUrl, displayName, defaultModel: modelId },
+        readConnectProviders(readConfig()),
+      );
+    } catch (error) {
+      // These are the CLI's own validation messages, surfaced verbatim so both
+      // applications explain a rejected connection the same way.
+      settings.status = (error as Error).message;
+      render();
+      return;
+    }
 
     let credentialRef: string | undefined;
     if (apiKey) {
@@ -278,7 +345,7 @@ async function openDiffTab(requestId: string): Promise<void> {
         return;
       }
       try {
-        credentialRef = credentialReference(connectionId);
+        credentialRef = credentialReference(connection.id);
         await new WindowsCredentialStore().set(credentialRef, apiKey);
       } catch {
         // Deliberately vague: the error must not carry the key or the target.
@@ -290,16 +357,15 @@ async function openDiffTab(requestId: string): Promise<void> {
 
     const patch: Record<string, unknown> = {
       connections: {
-        [connectionId]: {
-          id: connectionId,
-          displayName: connectionId,
-          kind: 'openai-compatible',
-          ...(baseUrl ? { baseUrl } : {}),
+        [connection.id]: {
+          ...connection,
+          // A plaintext key is never persisted; the reference replaces it.
+          apiKey: undefined,
           ...(credentialRef ? { credentialReference: credentialRef } : {}),
         },
       },
-      activeConnectionId: connectionId,
-      ...(modelId ? { defaultModel: modelId } : {}),
+      activeConnectionId: connection.id,
+      ...(connection.defaultModel ? { defaultModel: connection.defaultModel } : {}),
     };
 
     const result = updateConfigCoordinated(configPath(), patch);
@@ -329,6 +395,13 @@ async function openDiffTab(requestId: string): Promise<void> {
     }
     if (msg.type === 'refreshModels') {
       void loadSettingsState('Loading models…');
+      return;
+    }
+    if (msg.type === 'selectPreset' && typeof msg.preset === 'string') {
+      // The preset decides which fields apply, so the host re-renders the pane.
+      settings.preset = msg.preset;
+      settings.status = '';
+      render();
       return;
     }
     if (msg.type === 'saveSettings') {

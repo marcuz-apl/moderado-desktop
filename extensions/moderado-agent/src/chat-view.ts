@@ -151,18 +151,17 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
     if (node) node.textContent = text;
   }
 
-  // A picked provider supplies the connection id. When the user is adding a new
-  // connection the id comes from the text field instead, so both paths end up
-  // as one validated id on the host side.
+  // A picked preset supplies the endpoint, kind, and id. The extra name/base-URL
+  // fields only exist for the generic "other endpoint" entry.
   function readSettings() {
     const provider = document.getElementById('settings-provider');
-    const connectionId = document.getElementById('settings-connection-id');
+    const displayName = document.getElementById('settings-display-name');
     const baseUrl = document.getElementById('settings-base-url');
     const apiKey = document.getElementById('settings-api-key');
     const model = document.getElementById('settings-model');
-    const typed = connectionId ? connectionId.value.trim() : '';
     return {
-      connectionId: typed || (provider ? provider.value : ''),
+      preset: provider ? provider.value : '',
+      displayName: displayName ? displayName.value : '',
       baseUrl: baseUrl ? baseUrl.value : '',
       apiKey: apiKey ? apiKey.value : '',
       modelId: model ? model.value : '',
@@ -173,6 +172,7 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
     const close = document.getElementById('close-settings');
     const save = document.getElementById('settings-save');
     const refresh = document.getElementById('settings-refresh');
+    const provider = document.getElementById('settings-provider');
     if (close) close.addEventListener('click', () => vscode.postMessage({ type: 'closeSettings' }));
     if (save) save.addEventListener('click', () => {
       say('Saving…');
@@ -182,6 +182,9 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
       say('Loading models…');
       vscode.postMessage({ type: 'refreshModels' });
     });
+    // Changing the preset changes which fields apply, so the host re-renders
+    // the pane rather than the webview guessing at the new shape.
+    if (provider) provider.addEventListener('change', () => vscode.postMessage({ type: 'selectPreset', preset: provider.value }));
   }
 
   document.getElementById('open-settings').addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));

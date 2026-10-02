@@ -108,67 +108,114 @@ describe('moderado settings pane', () => {
     expect(html).not.toContain('id="settings-pane"');
   });
 
-  it('renders provider, API key, and model controls when opened', () => {
-    const pane = settingsPaneHtml(settings());
+  it('renders a provider picker, key field, and model picker', () => {
+    const pane = settingsPaneHtml(settings({ preset: 'nvidia-nim', providers: [
+      { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'Free-first routing.', requiresApiKey: true },
+    ] }));
     expect(pane).toContain('id="settings-provider"');
-    expect(pane).toContain('id="settings-base-url"');
     expect(pane).toContain('id="settings-api-key"');
     expect(pane).toContain('id="settings-model"');
+  });
+
+  it('hides the base URL field for a known provider', () => {
+    // The preset already knows its endpoint. Asking for it would invite a user
+    // to break a working provider by editing a value that is not theirs.
+    const pane = settingsPaneHtml(settings({ preset: 'openrouter', providers: [
+      { value: 'openrouter', label: 'OpenRouter', description: 'Free tier.', requiresApiKey: true },
+    ] }));
+    expect(pane).not.toContain('id="settings-base-url"');
+    expect(pane).not.toContain('id="settings-display-name"');
+  });
+
+  it('shows the base URL and name fields for a custom endpoint', () => {
+    const pane = settingsPaneHtml(settings({ preset: 'openai-compatible', providers: [
+      { value: 'openai-compatible', label: 'Other', description: 'Any endpoint.', requiresApiKey: true, custom: true },
+    ] }));
+    expect(pane).toContain('id="settings-base-url"');
+    expect(pane).toContain('id="settings-display-name"');
+  });
+
+  it('omits the key field for a local runtime', () => {
+    // Ollama and LM Studio authenticate with no key; asking for one implies a
+    // requirement that does not exist.
+    const pane = settingsPaneHtml(settings({ preset: 'ollama', providers: [
+      { value: 'ollama', label: 'Ollama', description: 'Local.', requiresApiKey: false },
+    ] }));
+    expect(pane).not.toContain('id="settings-api-key"');
+    expect(pane).toContain('needs no API key');
+  });
+
+  it('tags providers the same way the CLI does', () => {
+    const pane = settingsPaneHtml(settings({ preset: 'ollama', providers: [
+      { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true, tag: 'Free Models' },
+      { value: 'ollama', label: 'Ollama', description: 'd', requiresApiKey: false, tag: 'Local' },
+    ] }));
+    expect(pane).toContain('NVIDIA NIM · Free Models');
+    expect(pane).toContain('Ollama · Local');
   });
 
   it('masks the API key field', () => {
     // A visible key field would put a provider secret on screen and in shoulder
     // surfing. The value is write-only: it is sent out and never sent back.
-    const pane = settingsPaneHtml(settings());
+    const pane = settingsPaneHtml(settings({ preset: 'nvidia-nim', providers: [
+      { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true },
+    ] }));
     expect(pane).toMatch(/id="settings-api-key"[^>]*type="password"/);
   });
 
   it('never echoes a stored API key back into the pane', () => {
-    const pane = settingsPaneHtml(settings({ apiKeyStored: true, apiKey: 'sk-live-secret' }));
+    const pane = settingsPaneHtml(settings({
+      preset: 'nvidia-nim', apiKeyStored: true,
+      providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
+    }));
     expect(pane).not.toContain('sk-live-secret');
     expect(pane).toContain('A key is already stored');
   });
 
-  it('marks the active provider and model as selected', () => {
+  it('marks the selected provider and model', () => {
     const pane = settingsPaneHtml(
       settings({
-        connections: [
-          { id: 'nvidia', displayName: 'NVIDIA NIM' },
-          { id: 'local', displayName: 'Ollama' },
+        preset: 'ollama',
+        providers: [
+          { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true },
+          { value: 'ollama', label: 'Ollama', description: 'd', requiresApiKey: false },
         ],
-        activeConnectionId: 'local',
         models: [
-          { id: 'model-a', accessTier: 'free', isFree: true },
+          { id: 'model-a', accessTier: 'free_trial', isFree: true },
           { id: 'model-b', accessTier: 'paid', isFree: false },
         ],
         defaultModel: 'model-b',
       }),
     );
-    expect(pane).toContain('<option value="local" selected');
+    expect(pane).toContain('<option value="ollama" selected');
     expect(pane).toContain('<option value="model-b" selected');
   });
 
-  it('labels paid and unknown models instead of hiding the cost', () => {
+  it('labels each model with its engine access tier instead of hiding cost', () => {
+    // The real AccessTier values are free_trial | paid | local | unknown. The
+    // tier stays in the label so the free-first rule remains observable.
     const pane = settingsPaneHtml(
       settings({
+        preset: 'nvidia-nim',
         models: [
-          { id: 'model-a', accessTier: 'free', isFree: true },
+          { id: 'model-a', accessTier: 'free_trial', isFree: true },
           { id: 'model-b', accessTier: 'paid', isFree: false },
           { id: 'model-c', accessTier: 'unknown', isFree: false },
         ],
       }),
     );
+    expect(pane).toContain('model-a — free_trial');
     expect(pane).toContain('model-b — paid');
     expect(pane).toContain('model-c — unknown');
-    expect(pane).toContain('model-a — free');
   });
 
   it('escapes untrusted provider names, base URLs, and model ids', () => {
     const pane = settingsPaneHtml(
       settings({
-        connections: [{ id: 'x', displayName: '<img src=x onerror=alert(1)>' }],
+        preset: 'openai-compatible',
+        providers: [{ value: 'custom:x', label: '<img src=x onerror=alert(1)>', description: 'd', requiresApiKey: true, custom: true }],
         baseUrl: '"><script>bad</script>',
-        models: [{ id: '<script>bad</script>', accessTier: 'free', isFree: true }],
+        models: [{ id: '<script>bad</script>', accessTier: 'free_trial', isFree: true }],
       }),
     );
     expect(pane).not.toContain('<img src=x');
@@ -184,46 +231,45 @@ describe('moderado settings pane', () => {
     expect(pane).toContain('disabled');
   });
 
-  it('parses a submitted form into a validated patch', () => {
+  it('parses a submitted form into validated values', () => {
     const parsed = parseSettingsForm({
-      connectionId: 'nvidia',
-      baseUrl: 'https://integrate.api.nvidia.com/v1',
+      preset: 'nvidia-nim',
       apiKey: 'sk-test',
       modelId: 'model-a',
     });
     expect(parsed.ok).toBe(true);
-    expect(parsed.value?.connectionId).toBe('nvidia');
+    expect(parsed.value?.preset).toBe('nvidia-nim');
     expect(parsed.value?.modelId).toBe('model-a');
   });
 
-  it('rejects a non-https base URL rather than storing it', () => {
-    // A base URL is where the key gets sent, so a plaintext or script-shaped
-    // value must not reach the profile.
-    const parsed = parseSettingsForm({ connectionId: 'x', baseUrl: 'javascript:alert(1)' });
-    expect(parsed.ok).toBe(false);
-    expect(parsed.error).toBeTruthy();
+  it('rejects a missing or malformed provider value', () => {
+    expect(parseSettingsForm({ apiKey: 'k' }).ok).toBe(false);
+    expect(parseSettingsForm({ preset: 'x y z' }).ok).toBe(false);
   });
 
-  it('rejects a connection id that cannot become a credential target', () => {
-    const parsed = parseSettingsForm({ connectionId: '///', baseUrl: '' });
-    expect(parsed.ok).toBe(false);
+  it('rejects a provider name that cannot become a credential target', () => {
+    // The name is slugified into the connection id, which becomes the
+    // Credential Manager target name.
+    expect(parseSettingsForm({ preset: 'openai-compatible', displayName: '///' }).ok).toBe(false);
   });
 
   it('treats an empty API key as "leave the stored key alone"', () => {
     // The pane never receives the existing key, so an empty field must not be
     // read as a request to erase it.
-    const parsed = parseSettingsForm({ connectionId: 'x', baseUrl: '', apiKey: '   ' });
+    const parsed = parseSettingsForm({ preset: 'openrouter', apiKey: '   ' });
     expect(parsed.ok).toBe(true);
     expect(parsed.value?.apiKey).toBeUndefined();
   });
 
   it('rejects a malformed message instead of guessing', () => {
     expect(parseSettingsForm(undefined).ok).toBe(false);
-    expect(parseSettingsForm({ connectionId: 42 }).ok).toBe(false);
+    expect(parseSettingsForm({ preset: 42 }).ok).toBe(false);
   });
 
   it('carries a snapshot that updates the open pane in place', () => {
-    const snap = settingsSnapshot(settings({ open: true }));
+    const snap = settingsSnapshot(settings({ open: true, preset: 'nvidia-nim', providers: [
+      { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true },
+    ] }));
     expect(snap.settingsOpen).toBe(true);
     expect(snap.settings).toContain('id="settings-provider"');
     expect(settingsSnapshot(emptySettings()).settings).toBe('');
