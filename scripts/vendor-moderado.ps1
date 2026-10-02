@@ -12,6 +12,18 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $lock = Get-Content -Raw -LiteralPath (Join-Path $root 'sources.lock.json') | ConvertFrom-Json
 $revision = $lock.sources.moderado.commit
 
+# CI has no sibling checkout. Clone the pinned upstream into a cache directory
+# when the local path is absent, so a runner and a developer produce the same
+# vendored tree from the same immutable revision.
+if (!(Test-Path -LiteralPath $CliRepository)) {
+  $clone = Join-Path $root '.cache\cli-pinned'
+  if (Test-Path -LiteralPath $clone) { Remove-Item -LiteralPath $clone -Recurse -Force }
+  Write-Output "No local CLI checkout at $CliRepository; cloning pinned upstream."
+  & git clone --no-checkout $lock.sources.moderado.repository $clone
+  if ($LASTEXITCODE -ne 0) { throw "Clone of $($lock.sources.moderado.repository) failed." }
+  $CliRepository = $clone
+}
+
 $repo = (Resolve-Path -LiteralPath $CliRepository).Path
 $expected = (& git -C $repo cat-file -t $revision).Trim()
 if ($LASTEXITCODE -ne 0 -or $expected -ne 'commit') {

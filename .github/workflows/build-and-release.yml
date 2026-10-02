@@ -1,0 +1,196 @@
+name: build-and-release
+
+# Publishing is OFF by default and cannot run without an explicit dispatch and,
+# on a public repository, a real code signature. See the `publish` job guard.
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Create a GitHub Release from these artifacts'
+        type: boolean
+        default: false
+      allow_unsigned_publication:
+        description: >-
+          DANGER. Publish even though the artifacts are unsigned. On a public
+          repository this means SmartScreen warnings for every user and a real
+          risk of malware-flagging. Only use for a private, trusted audience.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24.18.0'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build:
+    name: Build and verify (Windows x64)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # build-m1.ps1 records the commit; tags come from here
+
+      - name: Report pinned revisions
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw sources.lock.json | ConvertFrom-Json
+          foreach ($name in 'vscodium','codeOss','moderado') {
+            if (-not $lock.sources.$name.commit) { throw "sources.lock.json is missing the $name commit." }
+            Write-Host "$name = $($lock.sources.$name.commit)"
+          }
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up Python 3.11
+        # prepare-m1.ps1 hard-requires `py -3.11`; hosted images default to 3.13+.
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install build prerequisites
+        shell: pwsh
+        run: |
+          # 7-Zip and jq are required by the VSCodium asset scripts and are not
+          # preinstalled on hosted images.
+          choco install --no-progress -y 7zip jq
+          if ($LASTEXITCODE -ne 0) { throw 'choco install failed.' }
+          if (-not (Test-Path 'C:\Program Files\7-Zip\7z.exe')) { throw '7-Zip not found after install.' }
+
+      - name: Report Visual Studio and Spectre availability
+        # Native modules build against Spectre. If it is missing the build dies
+        # deep in native compilation with a misleading error, so report it early.
+        shell: pwsh
+        run: |
+          $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          if (-not $vs) { throw 'Visual Studio C++ Build Tools are missing on this runner.' }
+          Write-Host "VS: $vs"
+          $spectre = Get-ChildItem -Path (Join-Path $vs 'VC\Tools\MSVC') -Recurse -Directory -Filter spectre -ErrorAction SilentlyContinue
+          if (-not $spectre) {
+            Write-Warning 'Spectre libraries are absent; native extensions may fail to compile.'
+            Write-Host 'spectre: MISSING'
+          } else {
+            Write-Host "spectre: $($spectre[0].FullName)"
+          }
+
+      - name: Vendor the pinned Moderado agent
+        shell: pwsh
+        run: |
+          # Clones the pinned upstream commit; there is no sibling checkout on a
+          # runner. The CLI tree is never modified.
+          ./scripts/vendor-moderado.ps1 -CliRepository "${{ runner.temp }}\no-cli-checkout"
+
+      - name: Build the vendored packages
+        shell: pwsh
+        run: |
+          Push-Location vendor/moderado
+          try {
+            npm install
+            if ($LASTEXITCODE -ne 0) { throw 'vendor npm install failed' }
+            npm run build
+            if ($LASTEXITCODE -ne 0) { throw 'vendor build failed' }
+          } finally { Pop-Location }
+
+      - name: Extension offline suite
+        shell: pwsh
+        run: |
+          Push-Location extensions/moderado-agent
+          try {
+            npm ci
+            npm test
+            if ($LASTEXITCODE -ne 0) { throw 'Agent extension tests failed.' }
+            npm run typecheck
+            if ($LASTEXITCODE -ne 0) { throw 'Agent extension typecheck failed.' }
+          } finally { Pop-Location }
+
+      - name: Prepare the pinned editor source
+        shell: pwsh
+        run: ./scripts/prepare-m1.ps1
+
+      - name: Build the editor and installers
+        shell: pwsh
+        env:
+          MODERADO_TSGO_CONCURRENCY: '2'
+        run: ./scripts/build-m1.ps1
+
+      - name: Generate provenance and notices
+        shell: pwsh
+        run: ./scripts/gen-provenance.ps1
+
+      - name: Verify the release evidence
+        shell: pwsh
+        run: ./scripts/verify-release.ps1
+
+      - name: Confirm the shipped archive contains the agent and licenses
+        shell: pwsh
+        run: |
+          # A packaging regression can produce a healthy-looking editor with no
+          # agent in it. Assert on the artifact, not the staging tree.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Get-ChildItem .cache/vscodium/assets -Filter '*-win32-x64-*.zip' | Select-Object -First 1
+          if (-not $zip) { throw 'No portable archive was produced.' }
+          $a = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $entry = $a.Entries | Where-Object { $_.FullName -eq 'resources/app/extensions/moderado-agent/dist/extension.js' }
+            if (-not $entry) { throw 'The agent is NOT in the shipped archive.' }
+            Write-Host "agent entry present: $($entry.Length) bytes"
+            if (-not ($a.Entries | Where-Object { $_.FullName -eq 'LICENSE.txt' })) {
+              throw 'LICENSE.txt is missing from the shipped archive.'
+            }
+          } finally { $a.Dispose() }
+
+      - name: Upload build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: moderado-desktop-evidence
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            .cache/vscodium/assets/*.zip
+            .cache/vscodium/assets/*.exe
+            .cache/vscodium/assets/build-manifest.json
+            .cache/vscodium/assets/provenance.json
+            .cache/vscodium/assets/THIRD-PARTY-NOTICES.md
+            .cache/vscodium/assets/release-verification.json
+
+  publish:
+    name: Publish GitHub Release (manual; requires a signature)
+    needs: build
+    runs-on: ubuntu-latest
+    # Intentionally disabled. Publishing is a separate, reviewed change made only
+    # after a code-signing certificate exists, so that this workflow cannot put
+    # unsigned binaries in front of the public. See HANDOFF.md.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish == true &&
+      false
+    permissions:
+      contents: write
+
+    steps:
+      - name: Explain why publishing is disabled
+        run: |
+          echo 'This job is intentionally disabled in the committed workflow.'
+          echo 'Publishing requires a code signature and the artifacts are unsigned.'
+          echo 'See HANDOFF.md, "Milestone 5 evidence".'
+          exit 1
+            Write-Warning 'Spectre libraries are absent; native extensions may fail to compile.'
+            Write-Host 'spectre: MISSING'
+          } else {
+            Write-Host "spectre: $($spectre[0].FullName)"
+          }

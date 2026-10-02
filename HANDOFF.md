@@ -426,6 +426,36 @@ verified live model call. The vendored agent packages carry no `license` field,
 which the generated notice flags as something to confirm upstream before any
 public distribution.
 
+### GitHub Actions build workflow (added 2026-10-02, **unverified**)
+
+`.github/workflows/build-and-release.yml` builds and verifies on `windows-2022`.
+**It has never been executed** — there is no runner here, so "CI builds" is not
+claimed anywhere in this file.
+
+Publishing is structurally impossible: the `publish` job's `if` ends in
+`&& false`, so no input combination can start it. Enabling it is a deliberate,
+separate change made only once a signing certificate exists.
+
+One change was needed for a runner to work at all: `vendor-moderado.ps1`
+previously hardcoded `D:\projects\moderado` and assumed a sibling CLI checkout.
+It now clones the pinned upstream commit when that path is absent. Verified
+locally that the pinned commit `a293c1d84d28d1b126fc7054a0f57011edc9d62c` is
+fetchable from the public CLI repository.
+
+Two prerequisites the workflow reports rather than assumes, because missing
+either fails deep in native compilation with a misleading error:
+
+- **Spectre libraries.** GitHub hosted images do not ship them. The step reports
+  `spectre: MISSING` and warns rather than failing, so a runner without them
+  surfaces the real native-compile error instead of a confusing one.
+- **Python 3.11.** `prepare-m1.ps1` hard-requires `py -3.11`; hosted images
+  default to 3.13+, so `actions/setup-python` pins it explicitly.
+
+`MODERADO_TSGO_CONCURRENCY=2` is set explicitly. The underlying typecheck crash
+is still undiagnosed, so a runner with a different CPU or memory profile may
+fail where a local build succeeds. **The first CI run may be red for that
+reason.**
+
 ### Milestone 4 evidence (release readiness)
 
 **Release verification.** `scripts/verify-release.ps1` checks artifact
