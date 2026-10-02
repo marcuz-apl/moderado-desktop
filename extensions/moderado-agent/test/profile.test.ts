@@ -51,6 +51,107 @@ describe('canonicalWorkspaceRoot', () => {
   });
 });
 
+import { describe, expect, it } from 'vitest';
+import { FakeProviderAdapter, NvidiaAdapter, OpenAICompatibleAdapter } from '@moderado/providers';
+import { resolveProvider } from '../src/host.js';
+import { MemoryCredentialStore } from '../src/credentials.js';
+import { readConfig } from '../src/profile.js';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+/** Isolated profile home; never the developer's real `~/.moderado`. */
+function homeWithConfig(contents: unknown): string {
+  const root = mkdtempSync(join(tmpdir(), 'moderado-provider-'));
+  mkdirSync(join(root, '.moderado'), { recursive: true });
+  writeFileSync(join(root, '.moderado', 'config.json'), JSON.stringify(contents), 'utf8');
+  return root;
+}
+
+const noEnv = {} as NodeJS.ProcessEnv;
+
+describe('provider resolution', () => {
+  it('falls back to the fake provider and explains why when nothing is configured', async () => {
+    const home = homeWithConfig({});
+    const { adapter, reason } = await resolveProvider(readConfig(home), new MemoryCredentialStore(), noEnv);
+    expect(adapter).toBeInstanceOf(FakeProviderAdapter);
+    // The fallback must be visible, not a silent pretend-run.
+    expect(reason).toMatch(/No provider connection/i);
+  });
+
+  it('falls back to the fake provider when the profile is corrupt', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'moderado-provider-bad-'));
+    mkdirSync(join(root, '.moderado'), { recursive: true });
+    writeFileSync(join(root, '.moderado', 'config.json'), '{ not json', 'utf8');
+    const { adapter, reason } = await resolveProvider(readConfig(root), new MemoryCredentialStore(), noEnv);
+    expect(adapter).toBeInstanceOf(FakeProviderAdapter);
+    expect(reason).toBeTruthy();
+  });
+
+  it('builds a real OpenAI-compatible adapter when a key resolves', async () => {
+    const home = homeWithConfig({
+      activeConnectionId: 'my-provider',
+      connections: {
+        'my-provider': { id: 'my-provider', kind: 'openai-compatible', baseUrl: 'https://example.invalid/v1' },
+      },
+    });
+    const { adapter, reason } = await resolveProvider(
+      readConfig(home),
+      new MemoryCredentialStore(),
+      { MODERADO_MY_PROVIDER_API_KEY: 'sk-from-env' } as NodeJS.ProcessEnv,
+    );
+    expect(adapter).toBeInstanceOf(OpenAICompatibleAdapter);
+    expect(reason).toBeUndefined();
+  });
+
+  it('reads the key from the credential store when there is no environment value', async () => {
+    const home = homeWithConfig({
+      activeConnectionId: 'p1',
+      connections: { p1: { id: 'p1', kind: 'openai-compatible', credentialReference: 'moderado/provider/p1' } },
+    });
+    const store = new MemoryCredentialStore();
+    await store.set('moderado/provider/p1', 'secret-from-credman');
+    const { adapter } = await resolveProvider(readConfig(home), store, noEnv);
+    expect(adapter).toBeInstanceOf(OpenAICompatibleAdapter);
+  });
+
+  it('uses the Nvidia adapter for an nvidia-nim connection', async () => {
+    const home = homeWithConfig({
+      activeConnectionId: 'nvidia-nim',
+      connections: { 'nvidia-nim': { id: 'nvidia-nim', kind: 'nvidia-nim' } },
+    });
+    const { adapter } = await resolveProvider(
+      readConfig(home),
+      new MemoryCredentialStore(),
+      { MODERADO_NVIDIA_NIM_API_KEY: 'k' } as NodeJS.ProcessEnv,
+    );
+    expect(adapter).toBeInstanceOf(NvidiaAdapter);
+  });
+
+  it('falls back and names the connection when no key can be resolved', async () => {
+    const home = homeWithConfig({
+      activeConnectionId: 'p1',
+      connections: { p1: { id: 'p1', kind: 'openai-compatible' } },
+    });
+    const { adapter, reason } = await resolveProvider(readConfig(home), new MemoryCredentialStore(), noEnv);
+    expect(adapter).toBeInstanceOf(FakeProviderAdapter);
+    expect(reason).toContain('p1');
+  });
+
+  it('never leaks the resolved key into the resolution result', async () => {
+    const home = homeWithConfig({
+      activeConnectionId: 'p1',
+      connections: { p1: { id: 'p1', kind: 'openai-compatible' } },
+    });
+    const { adapter, reason } = await resolveProvider(
+      readConfig(home),
+      new MemoryCredentialStore(),
+      { MODERADO_P1_API_KEY: 'super-secret-value' } as NodeJS.ProcessEnv,
+    );
+    expect(JSON.stringify({ adapter: adapter.id, name: adapter.name, reason })).not.toContain('super-secret-value');
+  });
+});
+
 describe('credential references match the pinned CLI', () => {
   it('produces the documented target shape', () => {
     expect(credentialReference('nvidia-nim')).toBe('moderado/provider/nvidia-nim');

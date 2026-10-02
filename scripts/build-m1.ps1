@@ -79,6 +79,10 @@ $artifacts = foreach ($name in $expected) {
   [ordered]@{ name = $file.Name; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash; bytes = $file.Length }
 }
 $manifest = [ordered]@{
+  # The commit this build was produced from. `desktopVersion` alone is not a
+  # sufficient identity: the version hook bumps VERSION on every commit, so a
+  # docs-only commit would otherwise invalidate an otherwise good manifest.
+  builtFromCommit = (& git -C $root rev-parse HEAD).Trim()
   desktopVersion = (Get-Content -Raw -LiteralPath (Join-Path $root 'VERSION')).Trim()
   target = 'windows-x64'
   sources = [ordered]@{

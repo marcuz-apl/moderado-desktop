@@ -1,5 +1,12 @@
 import { AgentLoop, PolicyManager, Router } from '@moderado/core';
-import { FakeProviderAdapter, freeModelPolicyFor, isFreeModelOption } from '@moderado/providers';
+import {
+  FakeProviderAdapter,
+  NvidiaAdapter,
+  OpenAICompatibleAdapter,
+  findProviderPreset,
+  freeModelPolicyFor,
+  isFreeModelOption,
+} from '@moderado/providers';
 import { createDefaultToolRegistry, resolveInJail } from '@moderado/tools';
 import {
   AgentEvent,
@@ -7,10 +14,12 @@ import {
   ApprovalRequest,
   ChatMessage,
   IApprovalHandler,
+  IProviderAdapter,
   ModelClassification,
 } from '@moderado/contracts';
 import { ApprovalCoordinator, RawDecision } from './approval.js';
-import { canonicalWorkspaceRoot, readConfig } from './profile.js';
+import { ConfigState, canonicalWorkspaceRoot, readConfig } from './profile.js';
+import { CredentialStore, MemoryCredentialStore, resolveCredential } from './credentials.js';
 import { SessionStore, StoredSession, conversationOf, createSession, saveSessionChecked } from './sessions.js';
 
 export interface AgentHostOptions {
@@ -26,8 +35,116 @@ export interface AgentHostOptions {
   pinnedModelId?: string;
   /** Overrides the shared `~/.moderado` home; tests pass an isolated fixture. */
   moderadoHome?: string;
+  /**
+   * Where provider keys are read from. Production injects
+   * `WindowsCredentialStore`; the default is in-memory so a test or a
+   * non-Windows host never touches the real keychain.
+   */
+  credentialStore?: CredentialStore;
 }
 
+/**
+ * Resolves the provider adapter for a run from the shared `~/.moderado` config.
+ *
+ * The key is resolved here and injected into the adapter. It is never written to
+ * an editor setting, returned to a renderer, or placed in an event. The adapter
+ * is a vendored class, not a model-directed object, so this keeps the "no
+ * renderer holds provider secrets" boundary intact.
+ */
+
+/** A connection as stored in `config.json`, validated at this boundary. */
+export interface ProviderConnection {
+  id: string;
+  displayName?: string;
+  kind?: string;
+  baseUrl?: string;
+  /** Credential Manager target, never the key itself. */
+  credentialReference?: string;
+  /** Legacy plaintext key, still honoured by the CLI's resolution order. */
+  apiKey?: string;
+}
+
+export interface ProviderResolution {
+  adapter: IProviderAdapter;
+  /** Set when the run fell back to the fake provider, for user-facing events. */
+  reason?: string;
+}
+
+/** The provider environment variable the CLI would consult for this connection. */
+function envVarFor(connectionId: string): string {
+  return `MODERADO_${connectionId.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+}
+
+function baseUrlFor(connection: ProviderConnection): string | undefined {
+  const trimmed = connection.baseUrl?.trim();
+  if (trimmed) return trimmed;
+  // Fall back to the pinned preset's own endpoint for a known provider id.
+  if (connection.kind === 'nvidia-nim') return undefined;
+  return undefined;
+}
+
+/**
+ * Builds the adapter for `state`'s active connection.
+ *
+ * Returns the fake adapter when no usable connection is configured, so the
+ * editor still opens and the failure is visible as a reason rather than a
+ * thrown error at run time.
+ */
+export async function resolveProvider(
+  state: ConfigState,
+  store: CredentialStore = new MemoryCredentialStore(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ProviderResolution> {
+  if (state.kind !== 'ok') {
+    return { adapter: new FakeProviderAdapter(), reason: 'The shared profile could not be read.' };
+  }
+
+  const connections = (state.config.connections ?? {}) as Record<string, ProviderConnection>;
+  const activeId = state.config.activeConnectionId;
+  const connection =
+    (typeof activeId === 'string' ? connections[activeId] : undefined) ??
+    Object.values(connections).find((c) => c && typeof c === 'object');
+
+  if (!connection?.id) {
+    return {
+      adapter: new FakeProviderAdapter(),
+      reason: 'No provider connection is configured. Run "Moderado: Configure Provider Connection".',
+    };
+  }
+
+  const apiKey = await resolveCredential(
+    env[envVarFor(connection.id)],
+    connection.credentialReference,
+    connection.apiKey,
+    store,
+  );
+
+  // A local runtime (Ollama, LM Studio) needs no key, so a missing key is only
+  // an error when the preset actually requires one.
+  const preset = findProviderPreset(connection.kind ?? 'openai-compatible');
+  const requiresKey = preset ? preset.requiresApiKey : true;
+  if (requiresKey && !apiKey) {
+    return {
+      adapter: new FakeProviderAdapter(),
+      reason: `No API key resolved for connection '${connection.id}'.`,
+    };
+  }
+
+  const baseUrl = baseUrlFor(connection);
+  if (connection.kind === 'nvidia-nim') {
+    return { adapter: new NvidiaAdapter({ apiKey, baseUrl }) };
+  }
+  return {
+    adapter: new OpenAICompatibleAdapter({
+      apiKey,
+      baseUrl,
+      providerId: connection.id,
+      providerName: connection.displayName ?? connection.id,
+    }),
+  };
+}
+
+  /** The outcome of one bounded agent turn. */
 export interface RunOutcome {
   status: string;
   finalMessage: string | null;
@@ -57,6 +174,11 @@ export class AgentHost implements IApprovalHandler {
   private readonly options: AgentHostOptions;
   private readonly approvals: ApprovalCoordinator;
   private readonly router = new Router();
+  /**
+   * Where provider keys come from. Overridable so tests never reach the real
+   * Windows Credential Manager; production injects `WindowsCredentialStore`.
+   */
+  private readonly credentials: CredentialStore;
   private controller: AbortController | null = null;
   private running = false;
   private readonly sessions: SessionStore;
@@ -70,6 +192,7 @@ export class AgentHost implements IApprovalHandler {
       nonInteractive: options.nonInteractive,
     });
     this.sessions = new SessionStore(options.moderadoHome);
+    this.credentials = options.credentialStore ?? new MemoryCredentialStore();
   }
 
   /** The session the current turn belongs to, if one has started. */
@@ -128,7 +251,22 @@ export class AgentHost implements IApprovalHandler {
     this.current = session;
 
     try {
-      const provider = new FakeProviderAdapter();
+      // The provider is resolved from the shared profile. When no usable
+      // connection exists it falls back to the fake adapter and says so, rather
+      // than silently pretending a real run happened.
+      const { adapter: provider, reason } = await resolveProvider(
+        readConfig(this.options.moderadoHome),
+        this.credentials,
+      );
+      if (reason) {
+        this.options.onEvent({
+          type: 'error',
+          code: 'provider_unavailable',
+          message: reason,
+          recoverable: true,
+          timestamp: Date.now(),
+        });
+      }
       const inventory = await provider.discoverModels(controller.signal);
       const policy = new PolicyManager({
         readOnly: input.planMode ?? false,
@@ -217,7 +355,10 @@ export class AgentHost implements IApprovalHandler {
    * can show paid and unknown-cost models behind their explicit opt-ins.
    */
   async discoverModels(): Promise<ModelOption[]> {
-    const provider = new FakeProviderAdapter();
+    const { adapter: provider } = await resolveProvider(
+      readConfig(this.options.moderadoHome),
+      this.credentials,
+    );
     const inventory = await provider.discoverModels();
     const state = readConfig(this.options.moderadoHome);
     const connectionId =

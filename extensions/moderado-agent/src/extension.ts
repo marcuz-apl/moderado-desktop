@@ -4,6 +4,11 @@ import { AgentHost } from './host.js';
 import { RawDecision } from './approval.js';
 import { configPath } from './profile.js';
 import { updateConfigCoordinated } from './coordination.js';
+import {
+  WindowsCredentialStore,
+  credentialManagerAvailable,
+  credentialReference,
+} from './credentials.js';
 
 /**
  * Extension entry point.
@@ -29,6 +34,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const host = new AgentHost({
     workspaceRoot,
     nonInteractive: false,
+    // On Windows the key comes from Credential Manager; elsewhere the in-memory
+    // default keeps Desktop usable without a keychain.
+    credentialStore: credentialManagerAvailable()
+      ? new WindowsCredentialStore()
+      : undefined,
     approvalTimeoutMs: config().get<number>('approvalTimeoutSeconds', 120) * 1000,
     allowPaid: config().get<boolean>('allowPaidModels', false),
     allowUnknown: config().get<boolean>('allowUnknownModels', false),
@@ -197,6 +207,35 @@ export function activate(context: vscode.ExtensionContext): void {
       const displayName = await vscode.window.showInputBox({ prompt: 'Display name', value: id.trim() });
       if (!displayName?.trim()) return;
 
+      // The key is written straight to Credential Manager and only the
+      // *reference* is stored in config.json. It is never echoed, never put in
+      // an editor setting, and never sent to the renderer.
+      const apiKey = await vscode.window.showInputBox({
+        prompt: 'API key (stored in Windows Credential Manager, never in config.json)',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (apiKey === undefined) return;
+
+      let credentialRef: string | undefined;
+      if (apiKey.trim()) {
+        if (!credentialManagerAvailable()) {
+          vscode.window.showWarningMessage(
+            'This platform has no Credential Manager. Set the provider environment variable instead.',
+          );
+          return;
+        }
+        try {
+          credentialRef = credentialReference(id.trim());
+          await new WindowsCredentialStore().set(credentialRef, apiKey.trim());
+        } catch {
+          vscode.window.showErrorMessage(
+            'Could not store the API key in Windows Credential Manager. Nothing was written to config.json.',
+          );
+          return;
+        }
+      }
+
       const result = updateConfigCoordinated(configPath(), {
         connections: {
           [id.trim()]: {
@@ -204,6 +243,7 @@ export function activate(context: vscode.ExtensionContext): void {
             displayName: displayName.trim(),
             kind: 'openai-compatible',
             baseUrl: baseUrl.trim(),
+            ...(credentialRef ? { credentialReference: credentialRef } : {}),
           },
         },
         activeConnectionId: id.trim(),

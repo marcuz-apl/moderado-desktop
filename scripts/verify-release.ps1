@@ -41,7 +41,22 @@ foreach ($artifact in $manifest.artifacts) {
 }
 
 # 2. Manifest provenance.
-Add-Result 'manifest:desktopVersion' ($manifest.desktopVersion -eq $version) "manifest=$($manifest.desktopVersion) VERSION=$version"
+# The build records the commit it was produced from. Comparing that commit
+# against the current history is stable: a later docs-only commit does not
+# invalidate a good build, but a build from an unmerged or rewritten history
+# still fails. `desktopVersion` is reported for information only.
+$head = (& git -C $root rev-parse HEAD).Trim()
+$built = if ($manifest.builtFromCommit) { [string]$manifest.builtFromCommit } else { '' }
+if ($built) {
+  & git -C $root merge-base --is-ancestor $built $head 2>$null
+  Add-Result 'manifest:builtFromAncestor' ($LASTEXITCODE -eq 0) "built=$($built.Substring(0,8)) head=$($head.Substring(0,8))"
+  $dirty = @(git -C $root status --porcelain --untracked-files=no)
+  Add-Result 'manifest:noUncommittedSourceChanges' ($dirty.Count -eq 0) "changed files=$($dirty.Count)"
+} else {
+  # Manifest predates builtFromCommit. Fall back to the strict version check.
+  Add-Result 'manifest:builtFromAncestor' ($manifest.desktopVersion -eq $version) "manifest=$($manifest.desktopVersion) VERSION=$version (no builtFromCommit recorded)"
+}
+Add-Result 'manifest:desktopVersionMatches' ($manifest.desktopVersion -eq $version) "manifest=$($manifest.desktopVersion) VERSION=$version"
 Add-Result 'manifest:vscodiumPinned' ($manifest.sources.vscodium -eq $lock.sources.vscodium.commit) $manifest.sources.vscodium
 Add-Result 'manifest:codeOssPinned' ($manifest.sources.codeOss -eq $lock.sources.codeOss.commit) $manifest.sources.codeOss
 # The build records the pinned agent under its own key (not inside `sources`),
