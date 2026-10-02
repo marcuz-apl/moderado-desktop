@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { AgentEvent, ApprovalRequest } from '@moderado/contracts';
 import { AgentHost } from './host.js';
 import { RawDecision } from './approval.js';
-import { configPath, mergeConfig } from './profile.js';
+import { configPath } from './profile.js';
 import { updateConfigCoordinated } from './coordination.js';
 
 /**

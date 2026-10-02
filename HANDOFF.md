@@ -1,9 +1,9 @@
 # Project Handoff
 
-Updated: 2026-10-01 UTC
+Updated: 2026-10-02 UTC
 Branch: master  
-Commit: `6093624` (resolve with `git log -1`)  
-Status: M1–M3 implemented and verified; M3 coordination limit documented
+Commit: `992898e` plus the M4 commit recorded below  
+Status: M1–M4 implemented and verified; M4 signing/publication not authorized
 
 ## Summary
 
@@ -21,13 +21,13 @@ is published or signed, and no Moderado agent integration exists yet.
 
 ## In progress
 
-- M1 documentation and version control only; the build and all verification
-  steps have completed (see the M1 verification evidence below).
+- Nothing is in progress. M4 release *evidence* is complete; signing and
+  publication are blocked on owner authorization and were not requested.
 
 ## Working tree
 
-- Independent Git repository; M1 scripts, branding, and documentation are being
-  committed on `master`.
+- Independent Git repository on `master`; M4 evidence, documentation, and the
+  release verification script are committed here.
 
 ## Checks
 
@@ -36,8 +36,9 @@ is published or signed, and no Moderado agent integration exists yet.
 - Editor-host launch, open-folder, and terminal: PASS.
 - Install and uninstall on the build account: PASS.
 - Clean-account install/uninstall in Windows Sandbox: PASS.
-- Build and tests — no Desktop application source or test runner exists yet;
-  Milestone 2 introduces the agent packages and their offline suites.
+- Agent extension offline suite: 58/58 passing; typecheck clean.
+- `scripts/verify-release.ps1`: 17/17 checks pass against the 2026-10-02
+  artifacts, including that the shipped zip actually contains the agent.
 
 ## Decisions and context
 
@@ -338,3 +339,63 @@ CLI change.
   and must be rebuilt before those identities are treated as final.
 - Artifacts are unsigned and local-only. Signing, provenance, and the update
   channel remain M4 work.
+
+### Milestone 4 evidence (release readiness)
+
+**Release verification.** `scripts/verify-release.ps1` checks artifact
+checksums, manifest provenance against `sources.lock.json`, packaged editor
+identity, license notices, and the bundled agent. It writes
+`release-verification.json` with `signed: false` and `published: false`, and
+fails loudly rather than reporting a clean run.
+
+All 17 checks pass against the artifacts built on 2026-10-02:
+
+| Artifact | Bytes | SHA-256 (first 16) |
+| --- | --- | --- |
+| `Moderado Desktop-win32-x64-1.135.06055.zip` | 312749508 | `CD4B8F5DA1DD2882` |
+| `Moderado DesktopSetup-x64-1.135.06055.exe` | 213095670 | `7179D82FA82C2FB8` |
+| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 213096048 | `52FB291B54071822` |
+
+**Two defects found and fixed while finishing M4.**
+
+- The extension check resolved the staged directory as
+  `assets\..\..\vscode\extensions\...`, i.e. `.cache\vscode\...`, which does not
+  exist, so it reported a present bundle as missing.
+- The check also read the pinned agent from `manifest.sources.moderado`, but
+  `build-m1.ps1` records it as `pinnedAgentRevisionForMilestone2`. The
+  comparison silently never matched real evidence.
+
+**A packaging-only rebuild silently dropped the agent.** Rebuilding with
+`-PackingOnly` skips `vscode-min-prepack`, which is where
+`compile-non-native-extensions-build` packages local extensions. The resulting
+editor and zip contained **no** `moderado-agent` at all (281.8 MB zip versus
+312.7 MB with the agent), while every pre-existing check still passed because
+they only inspected the staging checkout. The full `build-m1.ps1` run was
+required.
+
+`verify-release.ps1` now also opens the shipped zip and asserts that
+`extensions/moderado-agent/dist/extension.js` is present, so an editor that
+lost the agent cannot pass verification again. That check was confirmed to
+fail against the agent-less archive before the rebuild.
+
+**Real editor host, packaged bundle.** The freshly built editor was launched
+with the extension taken from the packaged output.
+`.cache/m4-hostcheck/user-ext/hostcheck.json`:
+
+```json
+{ "ok": true,
+  "checks": { "found": true, "isActive": true, "expectedCommandsPresent": true,
+    "commands": ["moderado.cancelRun", "moderado.configureProvider",
+      "moderado.openChat", "moderado.selectModel", "moderado.showSessions",
+      "moderado.togglePlanMode"] } }
+```
+
+`exthost.log` records `ExtensionService#_doActivateExtension
+moderado.moderado-agent`, confirming a real host rather than a stub.
+
+**Suites.** `npx vitest run` 58/58 passed; `tsc --noEmit` exits 0.
+
+**Still not done.** No code signing, no provenance attestation, no update
+channel, and no publication. Publishing requires the owner's explicit
+authorization and has not been requested. The live provider remains
+unconnected; runs use the vendored fake provider.

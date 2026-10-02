@@ -57,6 +57,25 @@ release, Credential Manager references, and a coordinated `config.json` writer.
 - Protect malformed and older profile data with validated, recoverable
   migrations.
 
+## M4 — Release readiness (evidence complete; release not authorized)
+
+Release evidence is produced by `scripts/verify-release.ps1`, which checks
+artifact checksums, manifest provenance against `sources.lock.json`, packaged
+editor identity, license notices, and the bundled agent. It writes
+`release-verification.json` and never claims signing or publication.
+
+It also opens the shipped zip and asserts the agent is really inside it. A
+packaging-only rebuild skips the non-native extension task and would otherwise
+produce an editor with no agent that still passed every other check.
+
+Installation, supported platform combinations, data locations, and known
+limitations are documented in [INSTALL.md](docs/INSTALL.md).
+
+**Not done:** code signing, provenance attestation, an update channel, and
+artifact publication. A `config.json` protocol that both editions follow is
+also still outstanding. Publishing requires explicit owner authorization and
+has not been requested or performed.
+
 ## M3 status (implemented; verified against the pinned CLI)
 
 Desktop now reads and writes the shared `~/.moderado` profile through a
