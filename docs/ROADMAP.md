@@ -57,25 +57,6 @@ release, Credential Manager references, and a coordinated `config.json` writer.
 - Protect malformed and older profile data with validated, recoverable
   migrations.
 
-## M4 — Release readiness (evidence complete; release not authorized)
-
-Release evidence is produced by `scripts/verify-release.ps1`, which checks
-artifact checksums, manifest provenance against `sources.lock.json`, packaged
-editor identity, license notices, and the bundled agent. It writes
-`release-verification.json` and never claims signing or publication.
-
-It also opens the shipped zip and asserts the agent is really inside it. A
-packaging-only rebuild skips the non-native extension task and would otherwise
-produce an editor with no agent that still passed every other check.
-
-Installation, supported platform combinations, data locations, and known
-limitations are documented in [INSTALL.md](docs/INSTALL.md).
-
-**Not done:** code signing, provenance attestation, an update channel, and
-artifact publication. A `config.json` protocol that both editions follow is
-also still outstanding. Publishing requires explicit owner authorization and
-has not been requested or performed.
-
 ## M3 status (implemented; verified against the pinned CLI)
 
 Desktop now reads and writes the shared `~/.moderado` profile through a
@@ -113,3 +94,46 @@ which this project must not make.
 
 MacOS, Linux, and Windows/WSL cross-home sharing follow separate evidence-backed
 milestones after the Windows release gate.
+
+## M4 status (evidence complete; release not authorized)
+
+Release evidence is produced by `scripts/verify-release.ps1`, which checks
+artifact checksums, manifest provenance against `sources.lock.json`, packaged
+editor identity, license notices, and the bundled agent. It writes
+`release-verification.json` and never claims signing or publication.
+
+It also opens the shipped zip and asserts the agent is really inside it. A
+packaging-only rebuild skips the non-native extension task and would otherwise
+produce an editor with no agent that still passed every other check.
+
+Installation, supported platform combinations, data locations, and known
+limitations are documented in [INSTALL.md](docs/INSTALL.md).
+
+**Not done:** code signing, provenance attestation, an update channel, and
+artifact publication. A `config.json` protocol that both editions follow is
+also still outstanding. Publishing requires explicit owner authorization and
+has not been requested or performed.
+
+## M5 — Provenance and license compliance
+
+Everything here is Desktop-owned and verifiable without publishing anything.
+Signing and the update channel are explicitly out of scope for M5 because both
+require owner authorization to distribute anything.
+
+- Emit a machine-readable provenance attestation beside the artifacts: pinned
+  upstream revisions, the commit each artifact was built from, per-artifact
+  SHA-256 and size, and the bundled agent's revision. It must be regenerable
+  and byte-stable, and `verify-release.ps1` must reject one that disagrees with
+  `sources.lock.json` or the manifest.
+- Generate a third-party license notice from what actually ships, covering the
+  Code OSS/VSCodium inputs and the vendored Moderado agent, and verify that the
+  notices referenced exist in the packaged editor. A notice that cannot be
+  produced from the real package must fail rather than be hand-written.
+- Add the explicit opt-in smoke procedure for live model calls that
+  [AGENTS.md](../AGENTS.md) requires. It must refuse to run without an explicit
+  opt-in flag, must never run in CI, must not persist the API key, and must be
+  separate from the offline suite.
+
+**Done when:** the attestation and notices are generated from the real build,
+verification fails on a tampered attestation or a missing notice, and the smoke
+procedure has been shown to refuse by default.

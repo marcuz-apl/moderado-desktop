@@ -62,10 +62,48 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1
 
 ## Signing
 
+## Signing
+
 These artifacts are **unsigned**. Windows SmartScreen will warn, and there is no
 Authenticode signature to validate. Signing requires a code-signing certificate
 and an owner's release authorization; neither exists yet. Do not distribute
 these builds.
+
+## Provenance and notices
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gen-provenance.ps1
+```
+
+Writes `provenance.json` and `THIRD-PARTY-NOTICES.md` next to the artifacts,
+generated from the build manifest, `sources.lock.json`, and the packaged editor.
+Nothing in them is hand-written; if an artifact's digest, an upstream pin, or a
+license file is missing or disagrees, the script throws instead of emitting a
+plausible-looking file.
+
+`provenance.json` is an **unsigned build record**, not a signature. It states
+what was produced; it does not prove it to a third party. There is still no
+Authenticode signature.
+
+The build now also copies `LICENSE.txt` (Code OSS, MIT) and the Desktop license
+into the portable editor. Upstream packaging ships Electron's
+`LICENSES.chromium.html` but not the MIT text, so the package previously
+redistributed MIT-licensed code with no copy of that license.
+
+## Live provider smoke procedure
+
+Live model calls require explicit opt-in and never run in CI:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\live-provider-smoke.ps1
+```
+
+That command **refuses** and explains why. It only proceeds with
+`-IUnderstandThisCallsALiveModel`, and it refuses again if `CI`,
+`GITHUB_ACTIONS`, `BUILDKITE`, or `TF_BUILD` is set. It performs no file
+mutation and runs no commands, and it never writes or logs the API key.
+
+**Not done:** code signing, an update channel, and artifact publication.
 
 ## What works, and what does not
 
@@ -86,7 +124,8 @@ Not working yet:
   used a profile with no resolvable key, so the fake provider path is what the
   tests and host check actually exercised. The real adapter path is covered by
   offline construction tests only.
-- **No signing, provenance, or update channel.**
+- **No signing or update channel.** Provenance and third-party notices are
+  generated and verified (M5), but nothing is signed or published.
 - **Chat view only.** There is no diff renderer; previews appear as text.
 - **Profile coordination is one-sided.** Desktop writes `config.json` under a
   lock and detects conflicting CLI changes, but the CLI does not take that lock,

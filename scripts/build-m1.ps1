@@ -75,6 +75,18 @@ if (Test-Path -LiteralPath $zip) {
   [System.IO.Directory]::CreateDirectory($archive) | Out-Null
   Move-Item -LiteralPath $zip -Destination (Join-Path $archive ((Get-Date -Format 'yyyyMMddHHmmss') + '.zip'))
 }
+# Ship the MIT license texts in the portable editor.
+#
+# The upstream packaging copies Electron's `LICENSES.chromium.html` but not the
+# Code OSS `LICENSE.txt`, so a Desktop package built straight from it
+# redistributes MIT-licensed code with no copy of that license. Add it, plus
+# Desktop's own license, before the archive is created. This runs before
+# `prepare_assets.sh` so the files land in the zip and both installers.
+$portable = Join-Path $checkout 'VSCode-win32-x64'
+if (Test-Path -LiteralPath $portable) {
+  Copy-Item -LiteralPath (Join-Path $checkout 'vscode\LICENSE.txt') -Destination (Join-Path $portable 'LICENSE.txt') -Force
+  Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $portable 'Moderado Desktop LICENSE') -Force
+}
 $assetStart = [System.DateTime]::UtcNow
 & $bash -c "cd '$posixCheckout' && . ./prepare_assets.sh"
 if ($LASTEXITCODE -ne 0) { throw 'Windows asset packaging failed.' }
