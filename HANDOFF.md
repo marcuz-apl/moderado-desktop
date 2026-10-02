@@ -403,9 +403,23 @@ API key.
 | `Moderado DesktopSetup-x64-1.135.06055.exe` | 167773565 | `33247F4F3BA8C131` |
 | `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 167773936 | `47F8C9907F1C4D52` |
 
-**Build note.** `tsgo` still crashed at the default concurrency of 4, this time
-with Windows status `0xC000012D`. `MODERADO_TSGO_CONCURRENCY=2` completed
-cleanly, so the safe default for this machine is 2.
+**Open defect: the typecheck crash cause is unknown.** `tsgo` still crashed at
+concurrency 4, reporting Windows status `0xC000012D` with no diagnostics.
+Concurrency 2 builds cleanly, so the cap holds the symptom down, but this is a
+mitigation, not a fix. Measured facts:
+
+- Peak combined RSS at concurrency 4 is only ~210-330 MB, so it is **not**
+  memory exhaustion.
+- The same 4 projects run concurrently and **succeed** in isolation, with and
+  without `--incremental`.
+- `@typescript/native/lib/tsc.js` is a Node shim that spawns the real 23 MB
+  native `tsc.exe` with `stdio: 'inherit'`, so the native process's output
+  bypasses the build's captured streams and the real failure never reaches the
+  log.
+
+Next step for this defect: the shim swallows the useful diagnostics. Making
+`tsc.js` forward the child's stderr instead of inheriting it, or capturing a
+Windows Application event for the crash, would expose the actual cause.
 
 **Still not done.** No code signing, no update channel, no publication, and no
 verified live model call. The vendored agent packages carry no `license` field,
@@ -474,22 +488,17 @@ when it builds cleanly on its own. Running every extension `tsconfig.json`
 through TS7 sequentially reported `FAILCOUNT=0` each time, which ruled out a
 source defect and pointed at resources.
 
-The final failed run printed the actual cause:
-`FATAL ERROR: MarkCompactCollector ... JavaScript heap out of memory`. The gulp
-process was dying from exhaustion at whichever step happened to be running, so
-the visible error was effectively random.
+The final failed run printed one cause:
+`FATAL ERROR: MarkCompactCollector ... JavaScript heap out of memory`. That is
+the **gulp** process dying, and raising its heap to 12288 genuinely fixed it.
 
-Two fixes:
+Two fixes, of very different confidence:
 
-- `scripts/apply-branding.ps1` patches `build/lib/tsgo.ts` (the overlay already
-  owns the reviewed downstream edits) to cap concurrent tsgo processes at 4.
-  Upstream merges one typecheck stream per extension and starts them all at
-  once. The patch is idempotent and changes no compiler flag; tune with
-  `MODERADO_TSGO_CONCURRENCY`.
-- `build-m1.ps1` raises `max-old-space-size` from 8192 to 12288, overridable with
-  `MODERADO_BUILD_HEAP_MB`.
-
-A full rebuild then completed with no heap exhaustion and no tsgo failure.
+- `build-m1.ps1` raises gulp's `max-old-space-size` from 8192 to 12288,
+  overridable with `MODERADO_BUILD_HEAP_MB`. This is a **confirmed fix**.
+- `apply-branding.ps1` caps concurrent typecheck processes. This is **only a
+  mitigation** for a separate, still-unexplained crash documented below. The
+  heap theory does not apply to those processes; they use a few hundred MB.
 
 **Version/provenance loop closed.** The version hook bumps `VERSION` on every
 commit, so the old `manifest:desktopVersion` check could never stay green: any

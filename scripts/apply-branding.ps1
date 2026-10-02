@@ -41,12 +41,21 @@ Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\branding\generated') -Fi
 
 # Limit concurrent extension typechecks.
 #
-# The upstream prepack task starts every extension's `tsgo` process at once via
-# `es.merge(...map(typeCheckExtensionStream))`. On this machine that reliably
-# exhausts the compiler: `tsgo` exits 1 or 2 with no diagnostics, or crashes with
-# Windows status 0xC000012D, while running the identical projects one at a time
-# reports zero errors. The patch is idempotent and only caps concurrency; it
-# changes no compiler flag. Default 2, which builds cleanly here.
+# UNVERIFIED MITIGATION. Upstream's prepack task starts every extension's
+# typecheck process at once via `es.merge(...map(typeCheckExtensionStream))`,
+# and that reliably crashes here while the same projects run fine alone.
+# However, the actual cause was never established:
+#
+#   * Peak combined RSS at concurrency 4 is ~210-330 MB, so it is not memory.
+#   * Running the same 4 projects concurrently succeeds in isolation, with and
+#     without --incremental.
+#   * The failing run reported exit code 0xC000012D with no diagnostics, and the
+#     Node shim in @typescript/native/lib/tsc.js spawns the real 23 MB native
+#     tsc.exe with `stdio: 'inherit'`, so its output bypasses the build's
+#     captured streams. The real failure is therefore invisible to the log.
+#
+# Concurrency 2 builds cleanly and 4 does not, so the cap holds the symptom
+# down. It is NOT a fix and the underlying cause is still unknown.
 $tsgo = Join-Path $editor 'build\lib\tsgo.ts'
 if (!(Test-Path -LiteralPath $tsgo)) { throw "Typecheck helper not found at $tsgo" }
 $tsgoText = Get-Content -Raw -LiteralPath $tsgo
