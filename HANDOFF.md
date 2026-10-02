@@ -346,6 +346,72 @@ CLI change.
 - Artifacts are unsigned and local-only. Signing, provenance, and the update
   channel remain M4 work.
 
+### Milestone 5 evidence (provenance and license compliance)
+
+**Compliance gap found and fixed.** Writing the notice generator surfaced a
+real defect: upstream packaging copies Electron's `LICENSES.chromium.html` into
+the portable editor but **not** the Code OSS `LICENSE.txt`. The shipped package
+was redistributing MIT-licensed code with no copy of that license.
+`gen-provenance.ps1` refused to run because the notice was absent, which is
+the failure mode it was written to have. `build-m1.ps1` now copies
+`LICENSE.txt` and the Desktop license into the portable editor before the
+archive is created. Confirmed present in the shipped zip:
+
+```
+LICENSE.txt
+LICENSES.chromium.html
+Moderado Desktop LICENSE
+resources/app/extensions/moderado-agent/dist/extension.js
+```
+
+**Attestation.** `scripts/gen-provenance.ps1` writes `provenance.json` and
+`THIRD-PARTY-NOTICES.md` from the build manifest, `sources.lock.json`, and the
+packaged editor. It recomputes every artifact digest rather than copying it, so
+a corrupted artifact cannot be blessed by re-reading the file that describes it,
+and it throws on a missing pin or notice rather than emitting a plausible file.
+It records `signed: false` and `published: false`: it is an **unsigned build
+record**, not a signature, and does not prove anything to a third party.
+
+**Verification is adversarial.** `verify-release.ps1` re-hashes the
+attestation's artifacts and re-measures the notices it claims, rather than
+trusting the attestation to agree with itself. Both tamper classes were
+confirmed to fail:
+
+| Tamper | Check that caught it |
+| --- | --- |
+| Altered a recorded artifact size | `provenance:licenseNoticesShip` |
+| Altered a recorded artifact `sha256` | `provenance:artifactDigests` |
+
+Full run after restoring the real attestation: **28/28 checks pass**, exit 0.
+
+**Live provider smoke gate.** `scripts/live-provider-smoke.ps1` is the explicit
+opt-in procedure AGENTS.md requires. Confirmed refusals:
+
+| Invocation | Exit | Result |
+| --- | --- | --- |
+| No flags | 1 | "Refusing to run: a live smoke procedure contacts a real provider and costs money." |
+| `-IUnderstandThisCallsALiveModel` with `CI=true` | 1 | "Refusing to run: a CI environment is detected." |
+
+It performs no file mutation, runs no commands, and never writes or logs the
+API key.
+
+**Artifacts** (`v0.1.0+261002a`, built from `3e37533`):
+
+| Artifact | Bytes | SHA-256 (first 16) |
+| --- | --- | --- |
+| `Moderado Desktop-win32-x64-1.135.06055.zip` | 241318263 | `61AC504082CE629A` |
+| `Moderado DesktopSetup-x64-1.135.06055.exe` | 167773565 | `33247F4F3BA8C131` |
+| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 167773936 | `47F8C9907F1C4D52` |
+
+**Build note.** `tsgo` still crashed at the default concurrency of 4, this time
+with Windows status `0xC000012D`. `MODERADO_TSGO_CONCURRENCY=2` completed
+cleanly, so the safe default for this machine is 2.
+
+**Still not done.** No code signing, no update channel, no publication, and no
+verified live model call. The vendored agent packages carry no `license` field,
+which the generated notice flags as something to confirm upstream before any
+public distribution.
+
 ### Milestone 4 evidence (release readiness)
 
 **Release verification.** `scripts/verify-release.ps1` checks artifact

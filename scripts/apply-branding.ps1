@@ -43,9 +43,10 @@ Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\branding\generated') -Fi
 #
 # The upstream prepack task starts every extension's `tsgo` process at once via
 # `es.merge(...map(typeCheckExtensionStream))`. On this machine that reliably
-# exhausts the TS7 processes and `tsgo` exits 1 or 2 with no diagnostics emitted,
-# while running the identical projects one at a time reports zero errors. The
-# patch is idempotent and only caps concurrency; it changes no compiler flag.
+# exhausts the compiler: `tsgo` exits 1 or 2 with no diagnostics, or crashes with
+# Windows status 0xC000012D, while running the identical projects one at a time
+# reports zero errors. The patch is idempotent and only caps concurrency; it
+# changes no compiler flag. Default 2, which builds cleanly here.
 $tsgo = Join-Path $editor 'build\lib\tsgo.ts'
 if (!(Test-Path -LiteralPath $tsgo)) { throw "Typecheck helper not found at $tsgo" }
 $tsgoText = Get-Content -Raw -LiteralPath $tsgo
@@ -61,7 +62,7 @@ if (!($tsgoText -match 'MODERADO_TSGO_CONCURRENCY')) {
  * Running the same projects sequentially reports zero errors, so the failure is
  * resource exhaustion rather than a source defect.
  */
-const TSGO_CONCURRENCY = Math.max(1, Number(process.env.MODERADO_TSGO_CONCURRENCY ?? '4'));
+const TSGO_CONCURRENCY = Math.max(1, Number(process.env.MODERADO_TSGO_CONCURRENCY ?? '2'));
 let tsgoActive = 0;
 const tsgoQueue: (() => void)[] = [];
 
