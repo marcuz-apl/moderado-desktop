@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!--
+  Moderado Desktop workbench mark.
+
+  Overlays src/vs/workbench/browser/media/code-icon.svg, the logo shown in the
+  centre of an empty editor area. VSCodium overlays the same path with its own
+  icon; without a Desktop overlay the editor ships showing VSCodium's logo.
+
+  Matches the window/taskbar icon produced by branding/make-icon.ps1: a dark
+  disc, a white "M", and the orange accent dot.
+-->
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" width="1024" height="1024" viewBox="0 0 100 100">
+  <g id="moderado-mark">
+    <ellipse cx="50" cy="50" rx="47" ry="47" fill="#14233a"/>
+    <path d="M28,74 L28,38 L50,56 L72,38 L72,74"
+          fill="none" stroke="#ffffff" stroke-width="9"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="70.5" cy="29.5" r="6.5" fill="#ff8b5c"/>
+  </g>
+</svg>

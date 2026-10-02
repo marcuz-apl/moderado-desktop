@@ -39,6 +39,25 @@ Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\branding\generated') -Fi
   Copy-Item -LiteralPath $_.FullName -Destination $target -Force
 }
 
+# Overlay the workbench logo.
+#
+# VSCodium replaces src/vs/workbench/browser/media/code-icon.svg with its own
+# mark during prepare_vscode.sh, and that is the logo shown in the centre of an
+# empty editor area. apply-branding.ps1 runs after that and before the
+# workbench is compiled, so overwriting the same path here wins. vscode-icon.svg
+# is the Sessions/chat equivalent, referenced directly by openInVSCode.css, and
+# needs the same treatment.
+$mark = Join-Path $PSScriptRoot '..\branding\code-icon.svg'
+if (!(Test-Path -LiteralPath $mark)) { throw "Branded workbench mark missing at $mark" }
+$markTargets = @(
+  (Join-Path $editor 'src\vs\workbench\browser\media\code-icon.svg'),
+  (Join-Path $editor 'src\vs\sessions\browser\media\vscode-icon.svg')
+)
+foreach ($markTarget in $markTargets) {
+  if (!(Test-Path -LiteralPath $markTarget)) { throw "Expected upstream media file missing: $markTarget" }
+  Copy-Item -LiteralPath $mark -Destination $markTarget -Force
+}
+
 # Limit concurrent extension typechecks.
 #
 # UNVERIFIED MITIGATION. Upstream's prepack task starts every extension's
