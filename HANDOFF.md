@@ -403,6 +403,42 @@ API key.
 | `Moderado DesktopSetup-x64-1.135.06055.exe` | 167773565 | `33247F4F3BA8C131` |
 | `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 167773936 | `47F8C9907F1C4D52` |
 
+**Live provider call verified (2026-10-02).** `live/live-provider.live.ts`
+under `vitest.live.config.ts` drove the production path end to end against the
+real `~/.moderado` profile and the real Windows Credential Manager:
+
+```
+[live] adapter=openrouter adapterModels=385 openrouterFreeModels=22
+[live] using modelId=inclusionai/ling-3.1-flash
+[live] PASS modelId=inclusionai/ling-3.1-flash chunks=9 replyChars=2
+Test Files  1 passed (1)
+```
+
+`replyChars=2` is the model's "ok". This is the first and only evidence that
+the provider path works for real: config read, key resolved from Credential
+Manager, adapter constructed, 385 models discovered, SSE stream parsed, and a
+non-empty assistant reply received.
+
+Two things were wrong on the way to that result, both in the *test*, not the
+product: the option is `modelId` (not `model`), and the streamed text field is
+`contentDelta` (not `content`). An earlier run had reported an empty reply and
+looked like a product bug; it was the probe reading the wrong field.
+
+Separation is enforced: `vitest.config.ts` includes only
+`test/**/*.test.ts`, so nothing under `live/` can be picked up by the default
+suite or by CI. The live suite is skipped without `MODERADO_LIVE=1` and skipped
+outright when any CI variable is set. Both were confirmed. The default offline
+suite remains 65/65 and the key is never logged or written.
+
+An extension API (`ModeradoApi.startRun/listSessions/cancel`) was added so a host
+check can drive the agent without the webview. It exposes no credentials and no
+tool permissions.
+
+**Still not verified:** a full run through the *editor UI*. Attempts to drive a
+live call through a real editor host did not complete in this environment; the
+renderer repeatedly crashed, so no editor-host evidence is claimed for a live
+call.
+
 **Open defect: the typecheck crash cause is unknown.** `tsgo` still crashed at
 concurrency 4, reporting Windows status `0xC000012D` with no diagnostics.
 Concurrency 2 builds cleanly, so the cap holds the symptom down, but this is a

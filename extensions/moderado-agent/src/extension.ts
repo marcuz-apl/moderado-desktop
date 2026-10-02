@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AgentEvent, ApprovalRequest } from '@moderado/contracts';
-import { AgentHost } from './host.js';
+import { AgentHost, RunOutcome } from './host.js';
 import { RawDecision } from './approval.js';
 import { configPath } from './profile.js';
 import { updateConfigCoordinated } from './coordination.js';
@@ -10,6 +10,13 @@ import {
   credentialReference,
 } from './credentials.js';
 
+export interface ModeradoApi {
+  /** Starts one bounded agent turn. Any mutation still requires human approval. */
+  startRun(task: string, options?: { planMode?: boolean }): Promise<RunOutcome>;
+  listSessions(): ReturnType<AgentHost['listSessions']>;
+  cancel(reason?: string): void;
+}
+
 /**
  * Extension entry point.
  *
@@ -17,7 +24,7 @@ import {
  * an approval answer and nothing else. It never receives provider credentials
  * and cannot grant its own tool permissions.
  */
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): ModeradoApi {
   const output = vscode.window.createOutputChannel('Moderado');
   context.subscriptions.push(output);
 
@@ -340,6 +347,18 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
+  // A narrow extension API. It exists so the host can be driven by an automated
+  // check (including the live provider smoke probe) without going through the
+  // webview. It deliberately exposes no credentials and no tool permissions: a
+  // caller can start a run, list sessions, or cancel, nothing more.
+  return {
+    startRun: (task: string, options?: { planMode?: boolean }) =>
+      host.startRun({ task, planMode: options?.planMode }),
+    listSessions: () => host.listSessions(),
+    cancel: (reason?: string) => host.cancel(reason),
+  };
+}
+
 interface TranscriptEntry {
   kind: 'user' | 'assistant' | 'tool' | 'error';
   label: string;
@@ -445,7 +464,6 @@ const SECRET_KEYS = new Set(['apiKey', 'credential', 'authorization', 'token', '
 
 function redactKey(key: string, value: unknown): unknown {
   return SECRET_KEYS.has(key) ? '[redacted]' : value;
-}
 }
 
 export function deactivate(): void {
