@@ -1,4 +1,8 @@
 import type { ApprovalRequest } from '@moderado/contracts';
+import { escapeHtml } from './html.js';
+import { settingsPaneHtml, SettingsState, emptySettings } from './settings-view.js';
+
+export { escapeHtml } from './html.js';
 
 /**
  * The chat webview, as pure string building.
@@ -22,6 +26,8 @@ export interface ChatViewState {
   transcript: TranscriptEntry[];
   running: boolean;
   pendingApproval: ApprovalRequest | null;
+  /** The in-panel settings pane; see settings-view.ts. */
+  settings?: SettingsState;
 }
 
 /** The parts of the view the webview updates in place. */
@@ -30,15 +36,9 @@ export interface ViewSnapshot {
   approval: string;
   running: boolean;
   pendingId: string | null;
-}
-
-/** Escapes untrusted transcript, model, or provider text before it becomes HTML. */
-export function escapeHtml(value: unknown): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  settingsOpen: boolean;
+  settings: string;
+  settingsStatus: string;
 }
 
 /** A fresh per-render nonce, which is what a VS Code webview CSP expects. */
@@ -91,9 +91,24 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
   form { display: flex; gap: 0.4rem; margin-top: 0.75rem; }
   input[type="text"] { flex: 1; padding: 0.4rem; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
   button { padding: 0.4rem 0.8rem; }
+  /* The gear opens the in-panel settings pane; it is a plain text glyph so it
+     inherits the active theme and needs no icon font. */
+  #open-settings { float: right; padding: 0.2rem 0.5rem; line-height: 1; background: none; border: none; color: var(--vscode-foreground); cursor: pointer; font-size: 1.1rem; }
+  #open-settings:hover { color: var(--vscode-textLink-foreground); }
+  #settings-host:not(:empty) { border-top: 1px solid var(--vscode-panel-border); padding-top: 0.5rem; }
+  .settings label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.8rem; opacity: 0.85; }
+  .settings input, .settings select { width: 100%; box-sizing: border-box; padding: 0.35rem; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+  .settings header { display: flex; align-items: center; justify-content: space-between; }
+  .settings h2 { font-size: 1rem; margin: 0; }
+  .settings .note { font-size: 0.75rem; opacity: 0.75; margin: 0.3rem 0 0; }
+  .settings .problem { color: var(--vscode-errorForeground); font-size: 0.8rem; }
+  .settings .row { display: flex; gap: 0.4rem; margin-top: 0.8rem; }
+  .settings .status { font-size: 0.8rem; min-height: 1.2em; margin: 0.4rem 0 0; }
 </style>
 </head>
 <body>
+<button id="open-settings" type="button" title="Moderado settings" aria-label="Moderado settings">&#9881;</button>
+<div id="settings-host">${snapshot.settings}</div>
 <div id="scroll">
   <ul id="transcript">${snapshot.rows}</ul>
 </div>
@@ -122,6 +137,55 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
     if (full) full.addEventListener('click', () => vscode.postMessage({ type: 'preview', requestId: pendingId }));
   }
 
+  // The settings pane collects a provider key, so it is a separate host element
+  // that is only written when the host actually sends a pane. The key is read
+  // from the DOM only at the moment of saving and is never stored in the
+  // webview, echoed back, or sent anywhere except the one save message.
+  const settingsHost = document.getElementById('settings-host');
+  let settingsOpen = ${JSON.stringify(snapshot.settingsOpen)};
+  if (settingsOpen) bindSettings();
+  const status = () => document.getElementById('settings-status');
+
+  function say(text) {
+    const node = status();
+    if (node) node.textContent = text;
+  }
+
+  // A picked provider supplies the connection id. When the user is adding a new
+  // connection the id comes from the text field instead, so both paths end up
+  // as one validated id on the host side.
+  function readSettings() {
+    const provider = document.getElementById('settings-provider');
+    const connectionId = document.getElementById('settings-connection-id');
+    const baseUrl = document.getElementById('settings-base-url');
+    const apiKey = document.getElementById('settings-api-key');
+    const model = document.getElementById('settings-model');
+    const typed = connectionId ? connectionId.value.trim() : '';
+    return {
+      connectionId: typed || (provider ? provider.value : ''),
+      baseUrl: baseUrl ? baseUrl.value : '',
+      apiKey: apiKey ? apiKey.value : '',
+      modelId: model ? model.value : '',
+    };
+  }
+
+  function bindSettings() {
+    const close = document.getElementById('close-settings');
+    const save = document.getElementById('settings-save');
+    const refresh = document.getElementById('settings-refresh');
+    if (close) close.addEventListener('click', () => vscode.postMessage({ type: 'closeSettings' }));
+    if (save) save.addEventListener('click', () => {
+      say('Saving…');
+      vscode.postMessage({ type: 'saveSettings', ...readSettings() });
+    });
+    if (refresh) refresh.addEventListener('click', () => {
+      say('Loading models…');
+      vscode.postMessage({ type: 'refreshModels' });
+    });
+  }
+
+  document.getElementById('open-settings').addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
+
   document.getElementById('composer').addEventListener('submit', (event) => {
     event.preventDefault();
     const text = input.value.trim();
@@ -143,6 +207,15 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
     send.disabled = update.running;
     cancel.disabled = !update.running;
     if (update.pendingId) bindApproval(update.pendingId);
+    // The pane is replaced only when the host sends one. Rewriting it on every
+    // streamed token would discard a half-typed API key mid-entry.
+    if (update.settingsOpen !== undefined && update.settingsOpen !== settingsOpen) {
+      settingsOpen = update.settingsOpen;
+      settingsHost.innerHTML = update.settings || '';
+      if (settingsOpen) bindSettings();
+    } else if (update.settingsStatus) {
+      say(update.settingsStatus);
+    }
     scroll.scrollTop = scroll.scrollHeight;
   });
 </script>
@@ -159,10 +232,15 @@ export function viewSnapshot(
         `<li class="${escapeHtml(entry.kind)}"><span class="who">${escapeHtml(entry.label)}</span><pre>${escapeHtml(entry.text)}</pre></li>`,
     )
     .join('');
+  const settings = state.settings ?? emptySettings();
   return {
     rows,
     approval: approvalHtml(state.pendingApproval, preview),
     running: state.running,
     pendingId: state.pendingApproval?.requestId ?? null,
+    settingsOpen: settings.open,
+    // Empty unless open, so the pane never reaches the document unasked.
+    settings: settings.open ? settingsPaneHtml(settings) : '',
+    settingsStatus: settings.status ?? '',
   };
 }

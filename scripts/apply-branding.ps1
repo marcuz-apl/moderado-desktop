@@ -58,6 +58,29 @@ foreach ($markTarget in $markTargets) {
   Copy-Item -LiteralPath $mark -Destination $markTarget -Force
 }
 
+# Overlay the empty-editor watermark.
+#
+# THE CENTRE-CANVAS LOGO. Branding code-icon.svg alone is not enough: this pinned
+# Code OSS renders the large centre mark from a separate asset. editorGroupWatermark
+# emits a `.letterpress` element (src/vs/workbench/browser/parts/editor/
+# editorGroupWatermark.ts) and editorgroupview.css paints it with
+# `url('./letterpress-*.svg')`, switching on the active theme between the light,
+# dark, hcLight, and hcDark variants. VSCodium overwrites those four files with its
+# own Codium letterpress, so the canvas keeps showing the VSCodium logo unless each
+# variant is replaced by name. One file per theme is required; a single overlay
+# would leave three themes unbranded.
+#
+# These variants are flat monochrome marks at upstream's opacities, not the
+# full-colour code-icon.svg, because the watermark is a faint background graphic.
+$watermarkDir = Join-Path $editor 'src\vs\workbench\browser\parts\editor\media'
+foreach ($variant in @('light', 'dark', 'hcLight', 'hcDark')) {
+  $source = Join-Path $PSScriptRoot "..\branding\letterpress-$variant.svg"
+  if (!(Test-Path -LiteralPath $source)) { throw "Branded watermark missing at $source" }
+  $target = Join-Path $watermarkDir "letterpress-$variant.svg"
+  if (!(Test-Path -LiteralPath $target)) { throw "Expected upstream watermark missing: $target" }
+  Copy-Item -LiteralPath $source -Destination $target -Force
+}
+
 # Limit concurrent extension typechecks.
 #
 # UNVERIFIED MITIGATION. Upstream's prepack task starts every extension's

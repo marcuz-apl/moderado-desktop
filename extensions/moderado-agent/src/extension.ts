@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { AgentEvent, ApprovalRequest } from '@moderado/contracts';
 import { AgentHost, RunOutcome } from './host.js';
 import { RawDecision } from './approval.js';
-import { configPath } from './profile.js';
+import { configPath, readConfig } from './profile.js';
 import { updateConfigCoordinated } from './coordination.js';
 import {
   WindowsCredentialStore,
@@ -10,6 +10,11 @@ import {
   credentialReference,
 } from './credentials.js';
 import { ChatViewState, TranscriptEntry, chatHtml, viewSnapshot } from './chat-view.js';
+import {
+  SettingsState,
+  emptySettings,
+  parseSettingsForm,
+} from './settings-view.js';
 
 export interface ModeradoApi {
   /** Starts one bounded agent turn. Any mutation still requires human approval. */
@@ -43,7 +48,14 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
    * read-only preview and can never authorize anything on its own.
    */
   const pendingApprovalRequests = new Map<string, ApprovalRequest>();
-  const view: ChatViewState & { planMode: boolean } = { transcript: [], running: false, pendingApproval: null, planMode: false };
+  const settings: SettingsState = emptySettings();
+  const view: ChatViewState & { planMode: boolean } = {
+    transcript: [],
+    running: false,
+    pendingApproval: null,
+    planMode: false,
+    settings,
+  };
   let chatView: vscode.WebviewView | undefined;
   // True once the webview document has been written; see render().
   let documentRendered = false;
@@ -162,10 +174,167 @@ async function openDiffTab(requestId: string): Promise<void> {
   });
 }
 
-/** Handles every message the chat webview can send. */
+/** A connection as it appears in the profile, with only display-safe fields. */
+  function connectionsFromConfig(config: Record<string, unknown>): {
+    id: string;
+    displayName: string;
+  }[] {
+    const connections = (config.connections ?? {}) as Record<string, Record<string, unknown>>;
+    return Object.entries(connections)
+      .filter(([id, value]) => id.trim() && value && typeof value === 'object')
+      .map(([id, value]) => ({
+        id,
+        displayName: typeof value.displayName === 'string' && value.displayName.trim()
+          ? value.displayName.trim()
+          : id,
+      }));
+  }
+
+  /**
+   * Rebuilds the pane from the shared profile.
+   *
+   * A corrupt profile blocks the pane instead of rendering empty defaults: the
+   * CLI loader would return an empty config here, and saving over that would
+   * destroy data that was never successfully read.
+   */
+  async function loadSettingsState(status?: string): Promise<void> {
+    const state = readConfig();
+    settings.open = true;
+    settings.profileError = undefined;
+    settings.models = [];
+    if (status) settings.status = status;
+
+    if (state.kind === 'invalid') {
+      settings.connections = [];
+      settings.activeConnectionId = '';
+      settings.baseUrl = '';
+      settings.apiKeyStored = false;
+      settings.defaultModel = '';
+      settings.profileError = state.error;
+      render();
+      return;
+    }
+
+    const config = state.kind === 'ok' ? state.config : {};
+    settings.connections = connectionsFromConfig(config);
+    settings.activeConnectionId =
+      typeof config.activeConnectionId === 'string' ? config.activeConnectionId : '';
+    settings.defaultModel = typeof config.defaultModel === 'string' ? config.defaultModel : '';
+
+    const record = (config.connections ?? {}) as Record<string, Record<string, unknown>>;
+    const active =
+      settings.connections.find((c) => c.id === settings.activeConnectionId) ??
+      settings.connections[0];
+    const activeRecord = active ? record[active.id] : undefined;
+    settings.baseUrl = typeof activeRecord?.baseUrl === 'string' ? activeRecord.baseUrl : '';
+
+    // Only the *presence* of a credential reaches the renderer. The key itself
+    // must never be read back, so it is never loaded here.
+    settings.apiKeyStored = Boolean(
+      activeRecord?.credentialReference || activeRecord?.apiKey,
+    );
+
+    // Model discovery needs a working provider; without one it fails, and that
+    // failure is shown rather than leaving an empty, unexplained list.
+    try {
+      const models = await host.discoverModels();
+      settings.models = models.map((m) => ({
+        id: m.id,
+        accessTier: m.accessTier,
+        isFree: m.isFree,
+      }));
+      settings.status = status ?? `${models.length} model(s) available.`;
+    } catch (error) {
+      settings.status = `Could not list models: ${(error as Error).message}`;
+    }
+    render();
+  }
+
+  async function openSettingsPane(): Promise<void> {
+    await loadSettingsState();
+  }
+
+  /**
+   * Applies a submitted settings form.
+   *
+   * The API key is written to Windows Credential Manager first and only the
+   * *reference* goes into config.json. If the credential write fails, nothing is
+   * written to the profile at all, so the two can never disagree.
+   */
+  async function saveSettings(message: unknown): Promise<void> {
+    const parsed = parseSettingsForm(message);
+    if (!parsed.ok) {
+      settings.status = parsed.error;
+      render();
+      return;
+    }
+    const { connectionId, baseUrl, apiKey, modelId } = parsed.value;
+
+    let credentialRef: string | undefined;
+    if (apiKey) {
+      if (!credentialManagerAvailable()) {
+        settings.status = 'This platform has no Credential Manager. Set the provider environment variable instead.';
+        render();
+        return;
+      }
+      try {
+        credentialRef = credentialReference(connectionId);
+        await new WindowsCredentialStore().set(credentialRef, apiKey);
+      } catch {
+        // Deliberately vague: the error must not carry the key or the target.
+        settings.status = 'Could not store the API key in Windows Credential Manager. Nothing was written to config.json.';
+        render();
+        return;
+      }
+    }
+
+    const patch: Record<string, unknown> = {
+      connections: {
+        [connectionId]: {
+          id: connectionId,
+          displayName: connectionId,
+          kind: 'openai-compatible',
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(credentialRef ? { credentialReference: credentialRef } : {}),
+        },
+      },
+      activeConnectionId: connectionId,
+      ...(modelId ? { defaultModel: modelId } : {}),
+    };
+
+    const result = updateConfigCoordinated(configPath(), patch);
+    if (!result.written) {
+      settings.status = result.conflict?.reason ?? result.reason ?? 'Could not save the settings.';
+      render();
+      return;
+    }
+    settings.status = 'Saved.';
+    // Reread so the pane reflects exactly what is on disk, including whether a
+    // credential now exists, rather than what this call intended to write.
+    await loadSettingsState('Saved.');
+  }
+
+  /** Handles every message the chat webview can send. */
   function handleWebviewMessage(message: unknown): void {
     if (!message || typeof message !== 'object') return;
     const msg = message as Record<string, unknown>;
+    if (msg.type === 'openSettings') {
+      void openSettingsPane();
+      return;
+    }
+    if (msg.type === 'closeSettings') {
+      settings.open = false;
+      render();
+      return;
+    }
+    if (msg.type === 'refreshModels') {
+      void loadSettingsState('Loading models…');
+      return;
+    }
+    if (msg.type === 'saveSettings') {
+      void saveSettings(msg);
+      return;
+    }
     if (msg.type === 'prompt' && typeof msg.text === 'string') {
       void runPrompt(msg.text);
       return;
@@ -240,6 +409,9 @@ async function openDiffTab(requestId: string): Promise<void> {
           ? 'Plan mode on: file writes and commands stay blocked.'
           : 'Plan mode off.',
       );
+    }),
+    vscode.commands.registerCommand('moderado.openSettings', async () => {
+      await openSettingsPane();
     }),
     vscode.commands.registerCommand('moderado.selectModel', async () => {
       const models = await host.discoverModels();

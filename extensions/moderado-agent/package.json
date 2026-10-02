@@ -42,6 +42,10 @@
         "title": "Moderado: Open Agent Chat"
       },
       {
+        "command": "moderado.openSettings",
+        "title": "Moderado: Open Settings"
+      },
+      {
         "command": "moderado.selectModel",
         "title": "Moderado: Select Model"
       },
