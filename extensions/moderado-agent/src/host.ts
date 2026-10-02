@@ -351,6 +351,16 @@ export class AgentHost implements IApprovalHandler {
   }
 
   /**
+   * The engine's access tier for a model id.
+   *
+   * Exposed so a surface that lists models labels them with the same tier the
+   * agent will route with, rather than re-deriving it and drifting.
+   */
+  classifyModel(modelId: string): string {
+    return this.router.classifyModel(modelId).accessTier;
+  }
+
+  /**
    * Lists the discovered models with their cost classification, so the picker
    * can show paid and unknown-cost models behind their explicit opt-ins.
    */

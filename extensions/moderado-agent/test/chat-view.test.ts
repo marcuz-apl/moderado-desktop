@@ -90,6 +90,13 @@ describe('chat view', () => {
   });
 
   it('escapes approval previews, which contain file paths and diffs', () => {
+    const pending = { requestId: 'r', actionSummary: '<b>x</b>' } as unknown as ApprovalRequest;
+    const snap = viewSnapshot(state({ pendingApproval: pending }), () => '<script>bad</script>');
+    expect(snap.approval).not.toContain('<script>');
+    expect(escapeHtml('<b>')).toBe('&lt;b&gt;');
+  });
+});
+
 describe('moderado settings pane', () => {
   function settings(over: Partial<SettingsState> = {}): SettingsState {
     return { ...emptySettings(), ...over };
@@ -103,12 +110,69 @@ describe('moderado settings pane', () => {
     expect(html).toContain("postMessage({ type: 'openSettings' })");
   });
 
+  it('puts the gear in a right-aligned bar at the top', () => {
+    // The bug: the gear used float:right, which a flex container ignores, so it
+    // rendered at the top-LEFT. It must live in a bar that justifies to the end,
+    // above the transcript.
+    const html = chatHtml(state(), preview);
+    expect(html).toMatch(/#panel-bar\s*\{[^}]*justify-content:\s*flex-end/);
+    expect(html.indexOf('id="panel-bar"')).toBeLessThan(html.indexOf('id="scroll"'));
+    expect(html).not.toMatch(/#open-settings\s*\{[^}]*float:/);
+    expect(html.indexOf('id="open-settings"')).toBeLessThan(html.indexOf('id="scroll"'));
+  });
+
   it('keeps the pane out of the document until it is opened', () => {
     const html = chatHtml(state(), preview);
     expect(html).not.toContain('id="settings-pane"');
   });
 
-  it('renders a provider picker, key field, and model picker', () => {
+  it('lists the connections already present in the shared profile', () => {
+    // The profile is shared with the CLI. A user who configured providers there
+    // must be able to see and switch to them, not just add new ones.
+    const pane = settingsPaneHtml(settings({
+      profilePath: 'C:\\Users\\marcu\\.moderado\\config.json',
+      activeConnectionId: 'agnes-ai',
+      savedConnections: [
+        {
+          id: 'agnes-ai', displayName: 'Agnes AI', kind: 'openai-compatible',
+          baseUrl: 'https://apihub.agnes-ai.com/v1', hasCredential: true,
+          defaultModel: 'mock/free-tool-model',
+        },
+        {
+          id: 'openrouter', displayName: 'openrouter', kind: 'openai-compatible',
+          baseUrl: 'https://openrouter.ai/api/v1', hasCredential: false,
+        },
+      ],
+    }));
+    expect(pane).toContain('C:\\Users\\marcu\\.moderado\\config.json');
+    expect(pane).toContain('Agnes AI');
+    expect(pane).toContain('https://apihub.agnes-ai.com/v1');
+    expect(pane).toContain('API key stored');
+    expect(pane).toContain('no API key stored');
+    expect(pane).toContain('default model: mock/free-tool-model');
+  });
+
+  it('marks the active profile connection and offers a switch for the rest', () => {
+    const pane = settingsPaneHtml(settings({
+      activeConnectionId: 'agnes-ai',
+      savedConnections: [
+        { id: 'agnes-ai', displayName: 'Agnes AI', kind: 'openai-compatible', baseUrl: 'https://a/v1', hasCredential: true },
+        { id: 'ollama', displayName: 'Ollama', kind: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', hasCredential: false },
+      ],
+    }));
+    expect(pane).toContain('active');
+    expect(pane).toContain('data-connection="ollama"');
+    // Only the inactive one gets a switch.
+    expect(pane).not.toContain('data-connection="agnes-ai"');
+  });
+
+  it('says which file it read when the profile has no connections', () => {
+    const pane = settingsPaneHtml(settings({ profilePath: 'C:\\Users\\marcu\\.moderado\\config.json' }));
+    expect(pane).toContain('No connections found in');
+    expect(pane).toContain('C:\\Users\\marcu\\.moderado\\config.json');
+  });
+
+  it('renders provider, key, and model controls when opened', () => {
     const pane = settingsPaneHtml(settings({ preset: 'nvidia-nim', providers: [
       { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'Free-first routing.', requiresApiKey: true },
     ] }));
@@ -273,11 +337,5 @@ describe('moderado settings pane', () => {
     expect(snap.settingsOpen).toBe(true);
     expect(snap.settings).toContain('id="settings-provider"');
     expect(settingsSnapshot(emptySettings()).settings).toBe('');
-  });
-});
-    const pending = { requestId: 'r', actionSummary: '<b>x</b>' } as unknown as ApprovalRequest;
-    const snap = viewSnapshot(state({ pendingApproval: pending }), () => '<script>bad</script>');
-    expect(snap.approval).not.toContain('<script>');
-    expect(escapeHtml('<b>')).toBe('&lt;b&gt;');
   });
 });

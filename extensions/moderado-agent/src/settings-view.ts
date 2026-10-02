@@ -18,16 +18,22 @@ import { escapeHtml } from './html.js';
  *    errors) is untrusted data from the shared profile and is escaped.
  */
 
-export interface SettingsConnection {
-  id: string;
-  displayName: string;
-}
-
 export interface SettingsModel {
   id: string;
   /** Engine `AccessTier`: free_trial | paid | local | unknown. */
   accessTier: string;
   isFree: boolean;
+}
+
+/** A saved connection read back from the shared `~/.moderado/config.json`. */
+export interface SettingsConnectionView {
+  id: string;
+  displayName: string;
+  baseUrl: string;
+  kind: string;
+  /** True when a Credential Manager reference (or legacy key) is stored. */
+  hasCredential: boolean;
+  defaultModel?: string;
 }
 
 /** A picker entry; mirrors the engine's preset metadata plus CLI tags. */
@@ -49,8 +55,11 @@ export interface SettingsState {
   providers: SettingsProviderChoice[];
   /** Currently selected picker value. */
   preset: string;
-  connections: SettingsConnection[];
+  /** Connections already present in the shared profile, so the CLI's work is visible. */
+  savedConnections: SettingsConnectionView[];
   activeConnectionId: string;
+  /** The resolved `config.json` path, shown so the user can confirm what was read. */
+  profilePath: string;
   baseUrl: string;
   displayName: string;
   /** True when a Credential Manager entry exists. The key itself is never here. */
@@ -68,8 +77,9 @@ export function emptySettings(): SettingsState {
     open: false,
     providers: [],
     preset: '',
-    connections: [],
+    savedConnections: [],
     activeConnectionId: '',
+    profilePath: '',
     baseUrl: '',
     displayName: '',
     apiKeyStored: false,
@@ -139,9 +149,27 @@ export function settingsPaneHtml(state: SettingsState): string {
     ? `<p class="problem" role="alert">${escapeHtml(state.profileError as string)} Fix or move that file before changing settings; Desktop did not read it and will not overwrite it.</p>`
     : '';
 
-  const saved = state.connections.length
-    ? `<p class="note">Active connection: <strong>${escapeHtml(state.activeConnectionId || 'none')}</strong></p>`
-    : '<p class="note">No provider connected yet.</p>';
+  // The shared profile is the source of truth for both applications, so what
+  // the CLI already configured is listed here rather than hidden behind a
+  // one-line summary. Without this, a user who set up providers in the CLI
+  // cannot see or switch to them.
+  const saved = state.savedConnections.length
+    ? `<div class="saved">
+      <h3>From ${escapeHtml(state.profilePath || '~/.moderado/config.json')}</h3>
+      <ul class="saved-list">
+      ${state.savedConnections.map((connection) => `<li${connection.id === state.activeConnectionId ? ' class="active"' : ''}>
+        <span class="name">${escapeHtml(connection.displayName)}</span>
+        <span class="meta">${escapeHtml(connection.id)} · ${escapeHtml(connection.kind)}</span>
+        <span class="meta">${escapeHtml(connection.baseUrl)}</span>
+        <span class="meta">${connection.hasCredential ? 'API key stored' : 'no API key stored'}</span>
+        ${connection.defaultModel ? `<span class="meta">default model: ${escapeHtml(connection.defaultModel)}</span>` : ''}
+        ${connection.id === state.activeConnectionId
+          ? '<span class="meta active-tag">active</span>'
+          : `<button class="use-connection" type="button" data-connection="${escapeHtml(connection.id)}"${disabled}>Use</button>`}
+      </li>`).join('')}
+      </ul>
+    </div>`
+    : `<p class="note">No connections found in ${escapeHtml(state.profilePath || '~/.moderado/config.json')}.</p>`;
 
   // The key is write-only: an empty field keeps whatever is stored, so the saved
   // key is never rendered back into the pane.

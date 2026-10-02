@@ -91,10 +91,20 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
   form { display: flex; gap: 0.4rem; margin-top: 0.75rem; }
   input[type="text"] { flex: 1; padding: 0.4rem; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
   button { padding: 0.4rem 0.8rem; }
-  /* The gear opens the in-panel settings pane; it is a plain text glyph so it
-     inherits the active theme and needs no icon font. */
-  #open-settings { float: right; padding: 0.2rem 0.5rem; line-height: 1; background: none; border: none; color: var(--vscode-foreground); cursor: pointer; font-size: 1.1rem; }
+  /* A flex bar with space-between puts the gear in the top-right corner. The
+     previous version used float:right, which a flex container ignores, so the
+     button landed at the top-left. */
+  #panel-bar { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; padding: 0 0 0.25rem; border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 0.5rem; }
+  #open-settings { padding: 0.1rem 0.4rem; line-height: 1; background: none; border: none; color: var(--vscode-foreground); cursor: pointer; font-size: 1.15rem; }
   #open-settings:hover { color: var(--vscode-textLink-foreground); }
+  #open-settings:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+  .settings .saved-list { list-style: none; padding: 0; margin: 0.4rem 0 0; }
+  .settings .saved-list li { border: 1px solid var(--vscode-panel-border); padding: 0.4rem 0.5rem; margin-bottom: 0.3rem; display: flex; flex-direction: column; gap: 0.1rem; }
+  .settings .saved-list li.active { border-color: var(--vscode-focusBorder); }
+  .settings .saved h3 { font-size: 0.8rem; margin: 0.8rem 0 0.2rem; word-break: break-all; }
+  .settings .saved .name { font-weight: 600; }
+  .settings .saved .meta { font-size: 0.72rem; opacity: 0.8; word-break: break-all; }
+  .settings .saved .active-tag { color: var(--vscode-textLink-foreground); }
   #settings-host:not(:empty) { border-top: 1px solid var(--vscode-panel-border); padding-top: 0.5rem; }
   .settings label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.8rem; opacity: 0.85; }
   .settings input, .settings select { width: 100%; box-sizing: border-box; padding: 0.35rem; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
@@ -107,7 +117,9 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
 </style>
 </head>
 <body>
-<button id="open-settings" type="button" title="Moderado settings" aria-label="Moderado settings">&#9881;</button>
+<div id="panel-bar">
+  <button id="open-settings" type="button" title="Moderado settings" aria-label="Moderado settings">&#9881;</button>
+</div>
 <div id="settings-host">${snapshot.settings}</div>
 <div id="scroll">
   <ul id="transcript">${snapshot.rows}</ul>
@@ -178,10 +190,17 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
       say('Saving…');
       vscode.postMessage({ type: 'saveSettings', ...readSettings() });
     });
+    // Reload must use what is currently in the form, not only what was last
+    // saved, or it would list the previous provider's models.
     if (refresh) refresh.addEventListener('click', () => {
       say('Loading models…');
-      vscode.postMessage({ type: 'refreshModels' });
+      vscode.postMessage({ type: 'refreshModels', ...readSettings() });
     });
+    // Switching to a connection that already exists in the shared profile only
+    // has to change which one is active.
+    for (const button of document.querySelectorAll('.use-connection')) {
+      button.addEventListener('click', () => vscode.postMessage({ type: 'useConnection', id: button.getAttribute('data-connection') }));
+    }
     // Changing the preset changes which fields apply, so the host re-renders
     // the pane rather than the webview guessing at the new shape.
     if (provider) provider.addEventListener('change', () => vscode.postMessage({ type: 'selectPreset', preset: provider.value }));

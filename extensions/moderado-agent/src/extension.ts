@@ -6,12 +6,14 @@ import { configPath, readConfig } from './profile.js';
 import { updateConfigCoordinated } from './coordination.js';
 import {
   WindowsCredentialStore,
+  MemoryCredentialStore,
   credentialManagerAvailable,
   credentialReference,
 } from './credentials.js';
 import { ChatViewState, TranscriptEntry, chatHtml, viewSnapshot } from './chat-view.js';
 import {
   SettingsState,
+  SettingsConnectionView,
   emptySettings,
   parseSettingsForm,
 } from './settings-view.js';
@@ -21,6 +23,18 @@ import {
   buildProviderConnection,
 } from './provider-setup.js';
 import type { ConnectProviderPresetId, ConnectProvidersConfig } from '@moderado/providers';
+import { discoverModelOptions } from './model-discovery.js';
+import { resolveProvider } from './host.js';
+
+/**
+ * Model discovery bound for the settings pane.
+ *
+ * The previous code set "Loading models…" and then re-assigned that same string
+ * on success, so the pane never left the loading state. Discovery is also
+ * bounded now: an endpoint that accepts the socket and never answers cannot
+ * wedge the panel.
+ */
+const MODEL_DISCOVERY_TIMEOUT_MS = 20_000;
 
 export interface ModeradoApi {
   /** Starts one bounded agent turn. Any mutation still requires human approval. */
@@ -181,10 +195,7 @@ async function openDiffTab(requestId: string): Promise<void> {
 }
 
 /** A connection as it appears in the profile, with only display-safe fields. */
-  function connectionsFromConfig(config: Record<string, unknown>): {
-    id: string;
-    displayName: string;
-  }[] {
+  function connectionsFromConfig(config: Record<string, unknown>): SettingsConnectionView[] {
     const connections = (config.connections ?? {}) as Record<string, Record<string, unknown>>;
     return Object.entries(connections)
       .filter(([id, value]) => id.trim() && value && typeof value === 'object')
@@ -193,6 +204,11 @@ async function openDiffTab(requestId: string): Promise<void> {
         displayName: typeof value.displayName === 'string' && value.displayName.trim()
           ? value.displayName.trim()
           : id,
+        baseUrl: typeof value.baseUrl === 'string' ? value.baseUrl : '',
+        kind: typeof value.kind === 'string' ? value.kind : 'openai-compatible',
+        // Only the presence of a credential is ever surfaced, never the value.
+        hasCredential: Boolean(value.credentialReference || value.apiKey),
+        defaultModel: typeof value.defaultModel === 'string' ? value.defaultModel : undefined,
       }));
   }
 
@@ -208,7 +224,13 @@ async function openDiffTab(requestId: string): Promise<void> {
     settings.open = true;
     settings.profileError = undefined;
     settings.models = [];
-    if (status) settings.status = status;
+    if (status) {
+      // Show the in-flight text immediately, then let the settled outcome below
+      // replace it. Re-using the placeholder as the final value is what left the
+      // pane stuck on "Loading models…".
+      settings.status = status;
+      render();
+    }
 
     // The picker is built from the engine's own preset metadata, so Desktop
     // offers the same providers the CLI does and cannot drift from the pin.
@@ -225,12 +247,13 @@ async function openDiffTab(requestId: string): Promise<void> {
     }));
 
     if (state.kind === 'invalid') {
-      settings.connections = [];
+      settings.savedConnections = [];
       settings.activeConnectionId = '';
       settings.baseUrl = '';
       settings.displayName = '';
       settings.apiKeyStored = false;
       settings.defaultModel = '';
+      settings.profilePath = configPath();
       settings.preset = settings.providers[0]?.value ?? '';
       settings.profileError = state.error;
       render();
@@ -238,10 +261,13 @@ async function openDiffTab(requestId: string): Promise<void> {
     }
 
     const config = state.kind === 'ok' ? state.config : {};
-    settings.connections = connectionsFromConfig(config);
+    settings.savedConnections = connectionsFromConfig(config);
     settings.activeConnectionId =
       typeof config.activeConnectionId === 'string' ? config.activeConnectionId : '';
     settings.defaultModel = typeof config.defaultModel === 'string' ? config.defaultModel : '';
+    // The resolved path is shown so the user can confirm Desktop is reading the
+    // same `~/.moderado/config.json` the CLI writes, on Windows included.
+    settings.profilePath = configPath();
 
     // Preselect the provider that is already connected, so reopening the pane
     // shows the current state rather than resetting the user to the first entry.
@@ -263,17 +289,13 @@ async function openDiffTab(requestId: string): Promise<void> {
 
     // Model discovery needs a working provider; without one it fails, and that
     // failure is shown rather than leaving an empty, unexplained list.
-    try {
-      const models = await host.discoverModels();
-      settings.models = models.map((m) => ({
-        id: m.id,
-        accessTier: m.accessTier,
-        isFree: m.isFree,
-      }));
-      settings.status = status ?? `${models.length} model(s) available.`;
-    } catch (error) {
-      settings.status = `Could not list models: ${(error as Error).message}`;
-    }
+    const result = await discoverModelOptions(
+      () => host.discoverModels(),
+      MODEL_DISCOVERY_TIMEOUT_MS,
+    );
+    settings.models = result.models;
+    // Only an explicit in-flight message may override the settled outcome.
+    settings.status = result.status;
     render();
   }
 
@@ -300,6 +322,89 @@ async function openDiffTab(requestId: string): Promise<void> {
 
   async function openSettingsPane(): Promise<void> {
     await loadSettingsState();
+  }
+
+  /**
+   * Lists models for the connection currently in the form, not the saved one.
+   *
+   * Without this, pressing "Reload models" after picking a provider and typing a
+   * key queried whatever was last written to the profile, so the list never
+   * matched what the user had just entered. The key stays in memory for this
+   * call only; it is never written here.
+   */
+  async function refreshModelsForPendingForm(message: unknown): Promise<void> {
+    const parsed = parseSettingsForm(message);
+    settings.open = true;
+    settings.models = [];
+    if (!parsed.ok) {
+      settings.status = parsed.error;
+      render();
+      return;
+    }
+    const { preset, displayName, baseUrl, apiKey, modelId } = parsed.value;
+    settings.status = 'Loading models…';
+    render();
+
+    let connection: ProviderConnectionRecord;
+    try {
+      connection = buildProviderConnection(
+        { preset, apiKey, baseUrl, displayName, defaultModel: modelId },
+        readConnectProviders(readConfig()),
+      );
+    } catch (error) {
+      settings.status = (error as Error).message;
+      render();
+      return;
+    }
+
+    // Build a throwaway profile so the engine's own resolver picks the right
+    // adapter and endpoint for what is on screen.
+    const synthetic = {
+      kind: 'ok' as const,
+      config: {
+        connections: { [connection.id]: { ...connection, apiKey } },
+        activeConnectionId: connection.id,
+      },
+    };
+
+    const result = await discoverModelOptions(async () => {
+      const { adapter, reason } = await resolveProvider(synthetic, new MemoryCredentialStore());
+      if (reason) throw new Error(reason);
+      const inventory = await adapter.discoverModels();
+      return inventory.map((entry) => ({
+        id: entry.id,
+        accessTier: host.classifyModel(entry.id),
+        toolSupport: 'unknown',
+        isFree: false,
+      }));
+    }, MODEL_DISCOVERY_TIMEOUT_MS);
+
+    settings.models = result.models;
+    settings.status = result.status;
+    render();
+  }
+
+  /** Points an existing profile connection at being active. */
+  async function useConnection(id: string): Promise<void> {
+    const state = readConfig();
+    if (state.kind !== 'ok') {
+      settings.status = state.kind === 'invalid' ? state.error : 'No profile to update.';
+      render();
+      return;
+    }
+    const record = (state.config.connections ?? {}) as Record<string, unknown>;
+    if (!record[id]) {
+      settings.status = 'That connection is no longer in the shared profile.';
+      render();
+      return;
+    }
+    const result = updateConfigCoordinated(configPath(), { activeConnectionId: id });
+    if (!result.written) {
+      settings.status = result.conflict?.reason ?? result.reason ?? 'Could not switch connection.';
+      render();
+      return;
+    }
+    await loadSettingsState(`Active connection is now ${id}.`);
   }
 
   /**
@@ -394,7 +499,11 @@ async function openDiffTab(requestId: string): Promise<void> {
       return;
     }
     if (msg.type === 'refreshModels') {
-      void loadSettingsState('Loading models…');
+      void refreshModelsForPendingForm(msg);
+      return;
+    }
+    if (msg.type === 'useConnection' && typeof msg.id === 'string') {
+      void useConnection(msg.id);
       return;
     }
     if (msg.type === 'selectPreset' && typeof msg.preset === 'string') {
