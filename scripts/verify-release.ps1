@@ -56,7 +56,6 @@ if ($built) {
   # Manifest predates builtFromCommit. Fall back to the strict version check.
   Add-Result 'manifest:builtFromAncestor' ($manifest.desktopVersion -eq $version) "manifest=$($manifest.desktopVersion) VERSION=$version (no builtFromCommit recorded)"
 }
-Add-Result 'manifest:desktopVersionMatches' ($manifest.desktopVersion -eq $version) "manifest=$($manifest.desktopVersion) VERSION=$version"
 Add-Result 'manifest:vscodiumPinned' ($manifest.sources.vscodium -eq $lock.sources.vscodium.commit) $manifest.sources.vscodium
 Add-Result 'manifest:codeOssPinned' ($manifest.sources.codeOss -eq $lock.sources.codeOss.commit) $manifest.sources.codeOss
 # The build records the pinned agent under its own key (not inside `sources`),
@@ -122,10 +121,17 @@ if (!$SkipExtension) {
 }
 
 # 5. Signing is never claimed.
+# `manifest:desktopVersionMatches` is deliberately not a gate. The version hook
+# bumps VERSION on every commit, so a build is always one commit behind HEAD the
+# moment anything is committed. The build's commit and a clean tree are the real
+# gates above; the version string is reported for information only.
 $failed = @($results | Where-Object { -not $_.ok })
 [ordered]@{
   checkedAt = (Get-Date).ToUniversalTime().ToString('o')
   desktopVersion = $version
+  builtDesktopVersion = $manifest.desktopVersion
+  versionMatches = ($manifest.desktopVersion -eq $version)
+  builtFromCommit = $manifest.builtFromCommit
   signed = $false
   published = $false
   passed = ($failed.Count -eq 0)
