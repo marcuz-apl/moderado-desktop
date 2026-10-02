@@ -315,10 +315,16 @@ CLI change.
   coalesces streamed assistant deltas, and presents approvals as Allow/Deny
   buttons; a modal dialog remains the fallback when no view is open. Closing the
   view denies anything still pending.
-- `moderado.configureProvider` records only non-secret connection fields. API
-  keys are never typed into an editor setting or sent to a renderer; Credential
-  Manager references are not yet written, and no real provider adapter is
-  connected — runs use the vendored fake provider.
+- `moderado.configureProvider` now writes the API key to Windows Credential
+  Manager through the existing encoded bridge and records only the resulting
+  `credentialReference` in `config.json`. A failed key write leaves
+  `config.json` untouched. Keys are never typed into an editor setting or sent
+  to a renderer.
+- **No live provider call is evidenced.** `resolveProvider` builds a real
+  `OpenAICompatibleAdapter`/`NvidiaAdapter` when a key resolves, but every
+  recorded run and the editor-host check used a profile with no key, so the
+  fake provider path is what actually ran. The real-adapter path is covered by
+  offline construction tests, not by a verified model call.
 - Sessions persist and resume, but only within Desktop. Cross-process
   round-trip against a pinned CLI release, including the workspace-hash
   compatibility question, is the next milestone's work.
@@ -415,5 +421,6 @@ reproduced directly.
 
 **Still not done.** No code signing, no provenance attestation, no update
 channel, and no publication. Publishing requires the owner's explicit
-authorization and has not been requested. The live provider remains
-unconnected; runs use the vendored fake provider.
+authorization and has not been requested. A live model call has not been
+verified: provider resolution is implemented and unit-tested offline, but
+every recorded run used the fake provider because no key was configured.

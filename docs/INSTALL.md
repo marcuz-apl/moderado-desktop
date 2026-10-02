@@ -79,8 +79,13 @@ Working and verified on a real editor host:
 
 Not working yet:
 
-- **No live provider.** Runs use a fake provider. Connecting a real provider,
-  and resolving its key from Windows Credential Manager, is not wired up.
+- **Provider keys.** Runs and model discovery build their adapter from the
+  active connection in `config.json`, using the vendored OpenAI-compatible or
+  NVIDIA adapter, and resolve the key in the CLI's precedence order. There is
+  still **no live model call in the verified evidence**: every recorded run
+  used a profile with no resolvable key, so the fake provider path is what the
+  tests and host check actually exercised. The real adapter path is covered by
+  offline construction tests only.
 - **No signing, provenance, or update channel.**
 - **Chat view only.** There is no diff renderer; previews appear as text.
 - **Profile coordination is one-sided.** Desktop writes `config.json` under a
