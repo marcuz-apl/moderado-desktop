@@ -19,6 +19,12 @@ export interface ModeradoApi {
 }
 
 /**
+ * The webview view id. Must match `contributes.views.moderado[].id` in
+ * package.json; VS Code resolves `<id>.focus` against it.
+ */
+const chatViewProviderId = 'moderado.chatView';
+
+/**
  * Extension entry point.
  *
  * The renderer boundary is deliberately thin: the webview may post a prompt or
@@ -31,8 +37,14 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
 
   const config = () => vscode.workspace.getConfiguration('moderado');
   const pendingApprovals = new Map<string, (raw: RawDecision | undefined) => void>();
+  /**
+   * The request behind each id, kept so a sidebar "show full diff" action can
+   * open the complete proposed change. Deny-by-default: this only ever feeds a
+   * read-only preview and can never authorize anything on its own.
+   */
+  const pendingApprovalRequests = new Map<string, ApprovalRequest>();
   const view: ChatViewState & { planMode: boolean } = { transcript: [], running: false, pendingApproval: null, planMode: false };
-  let panel: vscode.WebviewPanel | undefined;
+  let chatView: vscode.WebviewView | undefined;
   // True once the webview document has been written; see render().
   let documentRendered = false;
 
@@ -89,12 +101,14 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
    * dismissal or a closed view denies.
    */
   async function askHuman(request: ApprovalRequest, signal: AbortSignal): Promise<RawDecision | undefined> {
-    if (panel) {
+    if (chatView) {
       view.pendingApproval = request;
+      pendingApprovalRequests.set(request.requestId, request);
       render();
       const answer = await new Promise<RawDecision | undefined>((resolve) => {
         pendingApprovals.set(request.requestId, (raw) => {
           pendingApprovals.delete(request.requestId);
+          pendingApprovalRequests.delete(request.requestId);
           view.pendingApproval = null;
           endStreaming();
           render();
@@ -126,48 +140,91 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
     return { requestId: request.requestId, status: 'approved' };
   }
 
-  function openChatPanel(): vscode.WebviewPanel {
-    if (panel) {
-      panel.reveal(vscode.ViewColumn.Active);
-      return panel;
+  /**
+ * Opens the full proposed change as a read-only editor tab.
+ *
+ * The sidebar is too narrow for a diff, but the human must still be able to read
+ * the whole thing before deciding. The tab is read-only: the approval decision is
+ * made in the sidebar, never in the preview.
+ */
+async function openDiffTab(requestId: string): Promise<void> {
+  const request = pendingApprovalRequests.get(requestId);
+  if (!request) return;
+  const body = request.exactPayload.diffPreview || request.exactPayload.contentPreview;
+  if (!body) return;
+  const document = await vscode.workspace.openTextDocument({
+    language: 'diff',
+    content: body,
+  });
+  await vscode.window.showTextDocument(document, {
+    preview: true,
+    viewColumn: vscode.ViewColumn.One,
+  });
+}
+
+/** Handles every message the chat webview can send. */
+  function handleWebviewMessage(message: unknown): void {
+    if (!message || typeof message !== 'object') return;
+    const msg = message as Record<string, unknown>;
+    if (msg.type === 'prompt' && typeof msg.text === 'string') {
+      void runPrompt(msg.text);
+      return;
     }
-    const created = vscode.window.createWebviewPanel('moderado.chat', 'Moderado', vscode.ViewColumn.Active, {
-      enableScripts: true,
-      // The webview loads only inline content and never fetches remote sources.
-      localResourceRoots: [],
-    });
-    panel = created;
-    created.onDidDispose(() => {
-      panel = undefined;
-      documentRendered = false;
-      // Closing the view must deny anything still awaiting a decision.
-      host.cancel('The Moderado view was closed.');
-    });
-    created.webview.onDidReceiveMessage((message) => {
-      if (!message || typeof message !== 'object') return;
-      if (message.type === 'prompt' && typeof message.text === 'string') {
-        void runPrompt(message.text);
-        return;
-      }
-      if (message.type === 'cancel') {
-        host.cancel();
-        return;
-      }
-      if (message.type === 'approval' && typeof message.requestId === 'string') {
-        const settle = pendingApprovals.get(message.requestId);
-        if (!settle) return;
-        // The id is echoed back so the coordinator can match it; a message that
-        // names a different request cannot authorize this one.
-        settle({ requestId: message.requestId, status: message.status === 'approved' ? 'approved' : 'denied' });
-      }
-    });
-    render();
-    return created;
+    if (msg.type === 'cancel') {
+      host.cancel();
+      return;
+    }
+    if (msg.type === 'preview' && typeof msg.requestId === 'string') {
+      // A full diff is too wide for the sidebar, so it opens as a normal editor
+      // tab. The sidebar keeps the summary and the decision.
+      openDiffTab(msg.requestId);
+      return;
+    }
+    if (msg.type === 'approval' && typeof msg.requestId === 'string') {
+      const settle = pendingApprovals.get(msg.requestId);
+      if (!settle) return;
+      // The id is echoed back so the coordinator can match it; a message that
+      // names a different request cannot authorize this one.
+      settle({ requestId: msg.requestId, status: msg.status === 'approved' ? 'approved' : 'denied' });
+    }
   }
 
+  /**
+   * The chat lives in the activity bar sidebar, not a floating editor tab.
+   *
+   * `retainContextWhenHidden` matters: without it the webview is destroyed when
+   * the user switches away, discarding the transcript and anything typed but
+   * not yet sent.
+   */
+  const chatViewProvider: vscode.WebviewViewProvider = {
+    resolveWebviewView(webviewView) {
+      chatView = webviewView;
+      webviewView.webview.options = {
+        enableScripts: true,
+        // The webview loads only inline content and never fetches remote sources.
+        localResourceRoots: [],
+      };
+      webviewView.webview.html = chatHtml(view, previewText);
+      documentRendered = true;
+      webviewView.webview.onDidReceiveMessage(handleWebviewMessage);
+      webviewView.onDidDispose(() => {
+        chatView = undefined;
+        documentRendered = false;
+        // Losing the view must deny anything still awaiting a decision.
+        host.cancel('The Moderado view was closed.');
+      });
+      render();
+    },
+  };
+
   context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(chatViewProviderId, chatViewProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.commands.registerCommand('moderado.openChat', async () => {
-      openChatPanel();
+      // The agent is meant to be always available; this only reveals it when the
+      // sidebar is collapsed or showing another view.
+      await vscode.commands.executeCommand(`${chatViewProviderId}.focus`);
     }),
     vscode.commands.registerCommand('moderado.cancelRun', () => {
       host.cancel();
@@ -287,55 +344,19 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
     }),
   );
 
-  // A restored panel must not resolve approvals for a request that no longer
-  // exists, so a serializer only re-attaches a message listener.
-  context.subscriptions.push(
-    vscode.window.registerWebviewPanelSerializer('moderado.chat', {
-      async deserializeWebviewPanel(restored) {
-        panel = restored;
-        // A restored panel has no document yet, so the next render must write it.
-        documentRendered = false;
-        restored.onDidDispose(() => {
-          panel = undefined;
-          host.cancel('The Moderado view was closed.');
-        });
-        restored.webview.onDidReceiveMessage((message) => {
-          if (!message || typeof message !== 'object') return;
-          if (message.type === 'prompt' && typeof message.text === 'string') {
-            void runPrompt(message.text);
-            return;
-          }
-          if (message.type === 'cancel') {
-            host.cancel();
-            return;
-          }
-          if (message.type === 'approval' && typeof message.requestId === 'string') {
-            const settle = pendingApprovals.get(message.requestId);
-            if (!settle) return;
-            settle({
-              requestId: message.requestId,
-              status: message.status === 'approved' ? 'approved' : 'denied',
-            });
-          }
-        });
-        render();
-      },
-    }),
-  );
-
-  /** Renders the current chat state into an open panel, if there is one. */
+  /** Renders the current chat state into the open sidebar view, if there is one. */
   function render(): void {
-    if (!panel) return;
+    if (!chatView) return;
     // The document is written once. Later updates are pushed into the live DOM,
     // because reassigning `webview.html` destroys and rebuilds the whole webview:
     // doing that per streamed token wiped the composer and stole focus, so the
     // user could not type at all while a reply was arriving.
     if (!documentRendered) {
-      panel.webview.html = chatHtml(view, previewText);
+      chatView.webview.html = chatHtml(view, previewText);
       documentRendered = true;
       return;
     }
-    void panel.webview.postMessage({ type: 'update', ...viewSnapshot(view, previewText) });
+    void chatView.webview.postMessage({ type: 'update', ...viewSnapshot(view, previewText) });
   }
 
   function append(entry: TranscriptEntry): void {

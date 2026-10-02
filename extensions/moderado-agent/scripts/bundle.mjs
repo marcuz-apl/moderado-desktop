@@ -103,6 +103,7 @@ fs.writeFileSync(
     showQuickPick: async () => undefined,
     showTextDocument: async () => undefined,
     createWebviewPanel: () => ({ webview: { onDidReceiveMessage() {}, postMessage() {} }, onDidDispose() {}, dispose() {} }),
+    registerWebviewViewProvider: () => ({ dispose() {} }),
     registerWebviewPanelSerializer: () => ({ dispose() {} }),
   },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => undefined, getCommands: () => [] },

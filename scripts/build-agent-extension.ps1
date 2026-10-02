@@ -44,6 +44,12 @@ if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse 
 # the agent is self-contained and nothing should resolve at runtime.
 Copy-Item -LiteralPath (Join-Path $extension 'package.json') -Destination $target -Force
 Copy-Item -LiteralPath (Join-Path $extension 'dist') -Destination (Join-Path $target 'dist') -Recurse -Force
+# The activity bar icon is referenced by package.json contributes.viewsContainers.
+# Without it the sidebar container cannot render.
+$assets = Join-Path $extension 'assets'
+if (Test-Path -LiteralPath $assets) {
+  Copy-Item -LiteralPath $assets -Destination (Join-Path $target 'assets') -Recurse -Force
+}
 
 $bundled = Join-Path $target 'dist\extension.js'
 if (!(Test-Path -LiteralPath $bundled)) { throw 'Agent bundle was not installed.' }

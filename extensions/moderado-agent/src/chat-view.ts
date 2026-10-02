@@ -59,6 +59,7 @@ export function approvalHtml(
             <h2>Approval required</h2>
             <p>${escapeHtml(pending.actionSummary)}</p>
             <pre>${escapeHtml(preview(pending))}</pre>
+            <button id="full-diff" type="button">Show full change</button>
             <button id="allow" type="button">Allow</button>
             <button id="deny" type="button">Deny</button>
           </section>`;
@@ -75,7 +76,10 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <title>Moderado</title>
 <style>
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0.75rem; }
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0.75rem; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+  /* The transcript takes the remaining space so the composer stays pinned to the
+     bottom of the sidebar rather than sitting mid-panel. */
+  #scroll { flex: 1; overflow-y: auto; min-height: 0; }
   ul { list-style: none; padding: 0; }
   li { border-left: 3px solid var(--vscode-panel-border); margin: 0.4rem 0; padding-left: 0.6rem; }
   li.error { border-color: var(--vscode-errorForeground); }
@@ -90,7 +94,9 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
 </style>
 </head>
 <body>
-<ul id="transcript">${snapshot.rows}</ul>
+<div id="scroll">
+  <ul id="transcript">${snapshot.rows}</ul>
+</div>
 <div id="approval-host">${snapshot.approval}</div>
 <form id="composer">
   <label class="sr-only" for="prompt">Ask Moderado</label>
@@ -105,12 +111,15 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
   const cancel = document.getElementById('cancel');
   const transcript = document.getElementById('transcript');
   const approvalHost = document.getElementById('approval-host');
+  const scroll = document.getElementById('scroll');
 
   function bindApproval(pendingId) {
     const allow = document.getElementById('allow');
     const deny = document.getElementById('deny');
+    const full = document.getElementById('full-diff');
     if (allow) allow.addEventListener('click', () => vscode.postMessage({ type: 'approval', requestId: pendingId, status: 'approved' }));
     if (deny) deny.addEventListener('click', () => vscode.postMessage({ type: 'approval', requestId: pendingId, status: 'denied' }));
+    if (full) full.addEventListener('click', () => vscode.postMessage({ type: 'preview', requestId: pendingId }));
   }
 
   document.getElementById('composer').addEventListener('submit', (event) => {
@@ -134,6 +143,7 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
     send.disabled = update.running;
     cancel.disabled = !update.running;
     if (update.pendingId) bindApproval(update.pendingId);
+    scroll.scrollTop = scroll.scrollHeight;
   });
 </script>
 </body>

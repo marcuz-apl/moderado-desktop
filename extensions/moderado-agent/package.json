@@ -17,6 +17,25 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "moderado",
+          "title": "Moderado",
+          "icon": "assets/moderado.svg"
+        }
+      ]
+    },
+    "views": {
+      "moderado": [
+        {
+          "type": "webview",
+          "id": "moderado.chatView",
+          "name": "Agent Chat",
+          "icon": "assets/moderado.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "moderado.openChat",

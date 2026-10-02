@@ -66,6 +66,20 @@ describe('chat view', () => {
     expect(snap.pendingId).toBe('req-1');
     expect(snap.approval).toContain('Allow');
     expect(snap.approval).toContain('Deny');
+    // The sidebar is too narrow for a full diff, so it must offer to open one.
+    expect(snap.approval).toContain('id="full-diff"');
+  });
+
+  it('offers the full-change action only for a pending approval', () => {
+    const html = chatHtml(state(), preview);
+    expect(html).not.toContain('id="full-diff"');
+    expect(html).toContain('id="prompt"');
+  });
+
+  it('keeps the composer pinned below a scrollable transcript', () => {
+    const html = chatHtml(state(), preview);
+    expect(html).toContain('id="scroll"');
+    expect(html.indexOf('id="scroll"')).toBeLessThan(html.indexOf('id="composer"'));
   });
 
   it('escapes approval previews, which contain file paths and diffs', () => {
