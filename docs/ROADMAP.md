@@ -57,6 +57,33 @@ release, Credential Manager references, and a coordinated `config.json` writer.
 - Protect malformed and older profile data with validated, recoverable
   migrations.
 
+## M3 status (implemented; verified against the pinned CLI)
+
+Desktop now reads and writes the shared `~/.moderado` profile through a
+canonical, coordinated path. Round-trip tests run against the *actual* CLI
+`dist` from the pinned revision rather than a hand-written copy of its schema,
+so they would fail if the two editions diverged.
+
+Delivered here:
+
+- `src/profile.ts` — canonical workspace root, missing-vs-invalid config
+  detection, field-preserving merge, skill discovery.
+- `src/credentials.ts` — the CLI's `moderado/provider/<id>` normalization and
+  resolution order, plus a Windows Credential Manager store that passes the key
+  only on stdin and never on a command line.
+- `src/coordination.ts` — a lock file plus an in-lock re-read, so a concurrent
+  CLI write is merged rather than lost, and an owned-field conflict refuses to
+  overwrite instead of clobbering.
+- `src/sessions.ts` — the CLI's session schema and directory hash, atomic writes,
+  corrupt-record reporting, and a checked save that refuses to overwrite a
+  session another process changed.
+
+**Still open:** the CLI does not take Desktop's lock, so the coordination
+protects Desktop's own writes and detects the CLI's, but it cannot prevent a
+CLI write that lands between Desktop's read and its write. Making both editions
+follow one protocol needs a separate, reviewed change in the CLI repository,
+which this project must not make.
+
 ## M4 — Release readiness
 
 - Run offline suites and Windows real-editor workflow checks.

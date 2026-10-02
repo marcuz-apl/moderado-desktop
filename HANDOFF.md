@@ -2,8 +2,8 @@
 
 Updated: 2026-10-01 UTC
 Branch: master  
-Commit: `e007516` (resolve with `git log -1`)  
-Status: M1 evidence complete and committed; M2 agent integrated and verified
+Commit: `6093624` (resolve with `git log -1`)  
+Status: M1–M3 implemented and verified; M3 coordination limit documented
 
 ## Summary
 
@@ -247,6 +247,58 @@ dead code (`0 && (module.exports = …)`), the entry resolved `require` against
 esbuild's generated `main.node_modules` directory, and the exported global was
 never defined. `scripts/bundle.mjs` now asserts a reachable `module.exports` and
 smoke-loads the bundle against a stubbed host before exiting.
+
+### Milestone 3 evidence (shared profile compatibility)
+
+**Round-trip against the pinned CLI.** `test/profile.test.ts` loads the sibling
+CLI's compiled `apps/cli/dist/sessions.js` and exchanges real records:
+
+| Case | Result |
+| --- | --- |
+| Desktop reads a session the CLI wrote | PASS |
+| The CLI reads a session Desktop wrote | PASS |
+| Both resolve the same session directory for one workspace | PASS |
+| Both accept/reject the same session records | PASS |
+
+A CLI-written record is found by Desktop in the CLI's own hash directory, and a
+Desktop-written record is listed by the CLI's `listSessions`. The tests skip
+themselves if the CLI `dist` is absent rather than silently passing.
+
+**Credential references.** `credentialReference` reproduces the CLI's
+normalization exactly (trim, lowercase, each run outside `[a-z0-9_-]` becomes one
+hyphen) and `resolveCredential` preserves its precedence: environment, then
+credential reference, then legacy plaintext. `WindowsCredentialStore` reaches
+Credential Manager through an encoded PowerShell bridge spawned with
+`shell: false`; the key travels only over stdin, and failures raise a message
+that names neither the secret nor the reference.
+
+**Coordinated config writes.** `updateConfigCoordinated` takes a `wx` lock file,
+re-reads `config.json` *inside* the lock, and merges one level deep so a sibling's
+connection is not dropped. Where Desktop declares a field it owns, `expected`
+detects that another process changed it and refuses to write, leaving the other
+process's value intact. The lock is removed afterwards and an abandoned lock
+older than the timeout is reclaimed.
+
+**Session conflicts.** `saveSessionChecked` compares the `updatedAt` Desktop last
+read against what is on disk. On a mismatch it refuses and reports a
+`session_conflict` event, and the test asserts the CLI's message survives. The
+comparison is on the recorded timestamp rather than file mtime because mtime
+granularity is too coarse to catch a same-millisecond write.
+
+**Skills.** `discoverSkills` reads `skills/<name>/SKILL.md` from the shared
+tree, bounds the size, and reports empty or unreadable entries instead of
+dropping them silently. Skill bodies remain untrusted content.
+
+**Suite.** `npx vitest run`: **58 passed / 58** across 3 files (12 approval, 31
+profile/session including the CLI round-trips, 15 host). `tsc --noEmit` exits 0.
+The bundle is about 403 KiB and the extension activates in the real editor host
+with all six commands registered.
+
+**Known limit.** The CLI does not participate in Desktop's lock. Desktop's write
+is therefore atomic and conflict-aware, and it re-reads under the lock, but a CLI
+write landing between Desktop's read and its write can still be lost. Closing
+that requires a protocol both editions follow, delivered as a separate reviewed
+CLI change.
 
 ### Milestone 2 follow-ups
 

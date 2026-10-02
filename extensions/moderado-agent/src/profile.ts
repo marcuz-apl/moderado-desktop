@@ -136,3 +136,47 @@ export function profileLayout(customHome?: string) {
     desktop: path.join(root, 'desktop'),
   };
 }
+
+export interface DiscoveredSkill {
+  name: string;
+  body: string;
+}
+
+/** Guard against a skill file that would flood the prompt. */
+const MAX_SKILL_BYTES = 256 * 1024;
+
+/**
+ * Discovers user-installed skills from the shared `skills/` tree.
+ *
+ * A skill body is untrusted user content, not authority: it is validated and
+ * bounded here, and the caller must still treat it as data rather than
+ * instructions it must obey.
+ */
+export function discoverSkills(customHome?: string): { skills: DiscoveredSkill[]; invalid: string[] } {
+  const dir = path.join(moderadoHome(customHome), 'skills');
+  const skills: DiscoveredSkill[] = [];
+  const invalid: string[] = [];
+  if (!fs.existsSync(dir)) return { skills, invalid };
+
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(dir, entry.name, 'SKILL.md');
+    try {
+      const stat = fs.statSync(file);
+      if (stat.size > MAX_SKILL_BYTES) {
+        invalid.push(`${entry.name}: larger than ${MAX_SKILL_BYTES} bytes`);
+        continue;
+      }
+      const body = fs.readFileSync(file, 'utf8');
+      if (!body.trim()) {
+        invalid.push(`${entry.name}: SKILL.md is empty`);
+        continue;
+      }
+      skills.push({ name: entry.name, body });
+    } catch {
+      invalid.push(`${entry.name}: SKILL.md could not be read`);
+    }
+  }
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+  return { skills, invalid };
+}

@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { AgentEvent, ApprovalRequest } from '@moderado/contracts';
 import { AgentHost } from './host.js';
 import { RawDecision } from './approval.js';
-import { mergeConfig } from './profile.js';
+import { configPath, mergeConfig } from './profile.js';
+import { updateConfigCoordinated } from './coordination.js';
 
 /**
  * Extension entry point.
@@ -171,10 +172,17 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       if (!picked) return;
       const modelId = picked.split(' — ')[0];
-      const result = mergeConfig({ defaultModel: modelId });
-      vscode.window.showInformationMessage(
-        result.written ? `Default model set to ${modelId}.` : result.reason ?? 'Could not save the choice.',
-      );
+      // Coordinated write: the shared config may have changed in the CLI.
+      const result = updateConfigCoordinated(configPath(), { defaultModel: modelId });
+      if (result.written) {
+        vscode.window.showInformationMessage(`Default model set to ${modelId}.`);
+        return;
+      }
+      if (result.conflict) {
+        vscode.window.showWarningMessage(result.conflict.reason);
+        return;
+      }
+      vscode.window.showErrorMessage(result.reason ?? 'Could not save the choice.');
     }),
     vscode.commands.registerCommand('moderado.configureProvider', async () => {
       // Provider secrets are never typed into an editor setting or sent to a
@@ -189,7 +197,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const displayName = await vscode.window.showInputBox({ prompt: 'Display name', value: id.trim() });
       if (!displayName?.trim()) return;
 
-      const result = mergeConfig({
+      const result = updateConfigCoordinated(configPath(), {
         connections: {
           [id.trim()]: {
             id: id.trim(),
@@ -200,11 +208,15 @@ export function activate(context: vscode.ExtensionContext): void {
         },
         activeConnectionId: id.trim(),
       });
-      vscode.window.showInformationMessage(
-        result.written
-          ? `Saved connection '${displayName.trim()}'.`
-          : result.reason ?? 'Could not save the connection.',
-      );
+      if (result.written) {
+        vscode.window.showInformationMessage(`Saved connection '${displayName.trim()}'.`);
+        return;
+      }
+      if (result.conflict) {
+        vscode.window.showWarningMessage(result.conflict.reason);
+        return;
+      }
+      vscode.window.showErrorMessage(result.reason ?? 'Could not save the connection.');
     }),
     vscode.commands.registerCommand('moderado.showSessions', async () => {
       const { sessions, invalid } = host.listSessions();

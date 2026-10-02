@@ -10,9 +10,12 @@ successfully and have passed editor-host, install/uninstall, and clean-account
 checks. The pinned Moderado agent is vendored and bundled into a Desktop
 extension that activates in a real extension host, with a fail-closed approval
 boundary, a chat view, model selection, and session persistence in the shared
-`~/.moderado` profile. No live provider adapter is connected and cross-process
-profile round-trip is not yet verified. There is no published release and no
-signature. `VERSION` does not announce a published Desktop build.
+`~/.moderado` profile. Sessions and configuration round-trip against the pinned
+CLI in tests, and Desktop writes the shared config under a lock with conflict
+detection. The CLI does not yet participate in that lock, so a simultaneous CLI
+write can still be lost; no live provider adapter is connected and there is no
+published release or signature. `VERSION` does not announce a published Desktop
+build.
 
 ## Relationship to Moderado CLI
 

@@ -139,3 +139,56 @@ export class SessionStore {
 export function conversationOf(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m) => m.role !== 'system');
 }
+
+export type SessionSaveResult =
+  | { saved: true; session: StoredSession }
+  | { saved: false; conflict: { reason: string; existing: StoredSession | null } };
+
+/**
+ * Saves a session, refusing to clobber a concurrent edit.
+ *
+ * Atomic rename prevents a partial file, but two active processes editing one
+ * session ID would still silently overwrite each other's conversation. Desktop
+ * therefore compares the `updatedAt` it last saw against what is on disk now,
+ * and if the file moved underneath it, reports a conflict instead of writing.
+ *
+ * The comparison is on the recorded timestamp rather than the filesystem mtime
+ * because mtime granularity is too coarse to be reliable here, and a
+ * same-millisecond write by the other process would otherwise be missed.
+ */
+export function saveSessionChecked(
+  store: SessionStore,
+  session: StoredSession,
+  options: { knownUpdatedAt?: string } = {},
+): SessionSaveResult {
+  const target = store.getSessionPath(session);
+  const onDisk = safeParse(target);
+
+  if (options.knownUpdatedAt !== undefined && onDisk && onDisk.updatedAt !== options.knownUpdatedAt) {
+    return {
+      saved: false,
+      conflict: {
+        reason:
+          'This session was changed by another process since Desktop last read it. Desktop did not overwrite it.',
+        existing: onDisk,
+      },
+    };
+  }
+
+  const saved = store.save(session);
+  return { saved: true, session: saved };
+}
+
+/** Parses a session file, or null when it is absent or does not validate. */
+function safeParse(file: string): StoredSession | null {
+  try {
+    return StoredSessionSchema.parse(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+/** The stamp to pass to `saveSessionChecked` after reading or writing a session. */
+export function sessionStamp(session: StoredSession): string {
+  return session.updatedAt;
+}

@@ -11,7 +11,7 @@ import {
 } from '@moderado/contracts';
 import { ApprovalCoordinator, RawDecision } from './approval.js';
 import { canonicalWorkspaceRoot, readConfig } from './profile.js';
-import { SessionStore, StoredSession, conversationOf, createSession } from './sessions.js';
+import { SessionStore, StoredSession, conversationOf, createSession, saveSessionChecked } from './sessions.js';
 
 export interface AgentHostOptions {
   workspaceRoot: string;
@@ -160,16 +160,33 @@ export class AgentHost implements IApprovalHandler {
       const usage = result.usage;
       let saved: StoredSession;
       try {
-        saved = this.sessions.save({
-          ...session,
-          modelId: result.selectedModel.id,
-          mode: input.planMode ? 'Plan' : session.mode,
-          messages: conversationOf(result.messages),
-          usage: usage
-            ? SessionStore.applyUsage(session.usage, usage, true)
-            : session.usage,
-        });
-        this.current = saved;
+        // Checked save: if the CLI touched this session since it was read, the
+        // write is refused rather than silently losing one side's conversation.
+        const attempt = saveSessionChecked(
+          this.sessions,
+          {
+            ...session,
+            modelId: result.selectedModel.id,
+            mode: input.planMode ? 'Plan' : session.mode,
+            messages: conversationOf(result.messages),
+            usage: usage ? SessionStore.applyUsage(session.usage, usage, true) : session.usage,
+          },
+          { knownUpdatedAt: session.updatedAt },
+        );
+        if (!attempt.saved) {
+          this.options.onEvent({
+            type: 'error',
+            code: 'session_conflict',
+            message: attempt.conflict.reason,
+            recoverable: true,
+            timestamp: Date.now(),
+          });
+          saved = attempt.conflict.existing ?? session;
+          this.current = saved;
+        } else {
+          saved = attempt.session;
+          this.current = saved;
+        }
       } catch (error) {
         this.options.onEvent({
           type: 'error',
