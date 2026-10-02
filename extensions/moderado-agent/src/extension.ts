@@ -9,6 +9,7 @@ import {
   credentialManagerAvailable,
   credentialReference,
 } from './credentials.js';
+import { ChatViewState, TranscriptEntry, chatHtml, viewSnapshot } from './chat-view.js';
 
 export interface ModeradoApi {
   /** Starts one bounded agent turn. Any mutation still requires human approval. */
@@ -32,6 +33,8 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
   const pendingApprovals = new Map<string, (raw: RawDecision | undefined) => void>();
   const view: ChatViewState & { planMode: boolean } = { transcript: [], running: false, pendingApproval: null, planMode: false };
   let panel: vscode.WebviewPanel | undefined;
+  // True once the webview document has been written; see render().
+  let documentRendered = false;
 
   // Prefer the real editor workspace root so a session directory matches what the
   // CLI would derive for the same folder.
@@ -136,6 +139,7 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
     panel = created;
     created.onDidDispose(() => {
       panel = undefined;
+      documentRendered = false;
       // Closing the view must deny anything still awaiting a decision.
       host.cancel('The Moderado view was closed.');
     });
@@ -289,6 +293,8 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
     vscode.window.registerWebviewPanelSerializer('moderado.chat', {
       async deserializeWebviewPanel(restored) {
         panel = restored;
+        // A restored panel has no document yet, so the next render must write it.
+        documentRendered = false;
         restored.onDidDispose(() => {
           panel = undefined;
           host.cancel('The Moderado view was closed.');
@@ -320,7 +326,16 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
   /** Renders the current chat state into an open panel, if there is one. */
   function render(): void {
     if (!panel) return;
-    panel.webview.html = chatHtml(view);
+    // The document is written once. Later updates are pushed into the live DOM,
+    // because reassigning `webview.html` destroys and rebuilds the whole webview:
+    // doing that per streamed token wiped the composer and stole focus, so the
+    // user could not type at all while a reply was arriving.
+    if (!documentRendered) {
+      panel.webview.html = chatHtml(view, previewText);
+      documentRendered = true;
+      return;
+    }
+    void panel.webview.postMessage({ type: 'update', ...viewSnapshot(view, previewText) });
   }
 
   function append(entry: TranscriptEntry): void {
@@ -357,98 +372,6 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
     listSessions: () => host.listSessions(),
     cancel: (reason?: string) => host.cancel(reason),
   };
-}
-
-interface TranscriptEntry {
-  kind: 'user' | 'assistant' | 'tool' | 'error';
-  label: string;
-  text: string;
-}
-
-interface ChatViewState {
-  transcript: TranscriptEntry[];
-  running: boolean;
-  pendingApproval: ApprovalRequest | null;
-}
-
-/**
- * Minimal, dependency-free chat webview.
- *
- * The renderer is treated as untrusted: it receives already-validated events and
- * sends only a prompt, a cancel, or an approval answer keyed by request id. It is
- * never given a credential and can never grant its own tool permission.
- */
-function chatHtml(state: ChatViewState): string {
-  const escape = (value: unknown) =>
-    String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-
-  const rows = state.transcript
-    .map((entry) => `<li class="${escape(entry.kind)}"><span class="who">${escape(entry.label)}</span><pre>${escape(entry.text)}</pre></li>`)
-    .join('');
-
-  const approval = state.pendingApproval
-    ? `<section class="approval" role="alertdialog" aria-label="Approval required">
-         <h2>Approval required</h2>
-         <p>${escape(state.pendingApproval.actionSummary)}</p>
-         <pre>${escape(previewText(state.pendingApproval))}</pre>
-         <button id="allow" type="button">Allow</button>
-         <button id="deny" type="button">Deny</button>
-       </section>`
-    : '';
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
-<title>Moderado</title>
-<style>
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0.75rem; }
-  ul { list-style: none; padding: 0; }
-  li { border-left: 3px solid var(--vscode-panel-border); margin: 0.4rem 0; padding-left: 0.6rem; }
-  li.error { border-color: var(--vscode-errorForeground); }
-  li.tool { border-color: var(--vscode-charts-blue); }
-  .who { font-size: 0.75rem; text-transform: uppercase; opacity: 0.7; }
-  pre { white-space: pre-wrap; word-break: break-word; margin: 0.2rem 0 0; font-family: inherit; }
-  .approval { border: 1px solid var(--vscode-focusBorder); padding: 0.75rem; margin-top: 1rem; }
-  .approval h2 { font-size: 1rem; margin: 0 0 0.4rem; }
-  form { display: flex; gap: 0.4rem; margin-top: 0.75rem; }
-  input[type="text"] { flex: 1; padding: 0.4rem; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
-  button { padding: 0.4rem 0.8rem; }
-</style>
-</head>
-<body>
-<ul id="transcript">${rows}</ul>
-${approval}
-<form id="composer">
-  <label class="sr-only" for="prompt">Ask Moderado</label>
-  <input id="prompt" type="text" placeholder="Ask Moderado" autocomplete="off" ${state.running ? 'disabled' : ''} />
-  <button type="submit" ${state.running ? 'disabled' : ''}>Send</button>
-  <button type="button" id="cancel" ${state.running ? '' : 'disabled'}>Cancel</button>
-</form>
-<script>
-  const vscode = acquireVsCodeApi();
-  let pendingId = ${JSON.stringify(state.pendingApproval?.requestId ?? null)};
-  document.getElementById('composer').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const input = document.getElementById('prompt');
-    const text = input.value.trim();
-    if (!text) return;
-    vscode.postMessage({ type: 'prompt', text });
-    input.value = '';
-  });
-  document.getElementById('cancel').addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
-  const allow = document.getElementById('allow');
-  const deny = document.getElementById('deny');
-  if (allow) allow.addEventListener('click', () => vscode.postMessage({ type: 'approval', requestId: pendingId, status: 'approved' }));
-  if (deny) deny.addEventListener('click', () => vscode.postMessage({ type: 'approval', requestId: pendingId, status: 'denied' }));
-</script>
-</body>
-</html>`;
 }
 
 function previewText(request: ApprovalRequest): string {
