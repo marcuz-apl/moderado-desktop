@@ -348,13 +348,14 @@ identity, license notices, and the bundled agent. It writes
 `release-verification.json` with `signed: false` and `published: false`, and
 fails loudly rather than reporting a clean run.
 
-All 17 checks pass against the artifacts built on 2026-10-02:
+All 17 checks pass against the artifacts built on 2026-10-02 for
+`v0.1.0+2610023`:
 
 | Artifact | Bytes | SHA-256 (first 16) |
 | --- | --- | --- |
-| `Moderado Desktop-win32-x64-1.135.06055.zip` | 312749508 | `CD4B8F5DA1DD2882` |
-| `Moderado DesktopSetup-x64-1.135.06055.exe` | 213095670 | `7179D82FA82C2FB8` |
-| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 213096048 | `52FB291B54071822` |
+| `Moderado Desktop-win32-x64-1.135.06055.zip` | 312750536 | `6AC67FD55B36EE10` |
+| `Moderado DesktopSetup-x64-1.135.06055.exe` | 213116731 | `DF1BB2D3B8A8DB79` |
+| `Moderado DesktopUserSetup-x64-1.135.06055.exe` | 213117106 | `75E969D132C860FA` |
 
 **Two defects found and fixed while finishing M4.**
 
@@ -392,6 +393,23 @@ with the extension taken from the packaged output.
 
 `exthost.log` records `ExtensionService#_doActivateExtension
 moderado.moderado-agent`, confirming a real host rather than a stub.
+
+**Build flakiness observed (not a source defect).** Three consecutive full
+rebuilds failed before one succeeded, each with a different upstream error and
+none reproducible in isolation:
+
+1. `npm list --production` exiting non-zero inside `@vscodium/vsce` while
+   packaging extensions (`ELSPROBLEMS`, `tslib` reported missing). Re-running
+   all 65 non-esbuild extensions through the identical `vsce.listFiles` call
+   produced 0 failures.
+2. `tsgo exited with code 2` during `vscode-min-prepack`. Running the same
+   TS7 project typecheck directly over every extension `tsconfig.json`
+   produced `FAILCOUNT=0`.
+
+Clearing stale `*.tsbuildinfo` under `extensions/` before the rebuild, then
+retrying, succeeded. Treat a single `build-m1.ps1` failure as inconclusive
+until the same command has been retried and the failing step has been
+reproduced directly.
 
 **Suites.** `npx vitest run` 58/58 passed; `tsc --noEmit` exits 0.
 
