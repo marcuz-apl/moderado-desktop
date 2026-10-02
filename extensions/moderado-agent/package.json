@@ -35,6 +35,10 @@
         "title": "Moderado: Cancel Current Run"
       },
       {
+        "command": "moderado.showSessions",
+        "title": "Moderado: Show Recorded Sessions"
+      },
+      {
         "command": "moderado.togglePlanMode",
         "title": "Moderado: Toggle Plan Mode"
       }

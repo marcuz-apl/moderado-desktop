@@ -39,11 +39,13 @@ recorded in `vendor/moderado/VENDORED.json`). The export uses `git archive`, so
 the sibling CLI working tree is never modified.
 
 `extensions/moderado-agent/` bundles those packages with Desktop's host into a
-single CommonJS bundle for the editor host. Verification is recorded in
+single CommonJS bundle for the editor host. It provides the chat view, the
+fail-closed approval boundary, model selection, and session persistence against
+the shared `~/.moderado` profile. Verification is recorded in
 [HANDOFF.md](HANDOFF.md).
 
-Provider configuration, session persistence, and the streaming chat UI remain
-unbuilt; they are listed under Milestone 2 follow-ups.
+Milestone 3 still needs the cross-process round-trip against a pinned CLI
+release, Credential Manager references, and a coordinated `config.json` writer.
 
 ## M3 — Shared profile compatibility
 

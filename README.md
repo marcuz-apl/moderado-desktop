@@ -8,10 +8,11 @@ and approval UI. End users will not need to install Moderado CLI.
 **Status:** A local Windows x64 editor package and installers build
 successfully and have passed editor-host, install/uninstall, and clean-account
 checks. The pinned Moderado agent is vendored and bundled into a Desktop
-extension that activates in a real extension host with a fail-closed approval
-boundary. Provider configuration, the chat UI, and sessions are not built yet,
-and there is no published release, no signature, and no live provider
-integration. `VERSION` does not announce a published Desktop build.
+extension that activates in a real extension host, with a fail-closed approval
+boundary, a chat view, model selection, and session persistence in the shared
+`~/.moderado` profile. No live provider adapter is connected and cross-process
+profile round-trip is not yet verified. There is no published release and no
+signature. `VERSION` does not announce a published Desktop build.
 
 ## Relationship to Moderado CLI
 

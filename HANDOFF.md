@@ -217,11 +217,13 @@ closes the gaps the PRD records against the current core:
 - A write or command without a complete preview is denied rather than approved.
 
 **Offline suite.** `npx vitest run` in `extensions/moderado-agent`:
-**17 passed / 17** across 2 files. Coverage includes approval deny on denial,
-timeout, mismatch, closed UI, cancellation and non-interactive contexts; that no
-file is written when approval fails; workspace-jail traversal refusal; and a
-bounded agent turn against the vendored core using its fake provider, asserting
-free-first routing selects `mock/free-tool-model` rather than the paid model.
+**38 passed / 38** across 3 files (12 approval, 11 profile, 15 host). Coverage
+includes approval deny on denial, timeout, mismatch, closed UI, cancellation and
+non-interactive contexts; that no file is written when approval fails;
+workspace-jail traversal refusal; a bounded agent turn against the vendored core
+using its fake provider, asserting free-first routing selects
+`mock/free-tool-model` rather than the paid model; session persistence and resume
+against an isolated fixture home; and corrupt-config / corrupt-session handling.
 
 **Typecheck and bundle.** `npx tsc --noEmit` exits 0. `npm run compile`
 (esbuild) emits `dist/extension.js` + `dist/agent-core.js`, about 256 KiB total,
@@ -248,15 +250,30 @@ smoke-loads the bundle against a stubbed host before exiting.
 
 ### Milestone 2 follow-ups
 
-- The chat UI is not built. `moderado.openChat` prompts via an input box and
-  reports the run result; there is no streaming transcript view, no diff
-  renderer, and no webview approval surface. Approvals currently use a modal
-  dialog so they remain keyboard- and screen-reader-reachable.
-- `moderado.selectModel`, `moderado.configureProvider`, and
-  `moderado.togglePlanMode` are placeholders. Provider setup, Credential Manager
-  key resolution, and model discovery/selection are not wired, and no real
-  provider adapter is connected — runs use the vendored fake provider.
-- Sessions are not persisted or resumed; that is Milestone 3.
+- **Profile and session layer added.** `src/profile.ts` canonicalizes the
+  workspace root (resolving symlinks, Windows verbatim prefixes, drive-letter
+  case, and trailing separators) and reads the shared `config.json`,
+  distinguishing *missing* from *invalid* so a corrupt profile is never
+  overwritten with defaults. `mergeConfig` merges Desktop-owned fields onto the
+  parsed document, so unknown CLI fields survive. `src/sessions.ts` mirrors the
+  CLI's `StoredSessionSchema` and directory hash, writes atomically, and reports
+  corrupt session records instead of silently skipping them.
+- **Chat surface added.** A dependency-free webview renders the transcript,
+  coalesces streamed assistant deltas, and presents approvals as Allow/Deny
+  buttons; a modal dialog remains the fallback when no view is open. Closing the
+  view denies anything still pending.
+- `moderado.configureProvider` records only non-secret connection fields. API
+  keys are never typed into an editor setting or sent to a renderer; Credential
+  Manager references are not yet written, and no real provider adapter is
+  connected — runs use the vendored fake provider.
+- Sessions persist and resume, but only within Desktop. Cross-process
+  round-trip against a pinned CLI release, including the workspace-hash
+  compatibility question, is the next milestone's work.
+- **Test-isolation defect found and fixed.** Two run tests omitted the isolated
+  `moderadoHome` fixture and briefly wrote session files into the developer's
+  real `~/.moderado`. Both now pass an isolated temporary home, and a test run
+  was confirmed to leave the real profile unchanged (447 files before and after).
+  Any future run test must pass `moderadoHome`.
 - The rebuilt editor package that would carry the final AppIDs and this
   extension has not been produced. The extension is verified against the
   unpacked M1 editor, not a newly installed Desktop package.

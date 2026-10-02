@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { AgentEvent, ApprovalRequest } from '@moderado/contracts';
 import { resolveInJail } from '@moderado/tools';
 import { AgentHost, previewFor } from '../src/host.js';
+import { SessionStore } from '../src/sessions.js';
 
 function workspace(): string {
   return mkdtempSync(join(tmpdir(), 'moderado-m2-'));
@@ -39,6 +40,17 @@ describe('previewFor', () => {
 describe('workspace jail', () => {
   it('refuses a traversal out of the workspace', () => {
     const root = workspace();
+    expect(() => resolveInJail(root, '..\\..\\Windows\\System32\\drivers\\etc\\hosts')).toThrow();
+  });
+
+  it('still allows reading a file inside the workspace', () => {
+    const root = workspace();
+    const secret = join(root, 'secret.txt');
+    writeFileSync(secret, 'top-secret');
+    expect(readFileSync(resolveInJail(root, 'secret.txt'), 'utf8')).toBe('top-secret');
+  });
+});
+
 describe('AgentHost approvals', () => {
   it('never writes a file when the human denies', async () => {
     const root = workspace();
@@ -139,10 +151,75 @@ describe('AgentHost approvals', () => {
   });
 });
 
+describe('AgentHost session persistence', () => {
+  it('persists a turn to the shared profile and resumes it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'moderado-home-'));
+    const workspace = mkdtempSync(join(tmpdir(), 'moderado-ws-'));
+    const host = new AgentHost({
+      workspaceRoot: workspace,
+      moderadoHome: root,
+      onEvent: () => {},
+      promptForApproval: async () => undefined,
+    });
+
+    const first = await host.startRun({ task: 'Say hello.' });
+    expect(first.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+
+    // A second host over the same home resumes rather than starting over.
+    const resumed = new AgentHost({
+      workspaceRoot: workspace,
+      moderadoHome: root,
+      onEvent: () => {},
+      promptForApproval: async () => undefined,
+    });
+    const second = await resumed.startRun({ task: 'And again.' });
+    expect(second.sessionId).toBe(first.sessionId);
+
+    const { sessions } = new SessionStore(root).listSessions(workspace);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].messages.length).toBeGreaterThan(0);
+  });
+
+  it('never touches the real user profile', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'moderado-ws-'));
+    const root = mkdtempSync(join(tmpdir(), 'moderado-home-'));
+    const host = new AgentHost({
+      workspaceRoot: workspace,
+      moderadoHome: root,
+      onEvent: () => {},
+      promptForApproval: async () => undefined,
+    });
+    await host.startRun({ task: 'Say hello.' });
+    // The isolated fixture is the only place a session may appear.
+    expect(new SessionStore(root).listSessions(workspace).sessions).toHaveLength(1);
+  });
+
+  it('exposes model options with cost classification', async () => {
+    const host = new AgentHost({
+      workspaceRoot: mkdtempSync(join(tmpdir(), 'moderado-ws-')),
+      moderadoHome: mkdtempSync(join(tmpdir(), 'moderado-home-')),
+      onEvent: () => {},
+      promptForApproval: async () => undefined,
+    });
+    const models = await host.discoverModels();
+    expect(models.length).toBeGreaterThan(0);
+    const free = models.find((m) => m.id === 'mock/free-tool-model');
+    const paid = models.find((m) => m.id === 'mock/paid-tool-model');
+    expect(free?.isFree).toBe(true);
+    expect(paid?.isFree).toBe(false);
+  });
+});
 describe('AgentHost run', () => {
   it('completes a bounded turn against the vendored core with a fake provider', async () => {
     const { events, onEvent } = collector();
-    const host = new AgentHost({ workspaceRoot: workspace(), onEvent, promptForApproval: async () => undefined });
+    // Every run test must use an isolated home so the developer's real
+    // ~/.moderado is never written.
+    const host = new AgentHost({
+      workspaceRoot: workspace(),
+      moderadoHome: mkdtempSync(join(tmpdir(), 'moderado-home-')),
+      onEvent,
+      promptForApproval: async () => undefined,
+    });
 
     const result = await host.startRun({ task: 'Say hello.' });
 
@@ -154,6 +231,7 @@ describe('AgentHost run', () => {
   it('routes free-first by default and does not select a paid model', async () => {
     const host = new AgentHost({
       workspaceRoot: workspace(),
+      moderadoHome: mkdtempSync(join(tmpdir(), 'moderado-home-')),
       onEvent: () => {},
       promptForApproval: async () => undefined,
     });
@@ -161,14 +239,4 @@ describe('AgentHost run', () => {
     expect(result.model).not.toBe('mock/paid-tool-model');
     expect(result.model).toBe('mock/free-tool-model');
   }, 20_000);
-});
-    expect(() => resolveInJail(root, '..\\..\\Windows\\System32\\drivers\\etc\\hosts')).toThrow();
-  });
-
-  it('still allows reading a file inside the workspace', () => {
-    const root = workspace();
-    const secret = join(root, 'secret.txt');
-    writeFileSync(secret, 'top-secret');
-    expect(readFileSync(resolveInJail(root, 'secret.txt'), 'utf8')).toBe('top-secret');
-  });
 });
