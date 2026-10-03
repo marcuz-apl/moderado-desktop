@@ -1,9 +1,9 @@
 # Project Handoff
 
-Updated: 2026-10-02 UTC
+Updated: 2026-10-03 UTC
 Branch: master  
-Commit: `992898e` plus the M4 commit recorded below  
-Status: M1–M4 implemented and verified; M4 signing/publication not authorized
+Commit: `dec95db` plus the panel-rendering commit recorded below  
+Status: M1–M4 implemented and verified; sidebar/settings rendering fixed; M4 signing/publication not authorized
 
 ## Summary
 
@@ -36,8 +36,8 @@ is published or signed, and no Moderado agent integration exists yet.
 - Editor-host launch, open-folder, and terminal: PASS.
 - Install and uninstall on the build account: PASS.
 - Clean-account install/uninstall in Windows Sandbox: PASS.
-- Agent extension offline suite: 65/65 passing; typecheck clean.
-- `scripts/verify-release.ps1`: 19/19 checks pass against the 2026-10-02
+- Agent extension offline suite: 144/144 passing; typecheck clean.
+- `scripts/verify-release.ps1`: 28/28 checks pass against the 2026-10-03
   artifacts, including that the shipped zip actually contains the agent.
 
 ## Decisions and context
@@ -582,3 +582,74 @@ channel, and no publication. Publishing requires the owner's explicit
 authorization and has not been requested. A live model call has not been
 verified: provider resolution is implemented and unit-tested offline, but
 every recorded run used the fake provider because no key was configured.
+
+## Sidebar and settings rendering (2026-10-03 UTC)
+
+The reported "ugly and messy" sidebar was a rendering failure, not bad layout
+values. Four defects were found and fixed in `extensions/moderado-agent`.
+
+**1. The whole stylesheet was emitted as visible body text.** In
+`src/chat-view.ts` the `<style>` opening tag sat *below* the CSS, so the browser
+closed `<head>` with the CSS outside any style element: it printed the entire
+stylesheet as literal text in the panel and applied none of it. A stale
+duplicate block (its own `<style>` plus eight repeated rules) followed it. The
+stylesheet is now wrapped correctly and the duplicate deleted. `chatHtml()`
+emits exactly one `<style>`, whose first rule is `body {` and which closes
+before `</head>`.
+
+**2. `.sr-only` was never defined.** It was used by the composer's "Ask
+Moderado" label and by the settings model `<select>`, so both rendered as
+visible text. The rule now exists, and is repeated as `.settings .sr-only`
+because `.settings input, .settings select` is more specific than a bare class
+and would otherwise win `width` and `display`.
+
+**3. `#settings-host` reserved half the sidebar while empty.** The rule is
+`flex: 1`, so with no children it still grew, leaving an invisible spacer above
+the transcript and pushing the chat into the bottom half. `:empty { display:
+none }` collapses it.
+
+**4. Settings shared the panel with the chat.** Opening settings left the
+transcript, composer, auto-approve bar, and footer mounted underneath, each
+taking its own share of the flex column, so the pane was squeezed into a strip.
+A `settings-open` class on `<body>` — rendered server-side and toggled by the
+webview on open/close — hides the chat surface so the pane owns the sidebar.
+The server-side class avoids one frame of the chat surface flashing first.
+
+Regression tests added: "wraps every stylesheet in a style element", "defines
+sr-only so the composer label is not shown", "does not reserve space for an
+empty settings host", and "gives the settings pane the whole sidebar while it
+is open". Both layout tests were confirmed to fail before the CSS was changed.
+
+**Branding was re-checked, not assumed.** An earlier note claimed the build
+still showed the VSCodium logo. That was wrong. In the packaged editor,
+`resources/app/out/media/code-icon.svg` is the Moderado mark (dark disc, white
+"M", orange accent) and the four `letterpress-*.svg` files are the Moderado
+watermark, minified by the build from the branded 918–1087 byte originals.
+VSCodium's own watermark at `.cache/vscodium/src/stable/.../letterpress-dark.svg`
+is a different mark entirely (an irregular `codium_grey_dark_letterpress`
+blob), so the overlay is a real, visible change.
+
+One branding gap remains and is **not** fixed: `apply-branding.ps1` does not
+cover `src/vs/sessions/contrib/chat/browser/media/letterpress-sessions-*.svg`,
+so the Sessions/Chat centre watermark still ships the Code OSS atom glyph.
+
+**Build and verification.** Rebuilt with `scripts/build-m1.ps1` after both
+fixes were committed, because a `-PackingOnly` run is known to drop the agent.
+The packaged bundle was inspected directly:
+`resources/app/extensions/moderado-agent/dist/agent-core.js` contains the fix,
+and inside it `<title>Moderado</title>` is followed immediately by `<style>`.
+
+- `npx vitest run`: 144/144 across 6 files.
+- `npx tsc -p tsconfig.json --noEmit`: exit 0.
+- `scripts/gen-provenance.ps1`, then `scripts/verify-release.ps1`: 28/28 pass.
+  The first verification run failed `provenance:builtFromMatchesManifest` and
+  `provenance:artifactDigests` because `provenance.json` still named the
+  previous commit; regenerating it from the new manifest fixed both.
+- `build-manifest.json`: `builtFromCommit dec95db`, `desktopVersion
+  v0.1.0+2610035`, three artifacts.
+
+**Not verified.** The fixes are confirmed in the source, the bundle, and the
+packaged files. The panel has not been re-opened in a running editor after this
+build, so the visual result is asserted from the emitted markup rather than
+from a screenshot, and a live model call still has not been made. Nothing is
+published or signed.
