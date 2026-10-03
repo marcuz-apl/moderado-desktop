@@ -3,6 +3,10 @@ import {
   buildProviderChoices,
   buildProviderConnection,
   connectionIdFor,
+  buildDiscoveryConnection,
+  presetConnectionId,
+  sortFreeFirst,
+  pickDefaultModel,
 } from '../src/provider-setup.js';
 
 // These encode the CLI's rules, taken from apps/cli/src/ui/provider_connect.ts
@@ -169,5 +173,74 @@ describe('provider setup parity with the CLI', () => {
     expect(() => buildProviderConnection({
       preset: 'custom:removed', apiKey: 'k', defaultModel: 'm', displayName: 'Gone',
     }, { custom: [] })).toThrow(/no longer available/i);
+  });
+});
+
+describe('discovery connections', () => {
+  // Listing models must work *before* a key is entered: OpenRouter and several
+  // other providers serve /models without authentication, and the CLI lists the
+  // free catalog as its first step. Requiring a key here would leave the user
+  // staring at an empty list until they had already saved.
+  it('builds a connection without a key for listing', () => {
+    const built = buildDiscoveryConnection({ preset: 'openrouter' });
+    expect(built.id).toBe('openrouter');
+    expect(built.baseUrl).toBe('https://openrouter.ai/api/v1');
+    expect(built.apiKey).toBeUndefined();
+  });
+
+  it('uses the stored endpoint and model when the profile already has one', () => {
+    const built = buildDiscoveryConnection({
+      preset: 'openrouter',
+      storedBaseUrl: 'https://openrouter.ai/api/v1/',
+      defaultModel: 'meta/llama-3.3-free',
+    });
+    expect(built.baseUrl).toBe('https://openrouter.ai/api/v1');
+    expect(built.defaultModel).toBe('meta/llama-3.3-free');
+  });
+
+  it('prefers the key supplied by the caller', () => {
+    const built = buildDiscoveryConnection({ preset: 'nvidia-nim', apiKey: 'sk-x' });
+    expect(built.kind).toBe('nvidia-nim');
+    expect(built.apiKey).toBe('sk-x');
+  });
+
+  it('needs a base URL only for the generic endpoint', () => {
+    expect(() => buildDiscoveryConnection({ preset: 'openai-compatible' })).toThrow(/base URL/i);
+    expect(buildDiscoveryConnection({ preset: 'ollama' }).baseUrl)
+      .toBe('http://127.0.0.1:11434/v1');
+  });
+
+  it('maps every preset to the connection id the CLI would use', () => {
+    // The id decides both the Credential Manager target and the free-tier policy.
+    expect(presetConnectionId('nvidia-nim')).toBe('nvidia-nim');
+    expect(presetConnectionId('custom:my-gw')).toBe('my-gw');
+  });
+
+  it('orders free models first so the free-first rule is actionable', () => {
+    const ordered = sortFreeFirst([
+      { id: 'paid-a', isFree: false },
+      { id: 'free-b', isFree: true },
+      { id: 'paid-c', isFree: false },
+      { id: 'free-d', isFree: true },
+    ]);
+    expect(ordered.map((m) => m.id)).toEqual(['free-b', 'free-d', 'paid-a', 'paid-c']);
+  });
+
+  it('picks a free model as the default choice when one exists', () => {
+    const models = sortFreeFirst([
+      { id: 'paid-a', isFree: false },
+      { id: 'free-b', isFree: true },
+    ]);
+    expect(pickDefaultModel(models, '')).toBe('free-b');
+  });
+
+  it('keeps an existing default when it is still present', () => {
+    const models = sortFreeFirst([
+      { id: 'free-b', isFree: true },
+      { id: 'paid-a', isFree: false },
+    ]);
+    expect(pickDefaultModel(models, 'paid-a')).toBe('paid-a');
+    // A stale default must not survive as a selection.
+    expect(pickDefaultModel(models, 'gone')).toBe('free-b');
   });
 });

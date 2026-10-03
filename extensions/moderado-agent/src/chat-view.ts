@@ -98,13 +98,7 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
   #open-settings { padding: 0.1rem 0.4rem; line-height: 1; background: none; border: none; color: var(--vscode-foreground); cursor: pointer; font-size: 1.15rem; }
   #open-settings:hover { color: var(--vscode-textLink-foreground); }
   #open-settings:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
-  .settings .saved-list { list-style: none; padding: 0; margin: 0.4rem 0 0; }
-  .settings .saved-list li { border: 1px solid var(--vscode-panel-border); padding: 0.4rem 0.5rem; margin-bottom: 0.3rem; display: flex; flex-direction: column; gap: 0.1rem; }
-  .settings .saved-list li.active { border-color: var(--vscode-focusBorder); }
-  .settings .saved h3 { font-size: 0.8rem; margin: 0.8rem 0 0.2rem; word-break: break-all; }
-  .settings .saved .name { font-weight: 600; }
-  .settings .saved .meta { font-size: 0.72rem; opacity: 0.8; word-break: break-all; }
-  .settings .saved .active-tag { color: var(--vscode-textLink-foreground); }
+  .settings .active-line { font-size: 0.78rem; margin: 0 0 0.5rem; opacity: 0.85; }
   #settings-host:not(:empty) { border-top: 1px solid var(--vscode-panel-border); padding-top: 0.5rem; }
   .settings label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.8rem; opacity: 0.85; }
   .settings input, .settings select { width: 100%; box-sizing: border-box; padding: 0.35rem; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
@@ -196,13 +190,8 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
       say('Loading models…');
       vscode.postMessage({ type: 'refreshModels', ...readSettings() });
     });
-    // Switching to a connection that already exists in the shared profile only
-    // has to change which one is active.
-    for (const button of document.querySelectorAll('.use-connection')) {
-      button.addEventListener('click', () => vscode.postMessage({ type: 'useConnection', id: button.getAttribute('data-connection') }));
-    }
-    // Changing the preset changes which fields apply, so the host re-renders
-    // the pane rather than the webview guessing at the new shape.
+    // Changing the preset switches provider, so the host reloads that provider's
+    // key state and model list rather than leaving the previous one's on screen.
     if (provider) provider.addEventListener('change', () => vscode.postMessage({ type: 'selectPreset', preset: provider.value }));
   }
 

@@ -47,6 +47,13 @@ export interface SettingsProviderChoice {
   requiresApiKey: boolean;
   /** True for the generic "other endpoint" entry, which needs the extra fields. */
   custom?: boolean;
+  /**
+   * True when this provider already has a credential in Windows Credential
+   * Manager. Only the presence is exposed; the secret never reaches the pane.
+   */
+  hasCredential?: boolean;
+  /** Endpoint already recorded in the profile, if any. */
+  storedBaseUrl?: string;
 }
 
 export interface SettingsState {
@@ -114,14 +121,15 @@ function selectedChoice(state: SettingsState): SettingsProviderChoice | undefine
 /**
  * One `<option>` per model, labelled with its cost tier.
  *
- * The tier stays visible in the label rather than being filtered away, so the
- * free-first rule and the paid/unknown opt-in stay observable in the UI.
+ * The list arrives free-first so the cheapest option is the one at the top, and
+ * the tier stays visible so the free-first rule and the paid/unknown opt-in
+ * remain observable rather than hidden.
  */
 function modelOptions(state: SettingsState): string {
   return state.models
     .map(
       (model) =>
-        `<option value="${escapeHtml(model.id)}"${model.id === state.defaultModel ? ' selected' : ''}>${escapeHtml(`${model.id} — ${model.accessTier}`)}</option>`,
+        `<option value="${escapeHtml(model.id)}"${model.id === state.defaultModel ? ' selected' : ''}>${escapeHtml(`${model.isFree ? '★ ' : ''}${model.id} — ${model.accessTier}`)}</option>`,
     )
     .join('');
 }
@@ -144,32 +152,22 @@ export function settingsPaneHtml(state: SettingsState): string {
   const choice = selectedChoice(state);
   const generic = choice?.custom === true;
   const needsKey = choice?.requiresApiKey ?? true;
+  // Per-provider credential state: picking a provider shows whether that one
+  // already has a key, rather than the previous provider's.
+  const keyStored = choice?.hasCredential ?? false;
 
   const problem = blocked
     ? `<p class="problem" role="alert">${escapeHtml(state.profileError as string)} Fix or move that file before changing settings; Desktop did not read it and will not overwrite it.</p>`
     : '';
 
-  // The shared profile is the source of truth for both applications, so what
-  // the CLI already configured is listed here rather than hidden behind a
-  // one-line summary. Without this, a user who set up providers in the CLI
-  // cannot see or switch to them.
-  const saved = state.savedConnections.length
-    ? `<div class="saved">
-      <h3>From ${escapeHtml(state.profilePath || '~/.moderado/config.json')}</h3>
-      <ul class="saved-list">
-      ${state.savedConnections.map((connection) => `<li${connection.id === state.activeConnectionId ? ' class="active"' : ''}>
-        <span class="name">${escapeHtml(connection.displayName)}</span>
-        <span class="meta">${escapeHtml(connection.id)} · ${escapeHtml(connection.kind)}</span>
-        <span class="meta">${escapeHtml(connection.baseUrl)}</span>
-        <span class="meta">${connection.hasCredential ? 'API key stored' : 'no API key stored'}</span>
-        ${connection.defaultModel ? `<span class="meta">default model: ${escapeHtml(connection.defaultModel)}</span>` : ''}
-        ${connection.id === state.activeConnectionId
-          ? '<span class="meta active-tag">active</span>'
-          : `<button class="use-connection" type="button" data-connection="${escapeHtml(connection.id)}"${disabled}>Use</button>`}
-      </li>`).join('')}
-      </ul>
-    </div>`
-    : `<p class="note">No connections found in ${escapeHtml(state.profilePath || '~/.moderado/config.json')}.</p>`;
+  // The shared profile is the source of truth for both applications, so the
+  // active connection is surfaced compactly. An earlier version rendered every
+  // connection as a card under a full path heading, which dominated the pane;
+  // the details stay available via the command palette and the profile itself.
+  const active = state.savedConnections.find((c) => c.id === state.activeConnectionId);
+  const compactActive = state.activeConnectionId
+    ? `<p class="active-line" title="Shared profile: ${escapeHtml(state.profilePath || '~/.moderado/config.json')}">Using <strong>${escapeHtml(active?.displayName ?? state.activeConnectionId)}</strong>${active?.hasCredential ? ' · key stored' : ''}</p>`
+    : '';
 
   // The key is write-only: an empty field keeps whatever is stored, so the saved
   // key is never rendered back into the pane.
@@ -177,8 +175,8 @@ export function settingsPaneHtml(state: SettingsState): string {
     ? '<p class="note">This local runtime needs no API key.</p>'
     : `<label for="settings-api-key">API key</label>
     <input id="settings-api-key" type="password" autocomplete="off" spellcheck="false"
-           placeholder="${state.apiKeyStored ? 'Stored — leave empty to keep' : 'Paste the key'}"${disabled} />
-    ${state.apiKeyStored ? '<p class="note">A key is already stored in Windows Credential Manager. Leave the field empty to keep it.</p>' : ''}`;
+           placeholder="${keyStored ? 'Stored — leave empty to keep' : 'Paste the key'}"${disabled} />
+    ${keyStored ? `<p class="note">A key is already stored for this provider. Leave the field empty to keep it.</p>` : ''}`;
 
   // Only the generic endpoint has no preset-supplied values to fall back on.
   const extra = generic
@@ -193,7 +191,9 @@ export function settingsPaneHtml(state: SettingsState): string {
 
   const modelField = `<label for="settings-model">Default model</label>
     <select id="settings-model"${disabled}>${modelOptions(state)}</select>
-    ${state.models.length ? '' : '<p class="note">No models discovered yet. Save the connection first, then reload models.</p>'}
+    ${state.models.length
+      ? `<p class="note">★ marks a free model. ${state.models.filter((m) => m.isFree).length} free of ${state.models.length} listed.</p>`
+      : '<p class="note">Models load automatically when you pick a provider.</p>'}
     <p class="note">Free models are preferred. Paid and unknown-cost models stay listed but are only used when allowed.</p>`;
 
   const presetNote = choice ? `<p class="note">${escapeHtml(choice.description)}</p>` : '';
@@ -204,7 +204,7 @@ export function settingsPaneHtml(state: SettingsState): string {
       <button id="close-settings" type="button" aria-label="Close settings">Close</button>
     </header>
     ${problem}
-    ${saved}
+    ${compactActive}
     <label for="settings-provider">Provider</label>
     <select id="settings-provider"${disabled}>${providerOptions(state)}</select>
     ${presetNote}

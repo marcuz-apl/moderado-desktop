@@ -361,6 +361,22 @@ export class AgentHost implements IApprovalHandler {
   }
 
   /**
+   * Whether a model id is free under the engine's policy for a connection.
+   *
+   * A surface that lists models must mark free ones with the same rule routing
+   * uses, or a model shown as free would still be skipped (or vice versa).
+   */
+  isFreeModel(modelId: string, connectionId?: string): boolean {
+    const classification = this.router.classifyModel(modelId);
+    const policy = freeModelPolicyFor(connectionId);
+    return isFreeModelOption(
+      { id: modelId },
+      classification,
+      policy,
+    );
+  }
+
+  /**
    * Lists the discovered models with their cost classification, so the picker
    * can show paid and unknown-cost models behind their explicit opt-ins.
    */

@@ -141,6 +141,92 @@ function isLoopback(hostname: string): boolean {
   return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
 }
 
+// --- Listing models before a connection is saved -------------------------------
+
+/**
+ * The connection id a picker value maps to.
+ *
+ * It is the Credential Manager target and the key `freeModelPolicyFor` resolves
+ * against, so it must match what `buildProviderConnection` would produce.
+ */
+export function presetConnectionId(preset: string): string {
+  if (preset.startsWith('custom:')) return preset.slice('custom:'.length);
+  if (preset === 'openai-compatible') return connectionIdFor('Other OpenAI-compatible provider');
+  return preset;
+}
+
+export interface DiscoveryInput {
+  preset: string;
+  apiKey?: string;
+  /** The endpoint already recorded in the profile, if any. */
+  storedBaseUrl?: string;
+  displayName?: string;
+  defaultModel?: string;
+}
+
+/**
+ * A connection good enough to *list* models, with no key requirement.
+ *
+ * Deliberately more lenient than `buildProviderConnection`: OpenRouter and other
+ * providers serve their catalog without authentication, and the CLI lists the
+ * free models as its first step of the connect flow. Requiring a key here would
+ * show an empty list until the user had already saved a connection they cannot
+ * yet verify.
+ */
+export function buildDiscoveryConnection(
+  input: DiscoveryInput,
+  config?: ConnectProvidersConfig,
+): ProviderConnectionRecord {
+  const choice = findChoice(input.preset, config);
+  if (!choice) throw new Error('That provider is no longer available in the shared profile.');
+
+  const apiKey = input.apiKey?.trim() || undefined;
+  const baseUrl = (input.storedBaseUrl?.trim() || choice.baseUrl || '').replace(/\/+$/, '');
+
+  if (choice.kind === 'nvidia-nim') {
+    return {
+      id: 'nvidia-nim',
+      displayName: choice.label,
+      kind: 'nvidia-nim',
+      baseUrl: choice.baseUrl!,
+      ...(apiKey ? { apiKey } : {}),
+    };
+  }
+
+  if (!baseUrl) throw new Error('A base URL is required before models can be listed.');
+
+  const displayName = input.displayName?.trim() || choice.displayName || choice.label;
+  return {
+    id: presetConnectionId(choice.value),
+    displayName,
+    kind: 'openai-compatible',
+    baseUrl,
+    ...(apiKey ? { apiKey } : {}),
+    ...(input.defaultModel?.trim() || choice.defaultModel
+      ? { defaultModel: (input.defaultModel?.trim() || choice.defaultModel) as string }
+      : {}),
+  };
+}
+
+/**
+ * Free models first, stable within each group.
+ *
+ * The engine's rule is free-first, so the list the user picks from is ordered the
+ * same way; otherwise the cheapest option sits below a wall of paid entries.
+ */
+export function sortFreeFirst<T extends { isFree: boolean }>(models: T[]): T[] {
+  return [...models].sort((a, b) => Number(b.isFree) - Number(a.isFree));
+}
+
+/**
+ * The model to preselect: an explicit choice if it survived, otherwise the first
+ * free one, otherwise the first listed.
+ */
+export function pickDefaultModel<T extends { id: string }>(models: T[], current: string): string {
+  if (current && models.some((model) => model.id === current)) return current;
+  return models[0]?.id ?? '';
+}
+
 /**
  * Validates and normalizes one connection exactly as the CLI's `buildConnection`
  * does, so a connection saved here is readable by the CLI unchanged.

@@ -21,6 +21,10 @@ import {
   ProviderConnectionRecord,
   buildProviderChoices,
   buildProviderConnection,
+  buildDiscoveryConnection,
+  presetConnectionId,
+  sortFreeFirst,
+  pickDefaultModel,
 } from './provider-setup.js';
 import type { ConnectProviderPresetId, ConnectProvidersConfig } from '@moderado/providers';
 import { discoverModelOptions } from './model-discovery.js';
@@ -320,8 +324,93 @@ async function openDiffTab(requestId: string): Promise<void> {
     return { ...(enabled ? { enabled } : {}), ...(custom ? { custom } : {}) };
   }
 
-  async function openSettingsPane(): Promise<void> {
-    await loadSettingsState();
+  /**
+ * Loads the model list for one picker value and preselects a free model.
+ *
+ * Runs when the picker opens and again whenever the provider changes, so the list
+ * always belongs to what is currently selected.
+ *
+ * The stored key is resolved HERE, on the host side, and used only to query the
+ * provider. It is never put into `settings`, so it never reaches the webview; the
+ * pane is told only that a credential exists.
+ */
+async function loadModelsForPreset(preset: string): Promise<void> {
+  settings.open = true;
+  settings.preset = preset;
+  settings.models = [];
+  settings.defaultModel = '';
+  settings.status = 'Loading models…';
+  render();
+
+  const profile = readConfig();
+  const connectConfig = readConnectProviders(profile);
+  const config = profile.kind === 'ok' ? profile.config : {};
+  const record = (config.connections ?? {}) as Record<string, Record<string, unknown>>;
+  const id = presetConnectionId(preset);
+  const stored = record[id];
+  const choice = settings.providers.find((p) => p.value === preset);
+
+  // Resolve an existing credential for this provider, if there is one. The value
+  // stays local to this function.
+  let apiKey: string | undefined;
+  try {
+    const reference = typeof stored?.credentialReference === 'string' ? stored.credentialReference : undefined;
+    if (reference && credentialManagerAvailable()) {
+      apiKey = await new WindowsCredentialStore().get(reference);
+    } else if (typeof stored?.apiKey === 'string') {
+      apiKey = stored.apiKey;
+    }
+  } catch {
+    // A credential service that cannot answer is not fatal: many providers list
+    // their catalog without a key.
+    apiKey = undefined;
+  }
+
+  // Surface only the presence of a credential, for the key field's hint.
+  if (choice) choice.hasCredential = Boolean(apiKey);
+  const storedBaseUrl = typeof stored?.baseUrl === 'string' ? stored.baseUrl : undefined;
+  if (choice) choice.storedBaseUrl = storedBaseUrl;
+
+  let connection: ProviderConnectionRecord;
+  try {
+    connection = buildDiscoveryConnection(
+      { preset, apiKey, storedBaseUrl, defaultModel: typeof stored?.defaultModel === 'string' ? stored.defaultModel : undefined },
+      connectConfig,
+    );
+  } catch (error) {
+    settings.status = (error as Error).message;
+    render();
+    return;
+  }
+
+  const result = await discoverModelOptions(async () => {
+    const { adapter, reason } = await resolveProvider(
+      { kind: 'ok', config: { connections: { [connection.id]: { ...connection, apiKey } }, activeConnectionId: connection.id } },
+      new MemoryCredentialStore(),
+    );
+    if (reason) throw new Error(reason);
+    const inventory = await adapter.discoverModels();
+    return inventory.map((entry) => ({
+      id: entry.id,
+      accessTier: host.classifyModel(entry.id),
+      toolSupport: 'unknown',
+      // Free is decided by the engine's own policy for this connection id, so
+      // the star shown in the pane matches what routing will actually do.
+      isFree: host.isFreeModel(entry.id, connection.id),
+    }));
+  }, MODEL_DISCOVERY_TIMEOUT_MS);
+
+  const ordered = sortFreeFirst(result.models);
+  settings.models = ordered;
+  settings.defaultModel = pickDefaultModel(ordered, connection.defaultModel ?? '');
+  settings.status = result.status;
+  render();
+}
+
+async function openSettingsPane(): Promise<void> {
+    // The picker may already be showing a provider; load its models rather than
+    // whatever happened to be active in the profile.
+    await loadModelsForPreset(settings.preset || 'nvidia-nim');
   }
 
   /**
@@ -507,10 +596,9 @@ async function openDiffTab(requestId: string): Promise<void> {
       return;
     }
     if (msg.type === 'selectPreset' && typeof msg.preset === 'string') {
-      // The preset decides which fields apply, so the host re-renders the pane.
-      settings.preset = msg.preset;
-      settings.status = '';
-      render();
+      // Switching provider must bring that provider's key state and its free
+      // models with it, without the user pressing Reload.
+      void loadModelsForPreset(msg.preset);
       return;
     }
     if (msg.type === 'saveSettings') {

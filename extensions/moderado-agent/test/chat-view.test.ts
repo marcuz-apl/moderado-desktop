@@ -126,50 +126,69 @@ describe('moderado settings pane', () => {
     expect(html).not.toContain('id="settings-pane"');
   });
 
-  it('lists the connections already present in the shared profile', () => {
-    // The profile is shared with the CLI. A user who configured providers there
-    // must be able to see and switch to them, not just add new ones.
+  it('shows the active connection compactly, without the bulky path block', () => {
+    // The previous layout rendered every connection as a card under a full
+    // profile-path heading, which dominated the pane.
     const pane = settingsPaneHtml(settings({
       profilePath: 'C:\\Users\\marcu\\.moderado\\config.json',
       activeConnectionId: 'agnes-ai',
       savedConnections: [
-        {
-          id: 'agnes-ai', displayName: 'Agnes AI', kind: 'openai-compatible',
-          baseUrl: 'https://apihub.agnes-ai.com/v1', hasCredential: true,
-          defaultModel: 'mock/free-tool-model',
-        },
-        {
-          id: 'openrouter', displayName: 'openrouter', kind: 'openai-compatible',
-          baseUrl: 'https://openrouter.ai/api/v1', hasCredential: false,
-        },
-      ],
-    }));
-    expect(pane).toContain('C:\\Users\\marcu\\.moderado\\config.json');
-    expect(pane).toContain('Agnes AI');
-    expect(pane).toContain('https://apihub.agnes-ai.com/v1');
-    expect(pane).toContain('API key stored');
-    expect(pane).toContain('no API key stored');
-    expect(pane).toContain('default model: mock/free-tool-model');
-  });
-
-  it('marks the active profile connection and offers a switch for the rest', () => {
-    const pane = settingsPaneHtml(settings({
-      activeConnectionId: 'agnes-ai',
-      savedConnections: [
         { id: 'agnes-ai', displayName: 'Agnes AI', kind: 'openai-compatible', baseUrl: 'https://a/v1', hasCredential: true },
-        { id: 'ollama', displayName: 'Ollama', kind: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', hasCredential: false },
       ],
     }));
-    expect(pane).toContain('active');
-    expect(pane).toContain('data-connection="ollama"');
-    // Only the inactive one gets a switch.
-    expect(pane).not.toContain('data-connection="agnes-ai"');
+    // One short line, and the path only as a tooltip.
+    expect(pane).toContain('class="active-line"');
+    expect(pane).toContain('Using <strong>Agnes AI</strong>');
+    expect(pane).not.toContain('<h3>From');
+    expect(pane).not.toContain('class="saved-list"');
+    // The path is still discoverable without occupying layout space.
+    expect(pane).toContain('title="Shared profile: C:\\Users\\marcu\\.moderado\\config.json"');
   });
 
-  it('says which file it read when the profile has no connections', () => {
-    const pane = settingsPaneHtml(settings({ profilePath: 'C:\\Users\\marcu\\.moderado\\config.json' }));
-    expect(pane).toContain('No connections found in');
-    expect(pane).toContain('C:\\Users\\marcu\\.moderado\\config.json');
+  it('reflects the selected provider key state, not the previous one', () => {
+    // Picking a provider must show whether *that* provider already has a key.
+    const pane = settingsPaneHtml(settings({
+      preset: 'openrouter',
+      providers: [
+        { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true, hasCredential: true },
+        { value: 'openrouter', label: 'OpenRouter', description: 'd', requiresApiKey: true, hasCredential: false },
+      ],
+    }));
+    expect(pane).not.toContain('already stored for this provider');
+    expect(pane).toContain('placeholder="Paste the key"');
+  });
+
+  it('marks the key as stored for the provider that has one', () => {
+    const pane = settingsPaneHtml(settings({
+      preset: 'nvidia-nim',
+      providers: [
+        { value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true, hasCredential: true },
+        { value: 'openrouter', label: 'OpenRouter', description: 'd', requiresApiKey: true, hasCredential: false },
+      ],
+    }));
+    expect(pane).toContain('already stored for this provider');
+    expect(pane).toContain('Stored — leave empty to keep');
+  });
+
+  it('stars free models and counts them', () => {
+    const pane = settingsPaneHtml(settings({
+      preset: 'nvidia-nim',
+      providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
+      models: [
+        { id: 'free-a', accessTier: 'free_trial', isFree: true },
+        { id: 'paid-b', accessTier: 'paid', isFree: false },
+      ],
+    }));
+    expect(pane).toContain('★ free-a');
+    expect(pane).toContain('1 free of 2 listed');
+  });
+
+  it('prompts that models load on their own when the list is empty', () => {
+    const pane = settingsPaneHtml(settings({
+      preset: 'nvidia-nim',
+      providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
+    }));
+    expect(pane).toContain('Models load automatically when you pick a provider.');
   });
 
   it('renders provider, key, and model controls when opened', () => {
@@ -228,12 +247,15 @@ describe('moderado settings pane', () => {
   });
 
   it('never echoes a stored API key back into the pane', () => {
+    // The credential state is a hint, never the value: the secret stays in
+    // Credential Manager and is resolved host-side.
     const pane = settingsPaneHtml(settings({
-      preset: 'nvidia-nim', apiKeyStored: true,
-      providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
+      preset: 'nvidia-nim',
+      providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true, hasCredential: true }],
     }));
     expect(pane).not.toContain('sk-live-secret');
-    expect(pane).toContain('A key is already stored');
+    expect(pane).toContain('already stored for this provider');
+    expect(pane).toMatch(/id="settings-api-key"[^>]*type="password"/);
   });
 
   it('marks the selected provider and model', () => {
