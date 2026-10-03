@@ -172,7 +172,6 @@ function autoApproveHtml(auto: AutoApproveState): string {
   </div>`;
 }
 
-// PLACEHOLDER_CSS
 /** Builds the approval prompt. Empty when nothing is awaiting a decision. */
 export function approvalHtml(
   pending: ApprovalRequest | null,
@@ -199,6 +198,7 @@ export function chatHtml(state: ChatViewState, preview: (r: ApprovalRequest) => 
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <title>Moderado</title>
+<style>
 body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vscode-foreground); margin: 0; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; background: var(--vscode-sideBar-background, transparent); }
   button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
   button:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
@@ -255,25 +255,8 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   pre { white-space: pre-wrap; word-break: break-word; margin: 0.2rem 0 0; font-family: inherit; }
   .approval { border: 1px solid var(--vscode-focusBorder); padding: 0.75rem; margin-top: 1rem; border-radius: 4px; }
   .approval h2 { font-size: 1rem; margin: 0 0 0.4rem; }
-<style>
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0.75rem; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
-  /* The transcript takes the remaining space so the composer stays pinned to the
-     bottom of the sidebar rather than sitting mid-panel. */
-  #scroll { flex: 1; overflow-y: auto; min-height: 0; }
-  ul { list-style: none; padding: 0; }
-  li { border-left: 3px solid var(--vscode-panel-border); margin: 0.4rem 0; padding-left: 0.6rem; }
-  li.error { border-color: var(--vscode-errorForeground); }
-  li.tool { border-color: var(--vscode-charts-blue); }
-  .who { font-size: 0.75rem; text-transform: uppercase; opacity: 0.7; }
-  pre { white-space: pre-wrap; word-break: break-word; margin: 0.2rem 0 0; font-family: inherit; }
-  .approval { border: 1px solid var(--vscode-focusBorder); padding: 0.75rem; margin-top: 1rem; }
-  .approval h2 { font-size: 1rem; margin: 0 0 0.4rem; }
-  form { display: flex; gap: 0.4rem; margin-top: 0.75rem; }
-  input[type="text"] { flex: 1; padding: 0.4rem; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
-  button { padding: 0.4rem 0.8rem; }
-  /* A flex bar with space-between puts the gear in the top-right corner. The
-     previous version used float:right, which a flex container ignores, so the
-     button landed at the top-left. */
+  /* Visually hidden, still read by a screen reader. */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .settings .active-line { font-size: 0.78rem; margin: 0 0 0.5rem; opacity: 0.85; }
   .settings label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.8rem; opacity: 0.85; }
   .settings input, .settings select { width: 100%; box-sizing: border-box; padding: 0.35rem; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; }
@@ -283,7 +266,14 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   .settings .status { font-size: 0.8rem; min-height: 1.2em; margin: 0.4rem 0 0; }
   /* Settings shell: left nav plus content, matching the reference layout. */
   #settings-host { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  /* An empty host still grows, reserving half the sidebar for nothing. */
+  #settings-host:empty { display: none; }
   #settings-host:not(:empty) { border-top: 1px solid var(--vscode-panel-border); }
+  /* Settings is its own screen in the reference, not a strip above the chat. */
+  body.settings-open #scroll,
+  body.settings-open #auto-approve-host,
+  body.settings-open #composer,
+  body.settings-open #panel-foot { display: none; }
   .settings { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .settings .set-head { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--vscode-panel-border); }
   .settings .set-head h2 { font-size: 1.05rem; margin: 0; }
@@ -308,7 +298,7 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   .settings .summary { display: flex; gap: 0.9rem; font-size: 0.72rem; opacity: 0.75; margin-top: 0.5rem; }
 </style>
 </head>
-<body>
+<body${snapshot.settingsOpen ? ' class="settings-open"' : ''}>
 ${toolbarHtml()}
 <div id="settings-host">${snapshot.settings}</div>
 <div id="scroll">
@@ -362,6 +352,12 @@ ${toolbarHtml()}
   // webview, echoed back, or sent anywhere except the one save message.
   const settingsHost = document.getElementById('settings-host');
   let settingsOpen = ${JSON.stringify(snapshot.settingsOpen)};
+  // While the pane is open the chat surface is hidden, so settings owns the
+  // sidebar instead of sharing it with a half-height transcript.
+  function applySettingsVisibility() {
+    document.body.classList.toggle('settings-open', Boolean(settingsOpen));
+  }
+  applySettingsVisibility();
   if (settingsOpen) bindSettings();
   const status = () => document.getElementById('settings-status');
 
@@ -501,6 +497,7 @@ ${toolbarHtml()}
     if (update.settingsOpen !== undefined && update.settingsOpen !== settingsOpen) {
       settingsOpen = update.settingsOpen;
       settingsHost.innerHTML = update.settings || '';
+      applySettingsVisibility();
       if (settingsOpen) bindSettings();
     } else if (update.settingsStatus) {
       say(update.settingsStatus);

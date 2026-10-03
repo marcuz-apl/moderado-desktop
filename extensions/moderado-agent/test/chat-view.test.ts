@@ -16,6 +16,62 @@ function state(over: Partial<ChatViewState> = {}): ChatViewState {
 }
 
 describe('chat view', () => {
+  it('wraps every stylesheet in a style element', () => {
+    // The regression: the stylesheet was emitted as bare text in <head>, so the
+    // browser rendered the whole CSS block as visible body text and none of it
+    // applied. There must be exactly one <style>, opening before any rule and
+    // closing before </head>, with no CSS sitting outside it.
+    const html = chatHtml(state(), preview);
+    expect(html.split('<style>').length - 1).toBe(1);
+    expect(html.split('</style>').length - 1).toBe(1);
+
+    const styleStart = html.indexOf('<style>');
+    const styleEnd = html.indexOf('</style>');
+    const firstRule = html.indexOf('body {');
+    expect(styleStart).toBeGreaterThan(-1);
+    expect(firstRule).toBeGreaterThan(styleStart);
+    expect(firstRule).toBeLessThan(styleEnd);
+    // Nothing but the title precedes the stylesheet in <head>.
+    expect(html.slice(styleStart, styleEnd)).toMatch(/^<style>\s*body \{/);
+  });
+
+  it('defines sr-only so the composer label is not shown', () => {
+    // The label is accessibility-only. Without the rule it renders as visible
+    // text beside the composer, as happened in the screenshot.
+    const html = chatHtml(state(), preview);
+    expect(html).toContain('<label class="sr-only"');
+    expect(html).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
+  });
+
+  it('does not reserve space for an empty settings host', () => {
+    // #settings-host is flex:1. When it has no children that is an invisible
+    // spacer which splits the sidebar in half and squeezes the chat into the
+    // bottom half, which is what made the panel look misaligned.
+    const html = chatHtml(state(), preview);
+    expect(html).toContain('<div id="settings-host"></div>');
+    expect(html).toMatch(/#settings-host:empty\s*\{[^}]*display:\s*none/);
+  });
+
+  it('gives the settings pane the whole sidebar while it is open', () => {
+    // Settings is its own full-height screen. Leaving the transcript, composer,
+    // and auto-approve bar mounted underneath it stacks the chat into a strip.
+    const html = chatHtml(state(), preview);
+    expect(html).toMatch(/body\.settings-open #scroll[^{]*\{[^}]*display:\s*none/);
+    expect(html).toMatch(/body\.settings-open #composer[^{]*\{[^}]*display:\s*none/);
+    expect(html).toMatch(/body\.settings-open #auto-approve-host[^{]*\{[^}]*display:\s*none/);
+    expect(html).toMatch(/body\.settings-open #panel-foot[^{]*\{[^}]*display:\s*none/);
+    // The class has to actually be toggled, or the rules never take effect.
+    expect(html).toContain("classList.toggle('settings-open'");
+    // It is also rendered server-side, so an open pane does not flash the chat
+    // surface for one frame before the script runs.
+    expect(html).toContain('<body>');
+    const open = chatHtml(
+      state({ settings: { ...emptySettings(), open: true } }),
+      preview,
+    );
+    expect(open).toContain('<body class="settings-open">');
+  });
+
   it('renders a composer input so there is somewhere to type', () => {
     const html = chatHtml(state(), preview);
     expect(html).toContain('id="prompt"');
