@@ -31,8 +31,25 @@ if ($LASTEXITCODE -ne 0 -or $expected -ne 'commit') {
 }
 
 $target = Join-Path $root $Output
-if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
-[System.IO.Directory]::CreateDirectory($target) | Out-Null
+if (Test-Path -LiteralPath $target) {
+  # Selective clean: remove only upstream-exported content. The Desktop-owned
+  # npm wrapper (package.json/package-lock.json) must survive vendoring —
+  # wiping the whole directory deletes the manifest and the next `npm ci`
+  # fails with ENOENT (this exact CI failure). node_modules/dist are ignored
+  # build outputs, safe to drop so a stale install cannot leak in.
+  Remove-Item -LiteralPath (Join-Path $target 'packages') -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $target 'workspace-package.json') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $target 'tsconfig.base.json') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $target 'VENDORED.json') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $target 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
+  Get-ChildItem -LiteralPath $target -Recurse -Directory -Filter 'dist' -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+} else {
+  [System.IO.Directory]::CreateDirectory($target) | Out-Null
+}
+# Fail closed: without the wrapper there is nothing reproducible to install.
+if (!(Test-Path -LiteralPath (Join-Path $target 'package.json'))) { throw 'Vendored package.json is missing; the npm wrapper must be committed.' }
+if (!(Test-Path -LiteralPath (Join-Path $target 'package-lock.json'))) { throw 'Vendored package-lock.json is missing; the npm wrapper must be committed.' }
 
 $staging = Join-Path $root '.cache\vendor-staging'
 if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
@@ -64,7 +81,8 @@ if (Test-Path -LiteralPath (Join-Path $staging 'tsconfig.base.json')) {
 }
 Remove-Item -LiteralPath $staging -Recurse -Force
 
-$files = Get-ChildItem -LiteralPath $target -Recurse -File
+$files = Get-ChildItem -LiteralPath $target -Recurse -File |
+  Where-Object { $_.FullName -notmatch '[\\/]node_modules[\\/]' -and $_.FullName -notmatch '[\\/]dist[\\/]' -and $_.Name -ne 'tsconfig.tsbuildinfo' }
 $digest = [System.Security.Cryptography.SHA256]::Create()
 $accumulator = [System.Text.StringBuilder]::new()
 foreach ($file in ($files | Sort-Object FullName)) {

@@ -100,8 +100,10 @@ jobs:
         run: |
           Push-Location vendor/moderado
           try {
-            npm install
-            if ($LASTEXITCODE -ne 0) { throw 'vendor npm install failed' }
+            if (!(Test-Path -LiteralPath 'package.json')) { throw 'vendor package.json is missing; vendor-moderado.ps1 did not preserve the npm wrapper.' }
+            if (!(Test-Path -LiteralPath 'package-lock.json')) { throw 'vendor package-lock.json is missing; vendor-moderado.ps1 did not preserve the npm wrapper.' }
+            npm ci
+            if ($LASTEXITCODE -ne 0) { throw 'vendor npm ci failed' }
             npm run build
             if ($LASTEXITCODE -ne 0) { throw 'vendor build failed' }
           } finally { Pop-Location }
@@ -112,6 +114,7 @@ jobs:
           Push-Location extensions/moderado-agent
           try {
             npm ci
+            if ($LASTEXITCODE -ne 0) { throw 'Agent extension install failed.' }
             npm test
             if ($LASTEXITCODE -ne 0) { throw 'Agent extension tests failed.' }
             npm run typecheck
