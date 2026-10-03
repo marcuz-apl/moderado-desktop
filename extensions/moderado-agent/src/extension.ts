@@ -223,7 +223,8 @@ async function openDiffTab(requestId: string): Promise<void> {
    * CLI loader would return an empty config here, and saving over that would
    * destroy data that was never successfully read.
    */
-  async function loadSettingsState(status?: string): Promise<void> {
+  async function loadSettingsState(status?: string, options: { skipModels?: boolean } = {}): Promise<void> {
+    const skipModels = options.skipModels === true;
     const state = readConfig();
     settings.open = true;
     settings.profileError = undefined;
@@ -293,11 +294,19 @@ async function openDiffTab(requestId: string): Promise<void> {
 
     // Model discovery needs a working provider; without one it fails, and that
     // failure is shown rather than leaving an empty, unexplained list.
+    //
+    // Skipped when the caller is about to load models for a specific preset, so
+    // opening the pane does not query one provider and then immediately another.
+    if (skipModels) {
+      render();
+      return;
+    }
     const result = await discoverModelOptions(
       () => host.discoverModels(),
       MODEL_DISCOVERY_TIMEOUT_MS,
     );
-    settings.models = result.models;
+    settings.models = sortFreeFirst(result.models);
+    settings.defaultModel = pickDefaultModel(settings.models, settings.defaultModel);
     // Only an explicit in-flight message may override the settled outcome.
     settings.status = result.status;
     render();
@@ -408,9 +417,10 @@ async function loadModelsForPreset(preset: string): Promise<void> {
 }
 
 async function openSettingsPane(): Promise<void> {
-    // The picker may already be showing a provider; load its models rather than
-    // whatever happened to be active in the profile.
-    await loadModelsForPreset(settings.preset || 'nvidia-nim');
+    // Read the profile first so the picker starts on the connection that is
+    // actually active, then load that provider's models once.
+    await loadSettingsState(undefined, { skipModels: true });
+    await loadModelsForPreset(settings.preset || settings.providers[0]?.value || 'nvidia-nim');
   }
 
   /**
