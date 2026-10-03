@@ -660,20 +660,45 @@ One branding gap remains and is **not** fixed: `apply-branding.ps1` does not
 cover `src/vs/sessions/contrib/chat/browser/media/letterpress-sessions-*.svg`,
 so the Sessions/Chat centre watermark still ships the Code OSS atom glyph.
 
-**Build and verification.** Rebuilt with `scripts/build-m1.ps1` after both
-fixes were committed, because a `-PackingOnly` run is known to drop the agent.
-The packaged bundle was inspected directly:
-`resources/app/extensions/moderado-agent/dist/agent-core.js` contains the fix,
-and inside it `<title>Moderado</title>` is followed immediately by `<style>`.
+**Build and verification.** Rebuilt with `scripts/build-m1.ps1`, because a
+`-PackingOnly` run is known to drop the agent.
+
+The first full run was killed part-way through: gulp's prepack and packing both
+finished, `prepare_assets.sh` archived the previous zip, and then the process
+died with the new zip truncated at exactly 8,388,608 bytes and
+`build-manifest.json` still naming the previous commit. There was no error on
+either log stream, and 1.2 TB of free disk, so nothing in the build failed on
+its own merits. The cause was external: the build was started as a background
+process and then terminated when a long-running shell command polling it was
+interrupted twice. The lesson is to let the build run without interrupting the
+session that owns it.
+
+Recovery used `scripts/build-m1.ps1 -AssetsOnly`, which skips prepack and
+packing and only runs `prepare_assets.sh`. That was safe here because the
+already-packed `VSCode-win32-x64` was current, which was confirmed *before*
+resuming rather than assumed: its bundled agent contained every fix, and a
+`-AssetsOnly` run still re-runs the agent build, branding, and the artifact
+freshness check, so a stale editor could not have been blessed.
+
+The fix was then verified end to end, not only in source. Reading the shipped
+archive's `resources/app/extensions/moderado-agent/dist/agent-core.js` (483,810
+bytes) directly out of the zip confirms: the pinned-scroll guard present, the
+right-pointing chevron present and the old glyph absent, exactly one
+`open-settings` registration, the seam rule and `#settings-host:empty` present,
+and `<title>Moderado</title>` followed immediately by `<style>`.
 
 - `npx vitest run`: 148/148 across 6 files.
 - `npx tsc -p tsconfig.json --noEmit`: exit 0.
-- `scripts/gen-provenance.ps1`, then `scripts/verify-release.ps1`: 28/28 pass.
-  The first verification run failed `provenance:builtFromMatchesManifest` and
+- `scripts/gen-provenance.ps1`, then `scripts/verify-release.ps1`: 28/28 pass,
+  exit 0. An earlier run failed `provenance:builtFromMatchesManifest` and
   `provenance:artifactDigests` because `provenance.json` still named the
   previous commit; regenerating it from the new manifest fixed both.
-- `build-manifest.json`: `builtFromCommit dec95db`, `desktopVersion
-  v0.1.0+2610035`, three artifacts.
+- `build-manifest.json`: `builtFromCommit 1f6e96f`, `desktopVersion
+  v0.1.0+2610038`, three artifacts: zip 312,803,964 B, Setup 213,120,614 B,
+  UserSetup 213,120,980 B.
+
+**The duplicate settings-gear listener still exists in a separate worktree** at
+`.kilo/worktrees/copper-clementine/`, which was left untouched.
 
 **Not verified.** The fixes are confirmed in the source, the bundle, and the
 packaged files. The panel has not been re-opened in a running editor after this
