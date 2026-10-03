@@ -76,6 +76,24 @@ describe('chat view', () => {
     expect(open).toContain('<body class="settings-open">');
   });
 
+  it('wires the settings gear exactly once', () => {
+    // The listener was registered twice, so a single click sent two
+    // openSettings messages. The host answers that by re-reading the profile and
+    // awaiting provider model discovery, so the gear fired two network requests
+    // that raced on the same state.
+    const html = chatHtml(state(), preview);
+    const registrations =
+      html.split("getElementById('open-settings').addEventListener").length - 1;
+    expect(registrations).toBe(1);
+  });
+
+  it('does not stack two borders where the toolbar meets the pane', () => {
+    // #panel-bar already carries a border-bottom. The pane adding its own
+    // border-top put two 1px lines side by side, reading as a 2px seam.
+    const html = chatHtml(state(), preview);
+    expect(html).toMatch(/body\.settings-open #settings-host\s*\{[^}]*border-top:\s*none/);
+  });
+
   it('renders a composer input so there is somewhere to type', () => {
     const html = chatHtml(state(), preview);
     expect(html).toContain('id="prompt"');

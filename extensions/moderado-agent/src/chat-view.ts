@@ -276,6 +276,8 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   body.settings-open #auto-approve-host,
   body.settings-open #composer,
   body.settings-open #panel-foot { display: none; }
+  /* #panel-bar already draws a border-bottom, so the pane does not add another. */
+  body.settings-open #settings-host { border-top: none; }
   .settings { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .settings .set-head { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--vscode-panel-border); }
   .settings .set-head h2 { font-size: 1.05rem; margin: 0; }
@@ -415,8 +417,6 @@ ${toolbarHtml()}
       nav.addEventListener('click', () => vscode.postMessage({ type: 'setSettingsPage', page: nav.getAttribute('data-page') }));
     }
   }
-
-  document.getElementById('open-settings').addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
 
   // Auto-approve: expanding and toggling are host decisions. The renderer never
   // decides for itself that an action is approved.

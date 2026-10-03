@@ -36,7 +36,7 @@ is published or signed, and no Moderado agent integration exists yet.
 - Editor-host launch, open-folder, and terminal: PASS.
 - Install and uninstall on the build account: PASS.
 - Clean-account install/uninstall in Windows Sandbox: PASS.
-- Agent extension offline suite: 144/144 passing; typecheck clean.
+- Agent extension offline suite: 146/146 passing; typecheck clean.
 - `scripts/verify-release.ps1`: 28/28 checks pass against the 2026-10-03
   artifacts, including that the shipped zip actually contains the agent.
 
@@ -613,12 +613,26 @@ transcript, composer, auto-approve bar, and footer mounted underneath, each
 taking its own share of the flex column, so the pane was squeezed into a strip.
 A `settings-open` class on `<body>` — rendered server-side and toggled by the
 webview on open/close — hides the chat surface so the pane owns the sidebar.
-The server-side class avoids one frame of the chat surface flashing first.
+The server-side class avoids one frame of the chat surface flashing first, and
+the pane drops its own `border-top` because `#panel-bar` already draws one.
+
+**5. The settings gear fired twice per click.** `#open-settings` had its click
+listener registered in two places. The static toolbar is never re-rendered, so
+both copies stayed live: one click sent two `openSettings` messages, and the
+host answers that by re-reading the profile and awaiting provider model
+discovery. The gear therefore issued two provider requests that raced on the
+same `settings` state. The duplicate registration is removed.
+
+**6. Two 1px borders met at the toolbar seam.** `#panel-bar` draws a
+`border-bottom` and the pane drew its own `border-top`, stacking into what reads
+as a 2px line. The open state now removes the pane's border.
 
 Regression tests added: "wraps every stylesheet in a style element", "defines
 sr-only so the composer label is not shown", "does not reserve space for an
-empty settings host", and "gives the settings pane the whole sidebar while it
-is open". Both layout tests were confirmed to fail before the CSS was changed.
+empty settings host", "gives the settings pane the whole sidebar while it is
+open", "wires the settings gear exactly once", and "does not stack two borders
+where the toolbar meets the pane". Each was confirmed to fail before the fix it
+covers.
 
 **Branding was re-checked, not assumed.** An earlier note claimed the build
 still showed the VSCodium logo. That was wrong. In the packaged editor,
@@ -639,7 +653,7 @@ The packaged bundle was inspected directly:
 `resources/app/extensions/moderado-agent/dist/agent-core.js` contains the fix,
 and inside it `<title>Moderado</title>` is followed immediately by `<style>`.
 
-- `npx vitest run`: 144/144 across 6 files.
+- `npx vitest run`: 146/146 across 6 files.
 - `npx tsc -p tsconfig.json --noEmit`: exit 0.
 - `scripts/gen-provenance.ps1`, then `scripts/verify-release.ps1`: 28/28 pass.
   The first verification run failed `provenance:builtFromMatchesManifest` and
