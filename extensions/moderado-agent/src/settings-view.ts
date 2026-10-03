@@ -77,6 +77,10 @@ export interface SettingsState {
   profileError?: string;
   /** Transient feedback line, e.g. "Saved." or a failure reason. */
   status?: string;
+  /** Which settings section the left nav has selected. */
+  page?: string;
+  /** 'free' shows only cost-free models; 'all' shows everything. */
+  modelTab?: string;
 }
 
 export function emptySettings(): SettingsState {
@@ -130,6 +134,40 @@ function modelOptions(state: SettingsState): string {
     .map(
       (model) =>
         `<option value="${escapeHtml(model.id)}"${model.id === state.defaultModel ? ' selected' : ''}>${escapeHtml(`${model.isFree ? '★ ' : ''}${model.id} — ${model.accessTier}`)}</option>`,
+    )
+    .join('');
+}
+
+/** The left-hand settings navigation, matching the reference layout. */
+const SETTINGS_PAGES = [
+  { id: 'api', label: 'API Configuration' },
+  { id: 'features', label: 'Features' },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'general', label: 'General' },
+  { id: 'about', label: 'About' },
+] as const;
+
+function settingsNav(page: string): string {
+  return SETTINGS_PAGES.map(
+    (entry) => `<button type="button" data-page="${entry.id}" class="${page === entry.id ? 'on' : ''}">${escapeHtml(entry.label)}</button>`,
+  ).join('');
+}
+
+/** The model cards, as a name/description/free-badge list rather than a dropdown. */
+function modelCards(state: SettingsState): string {
+  const shown = state.modelTab === 'all' ? state.models : state.models.filter((m) => m.isFree);
+  if (!shown.length) {
+    return `<p class="note">${state.models.length ? 'No free models on this provider.' : 'No models loaded yet.'}</p>`;
+  }
+  return shown
+    .map(
+      (model) => `<button type="button" class="model-card${model.id === state.defaultModel ? ' on' : ''}" data-model="${escapeHtml(model.id)}">
+        <span class="model-top">
+          <span class="model-name">${escapeHtml(model.id)}</span>
+          ${model.isFree ? '<span class="model-badge">FREE</span>' : `<span class="model-badge paid">${escapeHtml(model.accessTier)}</span>`}
+        </span>
+        <span class="model-desc">${escapeHtml(model.accessTier)}${model.isFree ? ' · no cost' : ' · may cost'}</span>
+      </button>`,
     )
     .join('');
 }
@@ -189,33 +227,44 @@ export function settingsPaneHtml(state: SettingsState): string {
     <p class="note">HTTPS only. HTTP is accepted for localhost endpoints.</p>`
     : '';
 
-  const modelField = `<label for="settings-model">Default model</label>
-    <select id="settings-model"${disabled}>${modelOptions(state)}</select>
-    ${state.models.length
-      ? `<p class="note">★ marks a free model. ${state.models.filter((m) => m.isFree).length} free of ${state.models.length} listed.</p>`
-      : '<p class="note">Models load automatically when you pick a provider.</p>'}
-    <p class="note">Free models are preferred. Paid and unknown-cost models stay listed but are only used when allowed.</p>`;
+  const modelField = `<h3>Model</h3>
+    <div class="tab-row">
+      <button type="button" data-tab="all" class="${state.modelTab === 'all' ? 'on' : ''}">Recommended</button>
+      <button type="button" data-tab="free" class="${state.modelTab === 'free' ? 'on' : ''}">Free</button>
+    </div>
+    <label class="sr-only" for="settings-model">Default model</label>
+    <select id="settings-model" class="sr-only"${disabled}>${modelOptions(state)}</select>
+    ${modelCards(state)}
+    <p class="summary">
+      <span>${state.models.filter((m) => m.isFree).length} free</span>
+      <span>${state.models.length} listed</span>
+    </p>`;
 
   const presetNote = choice ? `<p class="note">${escapeHtml(choice.description)}</p>` : '';
 
   return `<section id="settings-pane" class="settings" aria-label="Moderado settings">
-    <header>
-      <h2>Connect a provider</h2>
-      <button id="close-settings" type="button" aria-label="Close settings">Close</button>
-    </header>
-    ${problem}
-    ${compactActive}
-    <label for="settings-provider">Provider</label>
-    <select id="settings-provider"${disabled}>${providerOptions(state)}</select>
-    ${presetNote}
-    ${extra}
-    ${keyField}
-    ${modelField}
-    <div class="row">
-      <button id="settings-save" type="button"${disabled}>Save and connect</button>
-      <button id="settings-refresh" type="button"${disabled}>Reload models</button>
+    <div class="set-head">
+      <h2>Settings</h2>
+      <button id="close-settings" type="button" class="done">Done</button>
     </div>
-    <p id="settings-status" class="status" role="status">${escapeHtml(state.status ?? '')}</p>
+    <div class="set-body">
+      <nav class="set-nav" aria-label="Settings sections">${settingsNav(state.page ?? 'api')}</nav>
+      <div class="set-content">
+        ${problem}
+        ${compactActive}
+        <h3>API Provider</h3>
+        <select id="settings-provider"${disabled}>${providerOptions(state)}</select>
+        ${presetNote}
+        ${extra}
+        ${keyField}
+        ${modelField}
+        <div class="row">
+          <button id="settings-save" type="button"${disabled}>Save and connect</button>
+          <button id="settings-refresh" type="button"${disabled}>Reload models</button>
+        </div>
+        <p id="settings-status" class="status" role="status">${escapeHtml(state.status ?? '')}</p>
+      </div>
+    </div>
   </section>`;
 }
 

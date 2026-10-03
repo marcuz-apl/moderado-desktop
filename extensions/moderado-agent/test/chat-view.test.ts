@@ -121,6 +121,89 @@ describe('moderado settings pane', () => {
     expect(html.indexOf('id="open-settings"')).toBeLessThan(html.indexOf('id="scroll"'));
   });
 
+  it('shows the brand welcome state only while the transcript is empty', () => {
+    const fresh = chatHtml(state(), preview);
+    expect(fresh).toContain('class="empty-state"');
+    expect(fresh).toContain('What can I do for you?');
+    const started = chatHtml(
+      state({ transcript: [{ kind: 'user', label: 'You', text: 'hi' }] }),
+      preview,
+    );
+    expect(started).not.toContain('class="empty-state"');
+  });
+
+  it('renders a RECENT list with cost badges when sessions exist', () => {
+    const html = chatHtml(state({
+      recents: [
+        { id: 's1', title: 'Fix the login bug', updatedAt: 'Sep 25', costLabel: '$0.00' },
+        { id: 's2', title: 'Second task', updatedAt: 'Sep 20', costLabel: null },
+      ],
+    }), preview);
+    expect(html).toContain('RECENT');
+    expect(html).toContain('View All');
+    expect(html).toContain('Fix the login bug');
+    expect(html).toContain('class="recent-cost">$0.00</span>');
+    // No cost badge when the engine reported none: two sessions, one badge.
+    expect(html.split('class="recent-cost"').length - 1).toBe(1);
+  });
+
+  it('escapes untrusted recent-session titles', () => {
+    const html = chatHtml(state({
+      recents: [{ id: 's1', title: '<img src=x onerror=alert(1)>', updatedAt: 'Sep 25', costLabel: null }],
+    }), preview);
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x');
+  });
+
+  it('renders the auto-approve bar collapsed and denies everything by default', () => {
+    const html = chatHtml(state(), preview);
+    expect(html).toContain('Auto-approve: nothing');
+    expect(html).toContain('id="auto-approve"');
+    // No category may be pre-enabled.
+    expect(html).not.toContain(' checked>');
+    expect(html).not.toContain(' checked ');
+    expect(html).toContain('id="aa-toggle"');
+  });
+
+  it('expands into a two-column grid when opened', () => {
+    const html = chatHtml(state({
+      autoApprove: {
+        expanded: true, readFiles: true, editFiles: false,
+        executeCommands: false, fetchWeb: false, useMcp: false,
+      },
+    }), preview);
+    expect(html).toContain('aa-grid');
+    expect(html).toContain('Read files');
+    expect(html).toContain('Edit files');
+    expect(html).toContain('Execute commands');
+    expect(html).toContain('Fetch web content');
+    expect(html).toContain('Use MCP servers');
+    expect(html).toContain('data-key="readFiles" checked');
+    // The fail-closed policy is stated rather than implied.
+    expect(html).toContain('still denies');
+  });
+
+  it('reports an auto-approve change to the host rather than deciding locally', () => {
+    // The renderer must never conclude on its own that an action is approved.
+    const html = chatHtml(state(), preview);
+    expect(html).toContain("postMessage({ type: 'setAutoApprove'");
+    expect(html).toContain("postMessage({ type: 'toggleAutoApprovePanel' })");
+  });
+
+  it('offers a Plan/Act toggle in the footer', () => {
+    const html = chatHtml(state(), preview);
+    expect(html).toContain('id="mode-plan"');
+    expect(html).toContain('id="mode-act"');
+    expect(html).toContain("postMessage({ type: 'setMode'");
+  });
+
+  it('uses a multi-line composer that sends on Enter', () => {
+    const html = chatHtml(state(), preview);
+    expect(html).toContain('<textarea id="prompt"');
+    expect(html).toContain('Type your task here...');
+    expect(html).toContain("event.key === 'Enter' && !event.shiftKey");
+  });
+
   it('keeps the pane out of the document until it is opened', () => {
     const html = chatHtml(state(), preview);
     expect(html).not.toContain('id="settings-pane"');
@@ -170,7 +253,7 @@ describe('moderado settings pane', () => {
     expect(pane).toContain('Stored — leave empty to keep');
   });
 
-  it('stars free models and counts them', () => {
+  it('badges free models and summarises the counts', () => {
     const pane = settingsPaneHtml(settings({
       preset: 'nvidia-nim',
       providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
@@ -178,17 +261,50 @@ describe('moderado settings pane', () => {
         { id: 'free-a', accessTier: 'free_trial', isFree: true },
         { id: 'paid-b', accessTier: 'paid', isFree: false },
       ],
+      defaultModel: 'free-a',
     }));
-    expect(pane).toContain('★ free-a');
-    expect(pane).toContain('1 free of 2 listed');
+    // Free models are cards with a FREE badge, as in the reference layout.
+    expect(pane).toContain('class="model-card on" data-model="free-a"');
+    expect(pane).toContain('>FREE<');
+    expect(pane).toContain('1 free');
+    expect(pane).toContain('2 listed');
   });
 
-  it('prompts that models load on their own when the list is empty', () => {
+  it('shows only free models on the Free tab', () => {
+    const pane = settingsPaneHtml(settings({
+      preset: 'nvidia-nim', modelTab: 'free',
+      providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
+      models: [
+        { id: 'free-a', accessTier: 'free_trial', isFree: true },
+        { id: 'paid-b', accessTier: 'paid', isFree: false },
+      ],
+    }));
+    expect(pane).toContain('data-model="free-a"');
+    expect(pane).not.toContain('data-model="paid-b"');
+  });
+
+  it('offers the Recommended and Free tabs', () => {
+    const pane = settingsPaneHtml(settings({ modelTab: 'free' }));
+    expect(pane).toContain('data-tab="all"');
+    expect(pane).toContain('data-tab="free"');
+  });
+
+  it('explains an empty model list', () => {
     const pane = settingsPaneHtml(settings({
       preset: 'nvidia-nim',
       providers: [{ value: 'nvidia-nim', label: 'NVIDIA NIM', description: 'd', requiresApiKey: true }],
     }));
-    expect(pane).toContain('Models load automatically when you pick a provider.');
+    expect(pane).toContain('No models loaded yet.');
+  });
+
+  it('has a left settings nav with the reference sections', () => {
+    const pane = settingsPaneHtml(settings({ page: 'api' }));
+    for (const label of ['API Configuration', 'Features', 'Terminal', 'General', 'About']) {
+      expect(pane).toContain(label);
+    }
+    expect(pane).toContain('class="set-nav"');
+    expect(pane).toContain('data-page="api"');
+    expect(pane).toContain('>Done</button>');
   });
 
   it('renders provider, key, and model controls when opened', () => {

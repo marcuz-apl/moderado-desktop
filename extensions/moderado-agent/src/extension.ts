@@ -10,7 +10,7 @@ import {
   credentialManagerAvailable,
   credentialReference,
 } from './credentials.js';
-import { ChatViewState, TranscriptEntry, chatHtml, viewSnapshot } from './chat-view.js';
+import { ChatViewState, TranscriptEntry, AutoApproveState, chatHtml, viewSnapshot } from './chat-view.js';
 import {
   SettingsState,
   SettingsConnectionView,
@@ -73,12 +73,16 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
    */
   const pendingApprovalRequests = new Map<string, ApprovalRequest>();
   const settings: SettingsState = emptySettings();
-  const view: ChatViewState & { planMode: boolean } = {
-    transcript: [],
-    running: false,
-    pendingApproval: null,
-    planMode: false,
-    settings,
+  /** Auto-approve categories. Every one starts denied (AGENTS.md section 4). */
+  const autoApprove: AutoApproveState & { requiresApprovalByDefault: boolean } = {
+    expanded: false,
+    readFiles: false,
+    editFiles: false,
+    executeCommands: false,
+    fetchWeb: false,
+    useMcp: false,
+    // Recorded so the panel can state the policy rather than implying it.
+    requiresApprovalByDefault: true,
   };
   let chatView: vscode.WebviewView | undefined;
   // True once the webview document has been written; see render().
@@ -88,6 +92,17 @@ export function activate(context: vscode.ExtensionContext): ModeradoApi {
   // CLI would derive for the same folder.
   const workspaceRoot =
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+
+  const view: ChatViewState & { planMode: boolean } = {
+    transcript: [],
+    running: false,
+    pendingApproval: null,
+    planMode: false,
+    settings,
+    autoApprove,
+    recents: [],
+    workspaceLabel: workspaceRoot.split(/[\\/]/).pop() ?? '',
+  };
 
   const host = new AgentHost({
     workspaceRoot,
@@ -588,6 +603,52 @@ async function openSettingsPane(): Promise<void> {
   function handleWebviewMessage(message: unknown): void {
     if (!message || typeof message !== 'object') return;
     const msg = message as Record<string, unknown>;
+    if (msg.type === 'toggleAutoApprovePanel') {
+      autoApprove.expanded = !autoApprove.expanded;
+      render();
+      return;
+    }
+    if (msg.type === 'setAutoApprove' && typeof msg.key === 'string' && typeof msg.value === 'boolean') {
+      // Auto-approving a mutation is an explicit human act, so it is applied only
+      // for a known category and the renderer cannot invent one.
+      const keys = ['readFiles', 'editFiles', 'executeCommands', 'fetchWeb', 'useMcp'] as const;
+      if (!(keys as readonly string[]).includes(msg.key)) return;
+      autoApprove[msg.key as (typeof keys)[number]] = msg.value;
+      autoApprove.requiresApprovalByDefault = true;
+      output.appendLine(`auto-approve ${msg.key} = ${msg.value}`);
+      render();
+      return;
+    }
+    if (msg.type === 'setMode' && (msg.mode === 'Plan' || msg.mode === 'Act')) {
+      view.planMode = msg.mode === 'Plan';
+      render();
+      return;
+    }
+    if (msg.type === 'setModelTab' && (msg.tab === 'free' || msg.tab === 'all')) {
+      settings.modelTab = msg.tab;
+      render();
+      return;
+    }
+    if (msg.type === 'setSettingsPage' && typeof msg.page === 'string') {
+      settings.page = msg.page;
+      render();
+      return;
+    }
+    if (msg.type === 'chooseModel' && typeof msg.id === 'string') {
+      settings.defaultModel = msg.id;
+      render();
+      return;
+    }
+    if (msg.type === 'newTask') {
+      view.transcript = [];
+      view.pendingApproval = null;
+      render();
+      return;
+    }
+    if (msg.type === 'openSession' && typeof msg.id === 'string') {
+      void vscode.commands.executeCommand('moderado.showSessions');
+      return;
+    }
     if (msg.type === 'openSettings') {
       void openSettingsPane();
       return;
@@ -796,9 +857,44 @@ async function openSettingsPane(): Promise<void> {
     }),
   );
 
+  /** A cost badge for a session, or null when the engine reported no cost. */
+  function costLabelOf(usage: { available?: boolean; costKnown?: boolean; totalUsd?: number } | undefined): string | null {
+    if (!usage?.available || !usage.costKnown) return null;
+    const value = usage.totalUsd;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    return `$${value.toFixed(2)}`;
+  }
+
+  /** Rebuilds the RECENT list from the shared session store. */
+  function refreshRecents(): void {
+    const { sessions } = host.listSessions();
+    view.recents = sessions.slice(0, 8).map((session) => ({
+      id: session.id,
+      // The first user message is the session's title in every practical sense;
+      // it is user text, so it is escaped like any other transcript content.
+      title: firstLineOf(session) || 'Untitled session',
+      updatedAt: formatWhen(session.updatedAt),
+      costLabel: costLabelOf(session.usage),
+    }));
+  }
+
+  function firstLineOf(session: { messages: { role: string; content?: unknown }[] }): string {
+    const first = session.messages.find((m) => m.role === 'user');
+    const text = typeof first?.content === 'string' ? first.content : '';
+    return text.split('\n')[0].slice(0, 120).trim();
+  }
+
+  /** A short, human date; falls back to the raw value if unparseable. */
+  function formatWhen(iso: string): string {
+    const when = new Date(iso);
+    if (Number.isNaN(when.getTime())) return iso;
+    return when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
   /** Renders the current chat state into the open sidebar view, if there is one. */
   function render(): void {
     if (!chatView) return;
+    refreshRecents();
     // The document is written once. Later updates are pushed into the live DOM,
     // because reassigning `webview.html` destroys and rebuilds the whole webview:
     // doing that per streamed token wiped the composer and stole focus, so the
