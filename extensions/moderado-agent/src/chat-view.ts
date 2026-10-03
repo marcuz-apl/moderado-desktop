@@ -255,8 +255,10 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   pre { white-space: pre-wrap; word-break: break-word; margin: 0.2rem 0 0; font-family: inherit; }
   .approval { border: 1px solid var(--vscode-focusBorder); padding: 0.75rem; margin-top: 1rem; border-radius: 4px; }
   .approval h2 { font-size: 1rem; margin: 0 0 0.4rem; }
-  /* Visually hidden, still read by a screen reader. */
-  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  /* Visually hidden, still read by a screen reader. Repeated with the .settings
+     scope because the .settings input/select rule is more specific than a bare
+     class and would otherwise win the width and display properties. */
+  .sr-only, .settings .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .settings .active-line { font-size: 0.78rem; margin: 0 0 0.5rem; opacity: 0.85; }
   .settings label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.8rem; opacity: 0.85; }
   .settings input, .settings select { width: 100%; box-sizing: border-box; padding: 0.35rem; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; }

@@ -41,6 +41,10 @@ describe('chat view', () => {
     const html = chatHtml(state(), preview);
     expect(html).toContain('<label class="sr-only"');
     expect(html).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
+    // The settings model dropdown is hidden on purpose: the model cards are the
+    // visible picker. Defining .sr-only must actually hide it, which needs the
+    // .settings scope to outrank `.settings input, .settings select`.
+    expect(html).toMatch(/\.settings\s+\.sr-only\s*\{[^}]*position:\s*absolute/);
   });
 
   it('does not reserve space for an empty settings host', () => {
