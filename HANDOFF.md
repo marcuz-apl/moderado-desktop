@@ -3,7 +3,7 @@
 Updated: 2026-10-03 UTC
 Branch: master  
 Commit: `dec95db` plus the panel-rendering commit recorded below  
-Status: M1–M4 implemented and verified; sidebar/settings rendering fixed; M4 signing/publication not authorized
+Status: M1â€“M4 implemented and verified; sidebar/settings rendering fixed; M4 signing/publication not authorized
 
 ## Summary
 
@@ -36,7 +36,7 @@ is published or signed, and no Moderado agent integration exists yet.
 - Editor-host launch, open-folder, and terminal: PASS.
 - Install and uninstall on the build account: PASS.
 - Clean-account install/uninstall in Windows Sandbox: PASS.
-- Agent extension offline suite: 146/146 passing; typecheck clean.
+- Agent extension offline suite: 148/148 passing; typecheck clean.
 - `scripts/verify-release.ps1`: 28/28 checks pass against the 2026-10-03
   artifacts, including that the shipped zip actually contains the agent.
 
@@ -177,17 +177,17 @@ CLSIDs, Open VSX gallery, and empty update/download URLs.
 
 Real editor-host check, `.cache/m1-final-check/`:
 
-- `extension-result.json` — folder opened and a live terminal PID returned.
-- `terminal-result.txt` — `terminal-ok`.
-- `host-profile/logs/20261001T160305/` — extension host started and
+- `extension-result.json` â€” folder opened and a live terminal PID returned.
+- `terminal-result.txt` â€” `terminal-ok`.
+- `host-profile/logs/20261001T160305/` â€” extension host started and
   `moderado.moderado-m1-smoke` activated, confirming a real host rather than a
   mocked `vscode` module.
 
 Install/uninstall on the build account:
 
-- `install.log` — UserSetup installed to a scratch directory and launched
+- `install.log` â€” UserSetup installed to a scratch directory and launched
   `Moderado Desktop.exe`.
-- `uninstall.log` — "Uninstallation process succeeded… Removed all? Yes".
+- `uninstall.log` â€” "Uninstallation process succeededâ€¦ Removed all? Yes".
 
 Clean-account check in a Windows Sandbox VM under `WDAGUtilityAccount`,
 `sandbox-shared/result.json`:
@@ -244,7 +244,7 @@ check reported:
 
 Three bundling defects were found and fixed by making the build fail loudly
 rather than silently shipping an unusable bundle: esbuild emitted ESM exports as
-dead code (`0 && (module.exports = …)`), the entry resolved `require` against
+dead code (`0 && (module.exports = â€¦)`), the entry resolved `require` against
 esbuild's generated `main.node_modules` directory, and the exported global was
 never defined. `scripts/bundle.mjs` now asserts a reachable `module.exports` and
 smoke-loads the bundle against a stubbed host before exiting.
@@ -465,7 +465,7 @@ public distribution.
 ### GitHub Actions build workflow (added 2026-10-02, **unverified**)
 
 `.github/workflows/build-and-release.yml` builds and verifies on `windows-2022`.
-**It has never been executed** — there is no runner here, so "CI builds" is not
+**It has never been executed** â€” there is no runner here, so "CI builds" is not
 claimed anywhere in this file.
 
 Publishing is structurally impossible: the `publish` job's `if` ends in
@@ -548,7 +548,7 @@ moderado.moderado-agent`, confirming a real host rather than a stub.
 
 **Root cause of the repeated build failures: heap exhaustion.** Seven rebuilds
 failed before one succeeded, each with a *different* error and none reproducible
-in isolation — `npm list` failing inside vsce, `tsgo exited with code 2` or `1`
+in isolation â€” `npm list` failing inside vsce, `tsgo exited with code 2` or `1`
 with no diagnostics emitted, and `css-language-features\esbuild.mts` failing
 when it builds cleanly on its own. Running every extension `tsconfig.json`
 through TS7 sequentially reported `FAILCOUNT=0` each time, which ruled out a
@@ -571,8 +571,8 @@ commit, so the old `manifest:desktopVersion` check could never stay green: any
 commit after a build reported a good build as stale. `build-m1.ps1` now records
 `builtFromCommit`, and `verify-release.ps1` gates on that commit being an
 ancestor of HEAD plus a clean source tree, with the version string reported as
-informational only. Both new gates were confirmed to fail correctly — against a
-diverged tree and against uncommitted source edits — before the build was
+informational only. Both new gates were confirmed to fail correctly â€” against a
+diverged tree and against uncommitted source edits â€” before the build was
 accepted.
 
 **Suites.** `npx vitest run` 65/65 passed; `tsc --noEmit` exits 0.
@@ -611,8 +611,8 @@ none }` collapses it.
 **4. Settings shared the panel with the chat.** Opening settings left the
 transcript, composer, auto-approve bar, and footer mounted underneath, each
 taking its own share of the flex column, so the pane was squeezed into a strip.
-A `settings-open` class on `<body>` — rendered server-side and toggled by the
-webview on open/close — hides the chat surface so the pane owns the sidebar.
+A `settings-open` class on `<body>` â€” rendered server-side and toggled by the
+webview on open/close â€” hides the chat surface so the pane owns the sidebar.
 The server-side class avoids one frame of the chat surface flashing first, and
 the pane drops its own `border-top` because `#panel-bar` already draws one.
 
@@ -627,18 +627,31 @@ same `settings` state. The duplicate registration is removed.
 `border-bottom` and the pane drew its own `border-top`, stacking into what reads
 as a 2px line. The open state now removes the pane's border.
 
+**7. Every update dragged the transcript back to the bottom.** The message
+handler assigned `scroll.scrollTop = scroll.scrollHeight` unconditionally, so a
+reader who scrolled up to re-read earlier output was yanked down by the next
+streamed token and could never read back. The handler now measures the
+distance to the tail *before* rewriting the DOM and only follows it when it was
+already in view (within 24px).
+
+**8. The collapsed auto-approve chevron pointed the wrong way.** It used
+`&#9652;` (UPPER LEFT TRIANGLE) against `&#9662;` (down) when open, which does
+not read as "expand". It now uses `&#9656;` (right), pairing with the existing
+down triangle.
+
 Regression tests added: "wraps every stylesheet in a style element", "defines
 sr-only so the composer label is not shown", "does not reserve space for an
 empty settings host", "gives the settings pane the whole sidebar while it is
-open", "wires the settings gear exactly once", and "does not stack two borders
-where the toolbar meets the pane". Each was confirmed to fail before the fix it
-covers.
+open", "wires the settings gear exactly once", "does not stack two borders
+where the toolbar meets the pane", "points the collapsed auto-approve chevron
+the right way", and "does not drag the transcript back down when the reader
+scrolled up". Each was confirmed to fail before the fix it covers.
 
 **Branding was re-checked, not assumed.** An earlier note claimed the build
 still showed the VSCodium logo. That was wrong. In the packaged editor,
 `resources/app/out/media/code-icon.svg` is the Moderado mark (dark disc, white
 "M", orange accent) and the four `letterpress-*.svg` files are the Moderado
-watermark, minified by the build from the branded 918–1087 byte originals.
+watermark, minified by the build from the branded 918â€“1087 byte originals.
 VSCodium's own watermark at `.cache/vscodium/src/stable/.../letterpress-dark.svg`
 is a different mark entirely (an irregular `codium_grey_dark_letterpress`
 blob), so the overlay is a real, visible change.
@@ -653,7 +666,7 @@ The packaged bundle was inspected directly:
 `resources/app/extensions/moderado-agent/dist/agent-core.js` contains the fix,
 and inside it `<title>Moderado</title>` is followed immediately by `<style>`.
 
-- `npx vitest run`: 146/146 across 6 files.
+- `npx vitest run`: 148/148 across 6 files.
 - `npx tsc -p tsconfig.json --noEmit`: exit 0.
 - `scripts/gen-provenance.ps1`, then `scripts/verify-release.ps1`: 28/28 pass.
   The first verification run failed `provenance:builtFromMatchesManifest` and

@@ -161,7 +161,7 @@ function autoApproveHtml(auto: AutoApproveState): string {
   return `<div class="aa${auto.expanded ? ' open' : ''}" id="auto-approve">
     <button id="aa-toggle" class="aa-head" type="button" aria-expanded="${auto.expanded}">
       <span>Auto-approve: ${escapeHtml(autoApproveSummary(auto))}</span>
-      <span class="aa-chevron">${auto.expanded ? '&#9662;' : '&#9652;'}</span>
+      <span class="aa-chevron">${auto.expanded ? '&#9662;' : '&#9656;'}</span>
     </button>
     ${auto.expanded ? `<div class="aa-body">
       <p class="aa-note">Let Moderado take these actions without asking for approval.
@@ -473,6 +473,10 @@ ${toolbarHtml()}
   window.addEventListener('message', (event) => {
     const update = event.data;
     if (!update || update.type !== 'update') return;
+    // Measured before the DOM is rewritten. A reader who scrolled up to re-read
+    // earlier output must not be dragged back down by the next streamed token,
+    // so the tail is only followed when it was already in view.
+    const pinned = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= 24;
     transcript.innerHTML = update.rows;
     approvalHost.innerHTML = update.approval;
     input.disabled = update.running;
@@ -508,7 +512,7 @@ ${toolbarHtml()}
       const node = document.getElementById(id);
       if (node) node.classList.toggle('on', Boolean(on));
     }
-    scroll.scrollTop = scroll.scrollHeight;
+    if (pinned) scroll.scrollTop = scroll.scrollHeight;
   });
 </script>
 </body>

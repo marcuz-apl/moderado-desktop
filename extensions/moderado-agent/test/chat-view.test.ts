@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ApprovalRequest } from '@moderado/contracts';
-import { chatHtml, escapeHtml, viewSnapshot, ChatViewState } from '../src/chat-view.js';
+import { chatHtml, emptyAutoApprove, escapeHtml, viewSnapshot, ChatViewState } from '../src/chat-view.js';
 import {
   settingsPaneHtml,
   settingsSnapshot,
@@ -92,6 +92,28 @@ describe('chat view', () => {
     // border-top put two 1px lines side by side, reading as a 2px seam.
     const html = chatHtml(state(), preview);
     expect(html).toMatch(/body\.settings-open #settings-host\s*\{[^}]*border-top:\s*none/);
+  });
+
+  it('points the collapsed auto-approve chevron the right way', () => {
+    // The collapsed state used &#9652; (UPPER LEFT TRIANGLE), which does not read
+    // as "expand". It must pair with the down-pointing triangle used when open.
+    const collapsed = chatHtml(state(), preview);
+    expect(collapsed).toContain('&#9656;');
+    expect(collapsed).not.toContain('&#9652;');
+    const open = chatHtml(
+      state({ autoApprove: { ...emptyAutoApprove(), expanded: true } }),
+      preview,
+    );
+    expect(open).toContain('&#9662;');
+  });
+
+  it('does not drag the transcript back down when the reader scrolled up', () => {
+    // scrollTop was assigned on every update, so a reader who scrolled up to
+    // re-read earlier output was yanked to the bottom by the next streamed token.
+    // The tail may only be followed when it was already pinned there.
+    const html = chatHtml(state(), preview);
+    expect(html).toMatch(/const pinned =/);
+    expect(html).toMatch(/if \(pinned\) scroll\.scrollTop = scroll\.scrollHeight/);
   });
 
   it('renders a composer input so there is somewhere to type', () => {
