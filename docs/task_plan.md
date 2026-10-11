@@ -106,3 +106,23 @@ Meet the PRD M4 exit criterion: a recurring task runs while the app is open with
 - `npm run build`: frontend and Rust builds passed.
 - `npm run dev`: Vite and the Tauri executable started; the development process was stopped after startup.
 - Local mock tests cover unattended recurring writes with checkpoints, restart recovery, transcript parsing, web search, and schedule migration. A read-only review's scheduler and search binding findings were fixed.
+
+# Activity Bar and Project Browser Plan
+
+## Goal
+
+Make the desktop sidebar navigable like an editor workbench while preserving the existing session and approval flows.
+
+## Design
+
+- A narrow icon rail switches one sidebar panel at a time: Sessions, Workspace, Checkpoints, Schedules, Source Control, Profile, and Settings. Profile sits directly above Settings at the bottom.
+- Workspace contains a lazy read-only project tree and text preview. It reuses the workspace jail and limits directory and file reads.
+- Source Control shows working tree changes and bounded commit history for a Git repository rooted at the selected workspace. It performs no Git mutations.
+- Settings groups the existing Connection and Web Search controls. All icons are local SVGs with accessible button labels and a visible selected state.
+
+## Phases
+
+1. Workspace browser and Git snapshot contracts with offline tests — pending
+2. Activity rail, contextual panels, tree, and history UI — pending
+3. Accessibility and responsive layout review — pending
+4. Full offline tests, lint, build, and Tauri startup — pending

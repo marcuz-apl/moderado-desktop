@@ -20,3 +20,8 @@
 - `run_turn` keeps a mutable history in memory; persistence must occur at safe message boundaries, including failed turns.
 - File writes occur inside `dispatch_tool` immediately after approval. The checkpoint hook belongs between approval and write.
 - SQLite is required by the PRD; `rusqlite` is the minimal direct dependency. Git CLI can provide object storage and refs without a new Git library.
+# Activity Bar Research
+
+- VS Code uses the Activity Bar on the outer edge to switch views in the Primary Side Bar. Account and Manage buttons normally sit at its bottom. Source Control has a distinct view and graph/history area. Moderado will use the same information architecture with its own visual style and local SVG icons.
+- Existing `workspace::read_text` already enforces the workspace jail and a 256 KiB text limit. A new typed directory listing can reuse the same jailed root; no general file execution is needed.
+- Existing checkpoints use Git internally, but Source Control must inspect only a repository rooted at the selected workspace so it does not read outside the workspace jail.
