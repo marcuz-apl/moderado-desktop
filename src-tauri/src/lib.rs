@@ -1,13 +1,18 @@
 pub mod agent;
 pub mod checkpoints;
 pub mod provider;
+pub mod schedules;
+pub mod search;
 pub mod sessions;
+pub mod transcript;
 pub mod workspace;
 
 use agent::runner::{run_turn_with_hooks, AgentEvent, RunConfig};
 use agent::{Approval, Mode};
 use provider::settings::ProviderSettings;
 use provider::ProviderId;
+use schedules::{ApprovalPolicy, Schedule, ScheduleStore};
+use search::{SearchConfig, SearchSettings, SearchStore};
 use serde::Serialize;
 use sessions::{CheckpointRecord, SessionRecord, SessionStore, SessionSummary};
 use std::collections::HashMap;
@@ -27,15 +32,34 @@ struct SessionRuntime {
 
 struct PendingApproval {
     id: u64,
+    preview: ApprovalEvent,
     decision: oneshot::Sender<Option<String>>,
     shown: Option<oneshot::Sender<()>>,
 }
 
 struct AppState {
     store: SessionStore,
+    schedules: ScheduleStore,
+    search: SearchStore,
     checkpoints: checkpoints::CheckpointStore,
     runtimes: Mutex<HashMap<String, Arc<SessionRuntime>>>,
     workspace_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleRunEvent {
+    session_id: String,
+    schedule_id: String,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleStartedEvent {
+    session_id: String,
+    schedule_id: String,
+    prompt: String,
 }
 
 impl AppState {
@@ -156,6 +180,169 @@ fn delete_session(state: tauri::State<'_, AppState>, session_id: String) -> Resu
 }
 
 #[tauri::command]
+fn create_schedule(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    prompt: String,
+    mode: Mode,
+    approval_policy: ApprovalPolicy,
+    next_run_at: i64,
+    interval_seconds: Option<i64>,
+) -> Result<Schedule, String> {
+    let session = state.store.get(&session_id)?;
+    let model = match mode {
+        Mode::Plan => &session.settings.plan_model,
+        Mode::Act => &session.settings.act_model,
+    };
+    if model.trim().is_empty() {
+        return Err("Save a model for this session before scheduling".into());
+    }
+    session
+        .settings
+        .provider_id
+        .base_url(&session.settings.base_url)?;
+    if matches!(mode, Mode::Plan) && matches!(approval_policy, ApprovalPolicy::AutoWrite) {
+        return Err("Auto-write approval applies only to Act mode".into());
+    }
+    if next_run_at <= schedules::unix_now() {
+        return Err("Schedule time must be in the future".into());
+    }
+    state.schedules.create(
+        &session_id,
+        &session.settings,
+        &state.search.get(&session_id)?,
+        schedules::ScheduleSpec {
+            prompt: &prompt,
+            mode,
+            approval_policy,
+            next_run_at,
+            interval_seconds,
+        },
+    )
+}
+
+#[tauri::command]
+fn list_schedules(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<Schedule>, String> {
+    state.store.get(&session_id)?;
+    state.schedules.list(&session_id)
+}
+
+#[tauri::command]
+fn delete_schedule(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    schedule_id: String,
+) -> Result<(), String> {
+    state.schedules.delete(&session_id, &schedule_id)
+}
+
+#[tauri::command]
+fn retry_schedule(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    schedule_id: String,
+) -> Result<(), String> {
+    state
+        .schedules
+        .retry(&session_id, &schedule_id, schedules::unix_now())
+}
+
+#[tauri::command]
+fn get_search_settings(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<SearchSettings, String> {
+    state.store.get(&session_id)?;
+    state.search.get(&session_id)
+}
+
+#[tauri::command]
+fn save_search_settings(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    settings: SearchSettings,
+) -> Result<(), String> {
+    state.store.get(&session_id)?;
+    state.search.save(&session_id, &settings)
+}
+
+#[tauri::command]
+async fn save_search_key(endpoint: String, api_key: String) -> Result<(), String> {
+    let endpoint = search::validate_endpoint(&endpoint)?;
+    if api_key.is_empty() {
+        return Err("Search API key cannot be empty".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let entry = keyring::Entry::new("com.moderado.desktop.search", &endpoint)
+            .map_err(|_| "Could not access OS keychain")?;
+        entry
+            .set_password(&api_key)
+            .map_err(|_| "Could not save search key to OS keychain".into())
+    })
+    .await
+    .map_err(|_| "Keychain task failed")?
+}
+
+async fn search_key(endpoint: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let entry = keyring::Entry::new("com.moderado.desktop.search", &endpoint)
+            .map_err(|_| "Could not access OS keychain")?;
+        match entry.get_password() {
+            Ok(key) => Ok(key),
+            Err(keyring::Error::NoEntry) => Ok(String::new()),
+            Err(_) => Err("Could not read search key from OS keychain".into()),
+        }
+    })
+    .await
+    .map_err(|_| "Keychain task failed")?
+}
+
+#[tauri::command]
+async fn import_transcript(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    source_session_id: String,
+    name: String,
+    format: transcript::TranscriptFormat,
+) -> Result<SessionRecord, String> {
+    let source = state.store.get(&source_session_id)?;
+    let (sender, receiver) = oneshot::channel();
+    app.dialog().file().pick_file(move |selection| {
+        let _ = sender.send(selection);
+    });
+    let selected = receiver
+        .await
+        .map_err(|_| "Transcript picker closed unexpectedly")?
+        .ok_or("No transcript selected")?;
+    let path = PathBuf::from(selected.to_string());
+    let size = std::fs::metadata(&path)
+        .map_err(|error| format!("Transcript unavailable: {error}"))?
+        .len();
+    if size > 8 * 1024 * 1024 {
+        return Err("Transcript exceeds 8 MiB".into());
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("Could not read transcript: {error}"))?;
+    let history = transcript::parse_jsonl(&text, format)?;
+    let session = state.store.create(
+        PathBuf::from(&source.workspace).as_path(),
+        &name,
+        source.settings,
+    )?;
+    if let Err(error) = state
+        .store
+        .save_state(&session.id, &session.settings, &history)
+    {
+        let _ = state.store.delete(&session.id);
+        return Err(error);
+    }
+    state.store.get(&session.id)
+}
+
+#[tauri::command]
 fn list_checkpoints(
     state: tauri::State<'_, AppState>,
     session_id: String,
@@ -268,6 +455,26 @@ fn activate_approval(
 }
 
 #[tauri::command]
+fn list_pending_approvals(state: tauri::State<'_, AppState>) -> Result<Vec<ApprovalEvent>, String> {
+    let runtimes = state
+        .runtimes
+        .lock()
+        .map_err(|_| "Session state unavailable")?;
+    let mut events = Vec::new();
+    for runtime in runtimes.values() {
+        if let Some(pending) = runtime
+            .pending
+            .lock()
+            .map_err(|_| "Approval state unavailable")?
+            .as_ref()
+        {
+            events.push(pending.preview.clone());
+        }
+    }
+    Ok(events)
+}
+
+#[tauri::command]
 async fn save_provider_key(
     provider_id: ProviderId,
     base_url: String,
@@ -361,15 +568,6 @@ async fn await_approval(
     let id = runtime.next_approval.fetch_add(1, Ordering::Relaxed) + 1;
     let (sender, receiver) = oneshot::channel();
     let (shown_sender, shown_receiver) = oneshot::channel();
-    if let Ok(mut pending) = runtime.pending.lock() {
-        *pending = Some(PendingApproval {
-            id,
-            decision: sender,
-            shown: Some(shown_sender),
-        });
-    } else {
-        return None;
-    }
     let event = ApprovalEvent {
         session_id: session_id.to_owned(),
         id,
@@ -377,10 +575,36 @@ async fn await_approval(
         before: preview.before,
         after: preview.after,
     };
-    if app.emit("approval-request", event).is_err() {
+    if let Ok(mut pending) = runtime.pending.lock() {
+        *pending = Some(PendingApproval {
+            id,
+            preview: event.clone(),
+            decision: sender,
+            shown: Some(shown_sender),
+        });
+    } else {
         return None;
     }
-    if shown_receiver.await.is_err() {
+    if app.emit("approval-request", event).is_err() {
+        if let Ok(mut pending) = runtime.pending.lock() {
+            pending.take();
+        }
+        return None;
+    }
+    if !matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(300), shown_receiver).await,
+        Ok(Ok(()))
+    ) {
+        if let Ok(mut pending) = runtime.pending.lock() {
+            pending.take();
+        }
+        let _ = app.emit(
+            "approval-expired",
+            ApprovalExpired {
+                session_id: session_id.to_owned(),
+                id,
+            },
+        );
         return None;
     }
     let decision = tokio::time::timeout(std::time::Duration::from_secs(300), receiver).await;
@@ -413,16 +637,72 @@ async fn start_turn(
     mode: Mode,
     prompt: String,
 ) -> Result<(), String> {
+    execute_turn(
+        &app,
+        state.inner(),
+        TurnRequest {
+            session_id,
+            settings,
+            mode,
+            prompt,
+            approval_policy: ApprovalPolicy::Prompt,
+            scheduled: false,
+            expected_search: None,
+        },
+    )
+    .await
+}
+
+struct TurnRequest {
+    session_id: String,
+    settings: ProviderSettings,
+    mode: Mode,
+    prompt: String,
+    approval_policy: ApprovalPolicy,
+    scheduled: bool,
+    expected_search: Option<SearchSettings>,
+}
+
+async fn execute_turn(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    request: TurnRequest,
+) -> Result<(), String> {
+    let TurnRequest {
+        session_id,
+        settings,
+        mode,
+        prompt,
+        approval_policy,
+        scheduled,
+        expected_search,
+    } = request;
     let runtime = state.runtime(&session_id)?;
-    let _guard = runtime
-        .turn_lock
-        .try_lock()
-        .map_err(|_| "This session is already running")?;
+    let _guard = if scheduled {
+        runtime.turn_lock.lock().await
+    } else {
+        runtime
+            .turn_lock
+            .try_lock()
+            .map_err(|_| "This session is already running")?
+    };
     let record = state.store.get(&session_id)?;
     let workspace = PathBuf::from(&record.workspace);
     let workspace_lock = state.workspace_lock(&record.workspace)?;
     let _workspace_guard = workspace_lock.lock().await;
     let record = state.store.get(&session_id)?;
+    if scheduled && record.settings != settings {
+        return Err("Session provider or models changed; recreate this schedule to authorize the new settings".into());
+    }
+    let live_search = state.search.get(&session_id)?;
+    if expected_search
+        .as_ref()
+        .is_some_and(|expected| *expected != live_search)
+    {
+        return Err(
+            "Session web search settings changed; recreate this schedule to authorize them".into(),
+        );
+    }
     if prompt.trim().is_empty() || prompt.len() > 64_000 {
         return Err("Prompt must be 1–64,000 characters".into());
     }
@@ -435,6 +715,16 @@ async fn start_turn(
     }
     let base_url = settings.provider_id.base_url(&settings.base_url)?;
     let api_key = configured_key(settings.provider_id, &base_url).await?;
+    let search_settings = expected_search.unwrap_or(live_search);
+    let search = if search_settings.enabled && !search_settings.endpoint.is_empty() {
+        let endpoint = search::validate_endpoint(&search_settings.endpoint)?;
+        Some(SearchConfig {
+            key: search_key(endpoint.clone()).await?,
+            endpoint,
+        })
+    } else {
+        None
+    };
     let mut messages = if record.settings.provider_id == settings.provider_id
         && record.settings.base_url == base_url
     {
@@ -446,6 +736,13 @@ async fn start_turn(
     let mut settings = settings;
     settings.base_url = base_url.clone();
     state.store.save_state(&session_id, &settings, &messages)?;
+    if scheduled && matches!(mode, Mode::Act) {
+        let checkpoint = state
+            .checkpoints
+            .create_before_run(&workspace, &session_id)?;
+        state.store.add_checkpoint(&checkpoint)?;
+        let _ = app.emit("checkpoint-created", &checkpoint);
+    }
     let result = run_turn_with_hooks(
         RunConfig {
             workspace: &workspace,
@@ -453,10 +750,21 @@ async fn start_turn(
             model: &model,
             api_key: &api_key,
             mode,
+            search: search.as_ref(),
         },
         &mut messages,
         &prompt,
-        |preview| await_approval(&app, &runtime, &session_id, preview),
+        |preview| {
+            let runtime = &runtime;
+            let session_id = &session_id;
+            async move {
+                if matches!(approval_policy, ApprovalPolicy::AutoWrite) {
+                    Some(preview.after)
+                } else {
+                    await_approval(app, runtime, session_id, preview).await
+                }
+            }
+        },
         |event| match event {
             AgentEvent::Text(value) => {
                 let _ = app.emit(
@@ -507,20 +815,131 @@ async fn start_turn(
     }
 }
 
+async fn run_due_schedule(app: tauri::AppHandle, schedule: Schedule) {
+    let _ = app.emit(
+        "schedule-started",
+        ScheduleStartedEvent {
+            session_id: schedule.session_id.clone(),
+            schedule_id: schedule.id.clone(),
+            prompt: schedule.prompt.clone(),
+        },
+    );
+    let state = app.state::<AppState>();
+    let result = match state.store.get(&schedule.session_id) {
+        Ok(session) if session.settings != schedule.settings => {
+            let error = "Session provider or models changed; recreate this schedule to authorize the new settings".to_owned();
+            Err(error)
+        }
+        Ok(_)
+            if state.search.get(&schedule.session_id).as_ref() != Ok(&schedule.search_settings) =>
+        {
+            Err(
+                "Session web search settings changed; recreate this schedule to authorize them"
+                    .into(),
+            )
+        }
+        Ok(session) => {
+            execute_turn(
+                &app,
+                state.inner(),
+                TurnRequest {
+                    session_id: schedule.session_id.clone(),
+                    settings: session.settings,
+                    mode: schedule.mode,
+                    prompt: schedule.prompt.clone(),
+                    approval_policy: schedule.approval_policy,
+                    scheduled: true,
+                    expected_search: Some(schedule.search_settings.clone()),
+                },
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    let error = result.err();
+    let finish = state
+        .schedules
+        .list(&schedule.session_id)
+        .and_then(|items| {
+            if items
+                .into_iter()
+                .find(|item| item.id == schedule.id)
+                .is_some_and(|item| item.in_flight)
+            {
+                if state.store.get(&schedule.session_id)?.settings != schedule.settings {
+                    state.schedules.pause(&schedule.id, "Session provider or models changed; recreate this schedule to authorize the new settings")
+                } else if state.search.get(&schedule.session_id)? != schedule.search_settings {
+                    state.schedules.pause(&schedule.id, "Session web search settings changed; recreate this schedule to authorize them")
+                } else {
+                    state.schedules.finish(&schedule.id, error.as_deref(), schedules::unix_now())
+                }
+            } else {
+                Ok(())
+            }
+        });
+    if let Err(failure) = finish {
+        let _ = app.emit("scheduler-error", failure);
+    }
+    let _ = app.emit(
+        "schedule-run",
+        ScheduleRunEvent {
+            session_id: schedule.session_id,
+            schedule_id: schedule.id,
+            error,
+        },
+    );
+}
+
+async fn poll_schedules(app: tauri::AppHandle) {
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        ticker.tick().await;
+        let due = {
+            let state = app.state::<AppState>();
+            state.schedules.claim_due(schedules::unix_now(), 8)
+        };
+        match due {
+            Ok(schedules) => {
+                for schedule in schedules {
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        run_due_schedule(handle, schedule).await;
+                    });
+                }
+            }
+            Err(error) => {
+                let _ = app.emit("scheduler-error", error);
+            }
+        }
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("sessions.sqlite");
-            let store = SessionStore::open(path).map_err(std::io::Error::other)?;
+            let store = SessionStore::open(path.clone()).map_err(std::io::Error::other)?;
+            let schedules = ScheduleStore::open(path.clone()).map_err(std::io::Error::other)?;
+            let search = SearchStore::open(path).map_err(std::io::Error::other)?;
+            schedules
+                .recover_interrupted()
+                .map_err(std::io::Error::other)?;
             let checkpoints =
                 checkpoints::CheckpointStore::new(app.path().app_data_dir()?.join("checkpoints"))
                     .map_err(std::io::Error::other)?;
             app.manage(AppState {
                 store,
+                schedules,
+                search,
                 checkpoints,
                 runtimes: Mutex::new(HashMap::new()),
                 workspace_locks: Mutex::new(HashMap::new()),
+            });
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                poll_schedules(handle).await;
             });
             Ok(())
         })
@@ -530,11 +949,20 @@ pub fn run() {
             get_session,
             rename_session,
             delete_session,
+            create_schedule,
+            list_schedules,
+            delete_schedule,
+            retry_schedule,
+            get_search_settings,
+            save_search_settings,
+            save_search_key,
+            import_transcript,
             list_checkpoints,
             preview_checkpoint,
             restore_checkpoint,
             respond_approval,
             activate_approval,
+            list_pending_approvals,
             save_provider_key,
             discover_models,
             provider_catalog,
@@ -566,6 +994,8 @@ mod tests {
             .unwrap();
         let second = store.create(root.path(), "Second", settings).unwrap();
         let state = AppState {
+            schedules: ScheduleStore::open(root.path().join("sessions.sqlite")).unwrap(),
+            search: SearchStore::open(root.path().join("sessions.sqlite")).unwrap(),
             store,
             checkpoints: checkpoints::CheckpointStore::new(root.path().join("checkpoints"))
                 .unwrap(),

@@ -30,3 +30,12 @@
 - Review found that `git add` could execute configured clean filters. Replaced staging with direct blob hashing and index plumbing; a regression test uses a required filter command that must not run.
 - Restore now attempts to roll back partial application, tracks executable bits on Unix, and records a context marker in every session sharing the workspace. The approval timeout starts when its dialog is shown, and expired approvals leave the UI queue.
 - Offline tests, lint, build, and Tauri startup smoke checks passed.
+
+## M4
+
+- Added persistent one-time and recurring schedules with explicit write approval policies. Scheduled Act runs create a checkpoint before execution, and each approved write retains the normal checkpoint and workspace jail behavior.
+- Claims prevent duplicate recurring runs while a prior run is active. Interrupted runs pause on restart and require a visible retry; provider or model changes pause schedules until recreated.
+- Added Codex and Claude Code JSONL text import into a new persistent session, excluding tool payloads and thinking content.
+- Added a per-session web search toggle, configurable API endpoint, and optional key stored in the OS keychain. The agent sees web search only when the endpoint is configured and search is enabled.
+- Read-only review identified interrupted-run recovery, recurring backlog, startup approval delivery, and provider and search capability binding risks; fixes were applied. Search endpoints with a pre-existing `q` parameter are rejected.
+- Final verification: 49 Rust tests and 1 frontend test passed offline; lint and build passed; Vite and the Tauri executable started successfully.

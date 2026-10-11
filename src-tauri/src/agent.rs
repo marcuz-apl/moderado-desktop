@@ -7,7 +7,7 @@ use std::path::Path;
 
 pub mod runner;
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     Plan,
@@ -21,12 +21,15 @@ pub struct Approval {
     pub after: String,
 }
 
-pub fn tool_definitions(mode: Mode) -> Vec<Value> {
+pub fn tool_definitions(mode: Mode, web_search: bool) -> Vec<Value> {
     let mut tools = vec![
         json!({"type":"function","function":{"name":"list_files","description":"List direct children of a workspace directory","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a UTF-8 file in the workspace","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"search_files","description":"Search UTF-8 workspace files for a literal text query","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
     ];
+    if web_search {
+        tools.push(json!({"type":"function","function":{"name":"web_search","description":"Search the configured web search API","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}));
+    }
     if matches!(mode, Mode::Act) {
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
@@ -151,6 +154,17 @@ where
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn web_search_is_advertised_only_when_configured() {
+        let has_search = |enabled| {
+            tool_definitions(Mode::Plan, enabled)
+                .iter()
+                .any(|tool| tool["function"]["name"] == "web_search")
+        };
+        assert!(!has_search(false));
+        assert!(has_search(true));
+    }
 
     #[tokio::test]
     async fn plan_mode_rejects_write_before_approval() {

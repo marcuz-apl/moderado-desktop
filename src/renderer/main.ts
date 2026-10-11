@@ -15,6 +15,10 @@ type ApprovalEvent = { sessionId: string; id: number; path: string; before: stri
 type ApprovalExpired = { sessionId: string; id: number };
 type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
 type CheckpointPreview = { checkpointId: string; currentTree: string; changes: { path: string; before: string; after: string }[] };
+type Schedule = { id: string; sessionId: string; prompt: string; mode: 'plan' | 'act'; approvalPolicy: 'prompt' | 'auto_write'; nextRunAt: number; intervalSeconds: number | null; enabled: boolean; inFlight: boolean; lastRunAt: number | null; lastError: string | null };
+type SearchSettings = { enabled: boolean; endpoint: string };
+type ScheduleStarted = { sessionId: string; scheduleId: string; prompt: string };
+type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const transcript = $<HTMLElement>('transcript');
@@ -26,12 +30,16 @@ const endpoint = $<HTMLInputElement>('endpoint');
 const keyField = $<HTMLInputElement>('api-key');
 const approvalDialog = $<HTMLDialogElement>('approval-dialog');
 const restoreDialog = $<HTMLDialogElement>('restore-dialog');
+const scheduleDialog = $<HTMLDialogElement>('schedule-dialog');
+const importDialog = $<HTMLDialogElement>('import-dialog');
 const emptyState = $('empty-state').cloneNode(true);
 
 let providers: ProviderPreset[] = [];
 let initialized = false;
 let activeProvider: ProviderId = 'gateway';
 let activeSessionId: string | null = null;
+let scheduleSessionId: string | null = null;
+let importSessionId: string | null = null;
 let mode: 'plan' | 'act' = 'plan';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
@@ -40,6 +48,7 @@ let summaries: SessionSummary[] = [];
 const sessions = new Map<string, SessionRecord>();
 const views = new Map<string, DisplayMessage[]>();
 const running = new Set<string>();
+const scheduledPending = new Map<string, number>();
 const approvalQueue: ApprovalEvent[] = [];
 const modeBySession = new Map<string, 'plan' | 'act'>();
 const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>();
@@ -177,6 +186,12 @@ async function selectSession(id: string): Promise<void> {
   renderTranscript();
   updateControls();
   await refreshCheckpoints();
+  await refreshSchedules();
+  const searchSettings = await invoke<SearchSettings>('get_search_settings', { sessionId: id });
+  if (id !== activeSessionId) return;
+  $<HTMLInputElement>('search-enabled').checked = searchSettings.enabled;
+  $<HTMLInputElement>('search-endpoint').value = searchSettings.endpoint;
+  $<HTMLInputElement>('search-key').value = '';
   setStatus(running.has(id) ? 'Agent is working…' : 'Session ready.');
 }
 
@@ -193,6 +208,12 @@ function updateControls(): void {
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
+  $<HTMLButtonElement>('new-schedule').disabled = !activeSessionId;
+  $<HTMLButtonElement>('import-transcript').disabled = !activeSessionId;
+  $<HTMLButtonElement>('save-search').disabled = !activeSessionId || busy;
+  $<HTMLInputElement>('search-enabled').disabled = !activeSessionId || busy;
+  $<HTMLInputElement>('search-endpoint').disabled = !activeSessionId || busy;
+  $<HTMLInputElement>('search-key').disabled = !activeSessionId || busy;
 }
 
 function setMode(next: 'plan' | 'act'): void {
@@ -220,6 +241,54 @@ async function refreshCheckpoints(): Promise<void> {
       button.textContent = `${checkpoint.path} · ${new Date(checkpoint.createdAt * 1000).toLocaleString()}`;
       button.addEventListener('click', () => { void previewCheckpoint(id, checkpoint.id); });
       return button;
+    }));
+  } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
+}
+
+async function refreshSchedules(): Promise<void> {
+  const list = $('schedule-list');
+  const id = activeSessionId;
+  if (!id) { list.textContent = 'Select a session.'; return; }
+  try {
+    const schedules = await invoke<Schedule[]>('list_schedules', { sessionId: id });
+    if (id !== activeSessionId) return;
+    if (!schedules.length) { list.textContent = 'No scheduled tasks.'; return; }
+    list.replaceChildren(...schedules.map((schedule) => {
+      const item = document.createElement('div');
+      item.className = 'schedule-item';
+      const name = document.createElement('strong');
+      name.textContent = schedule.prompt;
+      name.title = schedule.prompt;
+      const timing = document.createElement('span');
+      timing.textContent = `${schedule.inFlight ? 'Running' : schedule.enabled ? 'Next' : schedule.lastError ? 'Paused' : 'Completed'}: ${new Date(schedule.nextRunAt * 1000).toLocaleString()}${schedule.intervalSeconds ? ` · every ${schedule.intervalSeconds / 60} min` : ''}`;
+      const policy = document.createElement('span');
+      policy.textContent = `${schedule.mode === 'act' ? 'Act' : 'Plan'} · ${schedule.approvalPolicy === 'auto_write' ? 'auto-approve writes' : 'ask before writes'}`;
+      item.append(name, timing, policy);
+      if (schedule.lastError) {
+        const error = document.createElement('span');
+        error.className = 'schedule-error';
+        error.textContent = schedule.lastError;
+        item.append(error);
+      }
+      if (!schedule.enabled && schedule.lastError) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = 'Retry now';
+        retry.addEventListener('click', async () => {
+          try { await invoke('retry_schedule', { sessionId: id, scheduleId: schedule.id }); await refreshSchedules(); }
+          catch (error) { setStatus(String(error)); }
+        });
+        item.append(retry);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Delete schedule';
+      remove.addEventListener('click', async () => {
+        try { await invoke('delete_schedule', { sessionId: id, scheduleId: schedule.id }); await refreshSchedules(); }
+        catch (error) { setStatus(String(error)); }
+      });
+      item.append(remove);
+      return item;
     }));
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
@@ -256,6 +325,13 @@ function showChanges(before: string, after: string): void {
     line.textContent = `${kind === 'added' ? '+' : kind === 'removed' ? '-' : ' '} ${text}\n`;
     return line;
   }));
+}
+
+function enqueueApproval(request: ApprovalEvent): void {
+  if (currentApproval?.sessionId === request.sessionId && currentApproval.id === request.id) return;
+  if (approvalQueue.some((item) => item.sessionId === request.sessionId && item.id === request.id)) return;
+  approvalQueue.push(request);
+  showNextApproval();
 }
 
 function showNextApproval(): void {
@@ -297,6 +373,8 @@ async function answerApproval(accepted: boolean): Promise<void> {
 
 async function initialize(): Promise<void> {
   try {
+    await Promise.all([turnListenerReady, approvalListenerReady, approvalExpiryReady, checkpointListenerReady, scheduleStartedReady, scheduleRunReady, schedulerErrorReady]);
+    for (const pending of await invoke<ApprovalEvent[]>('list_pending_approvals')) enqueueApproval(pending);
     providers = await invoke<ProviderPreset[]>('provider_catalog');
     providerSelect.replaceChildren(...providers.map((provider) => {
       const option = document.createElement('option');
@@ -363,6 +441,79 @@ $('workspace-button').addEventListener('click', async () => {
   } catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
 });
 
+function localDateTime(date: Date): string {
+  const two = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+$('new-schedule').addEventListener('click', () => {
+  if (!activeSessionId) return;
+  scheduleSessionId = activeSessionId;
+  $<HTMLTextAreaElement>('schedule-prompt').value = '';
+  $<HTMLInputElement>('schedule-time').value = localDateTime(new Date(Date.now() + 5 * 60_000));
+  $<HTMLInputElement>('schedule-repeat').value = '';
+  $<HTMLSelectElement>('schedule-mode').value = mode;
+  $<HTMLSelectElement>('schedule-policy').value = 'prompt';
+  scheduleDialog.showModal();
+});
+$('cancel-schedule').addEventListener('click', () => scheduleDialog.close());
+$<HTMLFormElement>('schedule-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const sessionId = scheduleSessionId;
+  if (!sessionId) return;
+  const time = new Date($<HTMLInputElement>('schedule-time').value).getTime();
+  const repeat = $<HTMLInputElement>('schedule-repeat').value.trim();
+  const intervalSeconds = repeat ? Number(repeat) * 60 : null;
+  const selectedMode = $<HTMLSelectElement>('schedule-mode').value as 'plan' | 'act';
+  const approvalPolicy = $<HTMLSelectElement>('schedule-policy').value as 'prompt' | 'auto_write';
+  if (!Number.isFinite(time) || time <= Date.now()) { setStatus('Choose a future run time.'); return; }
+  if (repeat && (!Number.isInteger(intervalSeconds) || intervalSeconds === null || intervalSeconds < 60 || intervalSeconds > 2_592_000)) { setStatus('Repeat interval must be 1 to 43,200 minutes.'); return; }
+  if (selectedMode === 'plan' && approvalPolicy === 'auto_write') { setStatus('Auto-approve writes requires Act mode.'); return; }
+  try {
+    await invoke<Schedule>('create_schedule', { sessionId, prompt: $<HTMLTextAreaElement>('schedule-prompt').value, mode: selectedMode, approvalPolicy, nextRunAt: Math.floor(time / 1000), intervalSeconds });
+    scheduleDialog.close();
+    if (sessionId === activeSessionId) await refreshSchedules();
+    setStatus('Task scheduled. It will run while the app is open.');
+  } catch (error) { setStatus(String(error)); }
+});
+
+$('import-transcript').addEventListener('click', () => {
+  const session = activeSession();
+  if (!session) return;
+  importSessionId = session.id;
+  $<HTMLInputElement>('import-name').value = `${session.name} import`;
+  importDialog.showModal();
+});
+$('cancel-import').addEventListener('click', () => importDialog.close());
+$('save-search').addEventListener('click', async () => {
+  const sessionId = activeSessionId;
+  if (!sessionId) return;
+  const endpoint = $<HTMLInputElement>('search-endpoint').value.trim();
+  const apiKey = $<HTMLInputElement>('search-key').value;
+  const settings: SearchSettings = { enabled: $<HTMLInputElement>('search-enabled').checked, endpoint };
+  try {
+    if (apiKey) {
+      if (!endpoint) throw new Error('Enter a search endpoint before saving its API key.');
+      await invoke('save_search_key', { endpoint, apiKey });
+      $<HTMLInputElement>('search-key').value = '';
+    }
+    await invoke('save_search_settings', { sessionId, settings });
+    setStatus(endpoint && settings.enabled ? 'Web search is available for this session.' : 'Search settings saved.');
+  } catch (error) { setStatus(String(error)); }
+});
+$<HTMLFormElement>('import-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const sourceSessionId = importSessionId;
+  if (!sourceSessionId) return;
+  try {
+    const record = await invoke<SessionRecord>('import_transcript', { sourceSessionId, name: $<HTMLInputElement>('import-name').value, format: $<HTMLSelectElement>('import-format').value });
+    importDialog.close();
+    await refreshSummaries();
+    await selectSession(record.id);
+    setStatus(`Imported ${record.history.length} text messages.`);
+  } catch (error) { if (String(error) !== 'No transcript selected') setStatus(String(error)); }
+});
+
 $('rename-session').addEventListener('click', async () => {
   const session = activeSession();
   if (!session || running.has(session.id)) return;
@@ -395,6 +546,7 @@ $('delete-session').addEventListener('click', async () => {
       $('workspace-path').textContent = 'Agent files stay in this folder.';
       renderTranscript();
       await refreshCheckpoints();
+      await refreshSchedules();
       updateControls();
       setStatus('Create a session to begin.');
     }
@@ -406,10 +558,10 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
   if (payload.kind === 'text') addDisplay(id, 'Agent', payload.value ?? '', true);
   else if (payload.kind === 'tool') addDisplay(id, 'Tool', payload.value ?? '');
   else if (payload.kind === 'error') {
-    running.delete(id);
+    if (!scheduledPending.has(id)) running.delete(id);
     if (id === activeSessionId) setStatus(payload.value ?? 'Turn failed.');
   } else {
-    running.delete(id);
+    if (!scheduledPending.has(id)) running.delete(id);
     if (id === activeSessionId) setStatus('Ready.');
     void refreshSession(id, true).then(() => refreshSummaries()).catch((error) => setStatus(String(error)));
   }
@@ -418,8 +570,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
 });
 
 const approvalListenerReady = listen<ApprovalEvent>('approval-request', ({ payload }) => {
-  approvalQueue.push(payload);
-  showNextApproval();
+  enqueueApproval(payload);
 });
 
 const approvalExpiryReady = listen<ApprovalExpired>('approval-expired', ({ payload }) => {
@@ -436,6 +587,29 @@ const approvalExpiryReady = listen<ApprovalExpired>('approval-expired', ({ paylo
 const checkpointListenerReady = listen<Checkpoint>('checkpoint-created', ({ payload }) => {
   if (payload.sessionId === activeSessionId) void refreshCheckpoints();
 });
+
+const scheduleStartedReady = listen<ScheduleStarted>('schedule-started', ({ payload }) => {
+  scheduledPending.set(payload.sessionId, (scheduledPending.get(payload.sessionId) ?? 0) + 1);
+  running.add(payload.sessionId);
+  addDisplay(payload.sessionId, 'You', `[Scheduled] ${payload.prompt}`);
+  if (payload.sessionId === activeSessionId) setStatus('Scheduled task is running…');
+  renderSessions();
+  updateControls();
+});
+
+const scheduleRunReady = listen<ScheduleRun>('schedule-run', ({ payload }) => {
+  const remaining = (scheduledPending.get(payload.sessionId) ?? 1) - 1;
+  if (remaining > 0) scheduledPending.set(payload.sessionId, remaining);
+  else { scheduledPending.delete(payload.sessionId); running.delete(payload.sessionId); }
+  if (payload.sessionId === activeSessionId) {
+    setStatus(payload.error ? `Scheduled task failed: ${payload.error}` : 'Scheduled task completed.');
+    void refreshSchedules();
+  }
+  renderSessions();
+  updateControls();
+});
+
+const schedulerErrorReady = listen<string>('scheduler-error', ({ payload }) => setStatus(`Scheduler error: ${payload}`));
 
 $('approve').addEventListener('click', () => { void answerApproval(true); });
 $('reject').addEventListener('click', () => { void answerApproval(false); });
@@ -489,7 +663,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   updateControls();
   renderSessions();
   try {
-    await Promise.all([turnListenerReady, approvalListenerReady, approvalExpiryReady, checkpointListenerReady]);
+    await Promise.all([turnListenerReady, approvalListenerReady, approvalExpiryReady, checkpointListenerReady, scheduleStartedReady, scheduleRunReady, schedulerErrorReady]);
     await saveEnteredKey(settings);
     await invoke('save_provider_settings', { settings });
     const previous = conversationBindings.get(id);
@@ -507,7 +681,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     addDisplay(id, 'Error', String(error));
     if (id === activeSessionId) setStatus(String(error));
   } finally {
-    running.delete(id);
+    if (!scheduledPending.has(id)) running.delete(id);
     renderSessions();
     updateControls();
     if (id === activeSessionId) prompt.focus();

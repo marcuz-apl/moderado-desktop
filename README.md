@@ -6,13 +6,13 @@ Moderado Desktop follows the Cline Desktop interaction model — parallel sessio
 
 ## Current build
 
-M3 supports multiple sessions with independent conversations and per-session provider settings. Sessions and histories are saved in SQLite under the app-data directory and reload after restart. Sessions in separate workspaces can run concurrently. Approved writes create Git-backed checkpoints before changing files; the checkpoint list offers a diff preview and confirmed restore. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. Command execution remains planned work.
+M4 supports multiple persistent sessions, one-time and repeating task schedules, and text transcript imports from Codex and Claude Code JSONL files. Scheduled runs work while the desktop app is open and use the session's configured provider and models. An explicit per-schedule approval choice controls whether Act-mode file writes wait for review or proceed unattended; scheduled Act runs create a checkpoint before contacting the model, and writes create another checkpoint before changing files. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. Command execution and web search remain planned work.
 
-## Planned features
+## Capabilities
 
 - **Parallel sessions**: run multiple isolated agent sessions concurrently, each bound to its own workspace folder and provider/model.
 - **Plan/Act dual mode**: Plan mode is strictly read-only; Act mode enables mutating tools. Each mode can use a different model.
-- **Human-in-the-loop approval**: every file write, edit, or command execution requires explicit approval with a diff preview.
+- **Human-in-the-loop approval**: manual file writes and edits require explicit approval with a diff preview. Scheduled Act tasks can use an explicit auto-write preset.
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.
 - **Local-first**: fully usable offline with Ollama or LM Studio; no accounts required at first launch.
 - **No telemetry**: data never leaves your machine except to explicitly configured remote providers.
@@ -55,6 +55,12 @@ Create a session to choose its workspace folder, then select a provider. Moderad
 
 Each approved file write or edit creates a checkpoint of the workspace before applying the change. Select a checkpoint to review file differences, then confirm restore. Restore creates a safety checkpoint of the current workspace first. Git is required for checkpoints; the app uses the workspace's Git repository when the workspace is its root, or a separate Git store in app data otherwise. Checkpoint snapshots include nonignored workspace files, so inspect the restore preview before confirming.
 
+To schedule a task, save the session's provider and models by sending a task, then choose **Schedule task**. Set the first run time, optionally enter a repeat interval in minutes, and select Plan or Act mode. **Ask me** is the default write policy; choose **Auto-approve writes** explicitly for unattended Act work. If the app is closed at a due time, it claims the overdue occurrence on the next launch. A repeating schedule skips missed intervals and advances to its next future time. Interrupted runs pause for review and can be retried. A schedule pauses if its provider, models, or web search settings change; recreate it to authorize the new settings. Delete a schedule to stop future runs.
+
+Web search is enabled by default per session, but unavailable until you save a search API endpoint. In **Web search**, enter an HTTPS endpoint (or a loopback HTTP endpoint) and optionally an API key, which stays in the OS keychain. The API must accept `GET endpoint?q=term` and return JSON such as `{"results":[{"title":"Result","url":"https://example.com","snippet":"Summary"}]}`. Disable the checkbox to remove web search from that session's agent tools. Search requests go only to the configured endpoint.
+
+To import an existing conversation, select a session for the workspace, choose **Import transcript**, and select a Codex or Claude Code JSONL file. Moderado creates a new session containing user and assistant text. Tool outputs, thinking blocks, and metadata are excluded. Imported text becomes context for the selected provider when you send the next task.
+
 Changing the provider or its base URL starts a new conversation on the next task, so earlier local context is never sent to a newly selected remote provider. Switching between Plan and Act keeps the current conversation.
 
 The provider profiles use the same OpenAI-compatible streaming transport. Their preset URLs follow the providers' published API documentation: [NVIDIA NIM](https://docs.api.nvidia.com/nim/reference/llm-apis), [OpenRouter](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request), [Agnes AI](https://github.com/AgnesAI-Labs/AgnesAI-Models/blob/main/MODEL_CATALOG.md), [OrcaRouter](https://www.orcarouter.ai/switch/openrouter), and [LM Studio](https://lmstudio.ai/docs/developer/openai-compat). Some models may not support tool calls even if their provider accepts the API format; choose a tool-capable model for agent tasks.
@@ -69,6 +75,9 @@ src-tauri/src/
   provider.rs  # Provider catalog and OpenAI-compatible streaming client
   provider/settings.rs # Local provider settings without secrets
   sessions.rs  # SQLite sessions, histories, and checkpoint metadata
+  schedules.rs # Persistent schedules and due-run claiming
+  search.rs    # Per-session search settings and configured API client
+  transcript.rs # Codex and Claude Code JSONL text import
   checkpoints.rs # Git snapshots, diff preview, and restore
   workspace.rs # Workspace jail and file operations
 src/renderer/  # TypeScript UI and styles

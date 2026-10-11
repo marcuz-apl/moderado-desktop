@@ -86,14 +86,23 @@ Meet the PRD M4 exit criterion: a recurring task runs while the app is open with
 
 ## Design
 
-- Persist schedule definitions and run outcomes in the existing SQLite database. Poll due schedules from the Tauri runtime; claim each due run in SQLite before execution so an app restart does not launch the same occurrence twice.
+- Persist schedule definitions and run outcomes in the existing SQLite database. Poll due schedules from the Tauri runtime; claim each due run in SQLite before execution. Interrupted runs pause for explicit retry on restart.
 - Reuse the manual turn path for scheduled runs, including workspace locks, provider/keychain handling, history persistence, tool dispatcher, and checkpoints. An explicit per-schedule approval preset controls whether writes prompt or auto-approve. A scheduled Act run gets a checkpoint before contacting the model.
 - Import user and assistant text from Codex rollout JSONL and Claude Code session JSONL. Drop tool payloads and thinking blocks; reject empty/oversized input. Save into a new SQLite session bound to the selected workspace and current provider settings.
 - Add schedule and import controls to the session UI, plus run-status and validation feedback. Keep all scheduling local to the desktop process.
+- Add per-session web search settings, default enabled, backed by a user-configured API endpoint. Store optional keys in the OS keychain and expose the tool only when configured.
 
 ## Phases
 
-1. SQLite schedule model, validation, claiming, and restart tests — pending
-2. Shared scheduled turn execution and policy tests — pending
-3. Transcript parsers and import tests — pending
-4. UI, settings hardening, docs, full verification and review — pending
+1. SQLite schedule model, validation, claiming, and restart tests — complete
+2. Shared scheduled turn execution and policy tests — complete
+3. Transcript parsers and import tests — complete
+4. UI, settings hardening, docs, full verification and review — complete
+
+## Verification
+
+- `npm test`: 49 Rust tests and 1 frontend test passed offline.
+- `npm run lint`: ESLint, TypeScript, and Clippy passed.
+- `npm run build`: frontend and Rust builds passed.
+- `npm run dev`: Vite and the Tauri executable started; the development process was stopped after startup.
+- Local mock tests cover unattended recurring writes with checkpoints, restart recovery, transcript parsing, web search, and schedule migration. A read-only review's scheduler and search binding findings were fixed.

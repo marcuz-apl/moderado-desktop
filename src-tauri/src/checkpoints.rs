@@ -48,9 +48,27 @@ impl CheckpointStore {
         path: &str,
     ) -> Result<CheckpointRecord, String> {
         workspace::resolve_path(workspace, path)?;
+        self.create_snapshot(workspace, session_id, path, &[path.to_owned()])
+    }
+
+    pub fn create_before_run(
+        &self,
+        workspace: &Path,
+        session_id: &str,
+    ) -> Result<CheckpointRecord, String> {
+        self.create_snapshot(workspace, session_id, "Scheduled run", &[])
+    }
+
+    fn create_snapshot(
+        &self,
+        workspace: &Path,
+        session_id: &str,
+        path: &str,
+        force_paths: &[String],
+    ) -> Result<CheckpointRecord, String> {
         let repo = self.repo(workspace, session_id)?;
         let id = new_id();
-        let tree = self.snapshot_tree(&repo, workspace, &[path.to_owned()])?;
+        let tree = self.snapshot_tree(&repo, workspace, force_paths)?;
         let commit = git(
             &repo,
             workspace,

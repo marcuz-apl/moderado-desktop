@@ -1,5 +1,6 @@
 use super::{dispatch_tool_with_checkpoint, tool_definitions, Approval, Mode};
 use crate::provider;
+use crate::search::{self, SearchConfig};
 use serde_json::{json, Value};
 use std::future::Future;
 use std::path::Path;
@@ -10,6 +11,7 @@ pub struct RunConfig<'a> {
     pub model: &'a str,
     pub api_key: &'a str,
     pub mode: Mode,
+    pub search: Option<&'a SearchConfig>,
 }
 
 #[derive(Debug)]
@@ -60,7 +62,7 @@ where
 {
     history.push(json!({"role":"user","content":prompt}));
     persist(history)?;
-    let tools = tool_definitions(config.mode);
+    let tools = tool_definitions(config.mode, config.search.is_some());
     let mode_instruction = match config.mode {
         Mode::Plan => "Plan mode: inspect the workspace and explain a plan. File mutations are unavailable.",
         Mode::Act => "Act mode: complete the user's task using the available tools. File writes require user approval.",
@@ -96,14 +98,27 @@ where
             .push(json!({"role":"assistant","content":completion.content,"tool_calls":wire_calls}));
         persist(history)?;
         for call in calls {
-            let result = dispatch_tool_with_checkpoint(
-                config.workspace,
-                config.mode,
-                &call,
-                &mut approve,
-                |preview| before_mutation(preview),
-            )
-            .await;
+            let result = if call.name == "web_search" {
+                match config.search {
+                    Some(search) => match serde_json::from_str::<Value>(&call.arguments) {
+                        Ok(args) => match args.get("query").and_then(Value::as_str) {
+                            Some(query) => search::query(search, query).await,
+                            None => Err("Search query is required".into()),
+                        },
+                        Err(_) => Err("Invalid tool arguments".into()),
+                    },
+                    None => Err("Web search is unavailable for this session".into()),
+                }
+            } else {
+                dispatch_tool_with_checkpoint(
+                    config.workspace,
+                    config.mode,
+                    &call,
+                    &mut approve,
+                    |preview| before_mutation(preview),
+                )
+                .await
+            };
             let value = match result {
                 Ok(value) => value,
                 Err(error) => format!("Error: {error}"),
@@ -190,6 +205,7 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
+                search: None,
             },
             &mut history,
             "Create hello.txt",
@@ -240,6 +256,7 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
+                search: None,
             },
             &mut history,
             "Write a.txt",
@@ -284,6 +301,7 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Plan,
+                search: None,
             },
             &mut history,
             "Plan a change",
@@ -359,6 +377,7 @@ mod tests {
                     model: "test-model",
                     api_key: "",
                     mode: Mode::Act,
+                    search: None,
                 },
                 &mut history,
                 "Create m2.txt",
@@ -424,6 +443,7 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
+                search: None,
             },
             &mut history,
             "Change file.txt",
@@ -462,5 +482,96 @@ mod tests {
             std::fs::read_to_string(workspace.join("file.txt")).unwrap(),
             "before"
         );
+    }
+
+    #[tokio::test]
+    async fn recurring_auto_approved_run_writes_with_checkpoints() {
+        use crate::checkpoints::CheckpointStore;
+        use crate::provider::settings::ProviderSettings;
+        use crate::provider::ProviderId;
+        use crate::schedules::{ApprovalPolicy, ScheduleSpec, ScheduleStore};
+        use crate::search::SearchSettings;
+        use crate::sessions::SessionStore;
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::write(workspace.join("file.txt"), "before").unwrap();
+        let database = root.path().join("sessions.sqlite");
+        let sessions = SessionStore::open(database.clone()).unwrap();
+        let settings = ProviderSettings {
+            provider_id: ProviderId::Ollama,
+            base_url: "http://localhost:11434/v1".into(),
+            plan_model: "model".into(),
+            act_model: "model".into(),
+        };
+        let session = sessions
+            .create(&workspace, "Recurring", settings.clone())
+            .unwrap();
+        let schedules = ScheduleStore::open(database).unwrap();
+        schedules
+            .create(
+                &session.id,
+                &settings,
+                &SearchSettings::default(),
+                ScheduleSpec {
+                    prompt: "Update file",
+                    mode: Mode::Act,
+                    approval_policy: ApprovalPolicy::AutoWrite,
+                    next_run_at: 100,
+                    interval_seconds: Some(60),
+                },
+            )
+            .unwrap();
+        let due = schedules.claim_due(100, 8).unwrap();
+        assert_eq!(due.len(), 1);
+        let checkpoints = CheckpointStore::new(root.path().join("checkpoints")).unwrap();
+        let before_run = checkpoints
+            .create_before_run(&workspace, &session.id)
+            .unwrap();
+        sessions.add_checkpoint(&before_run).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            read_request(&mut first);
+            respond(&mut first, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"file.txt\\\",\\\"content\\\":\\\"after\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n");
+            let (mut second, _) = listener.accept().unwrap();
+            read_request(&mut second);
+            respond(
+                &mut second,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: [DONE]\n\n",
+            );
+        });
+        let mut history = Vec::new();
+        run_turn_with_hooks(
+            RunConfig {
+                workspace: &workspace,
+                base_url: &base,
+                model: "model",
+                api_key: "",
+                mode: Mode::Act,
+                search: None,
+            },
+            &mut history,
+            &due[0].prompt,
+            |preview| async move { Some(preview.after) },
+            |_| {},
+            |preview| {
+                let checkpoint = checkpoints.create(&workspace, &session.id, &preview.path)?;
+                sessions.add_checkpoint(&checkpoint)
+            },
+            |history| sessions.save_state(&session.id, &settings, history),
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
+        schedules.finish(&due[0].id, None, 100).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("file.txt")).unwrap(),
+            "after"
+        );
+        assert_eq!(sessions.list_checkpoints(&session.id).unwrap().len(), 2);
+        assert_eq!(schedules.list(&session.id).unwrap()[0].next_run_at, 160);
+        assert!(schedules.claim_due(100, 8).unwrap().is_empty());
     }
 }
