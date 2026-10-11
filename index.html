@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moderado Desktop</title>
+    <link rel="stylesheet" href="/src/renderer/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">M</span><span>moderado<small>DESKTOP</small></span></div>
+        <div class="sidebar-section">
+          <p class="eyebrow">WORKSPACE</p>
+          <button id="workspace-button" class="workspace-button" type="button"><span id="workspace-name">Choose a folder</span><span>↗</span></button>
+          <p id="workspace-path" class="path">Agent files stay in this folder.</p>
+        </div>
+        <div class="sidebar-section settings">
+          <p class="eyebrow">CONNECTION</p>
+          <label for="endpoint">Endpoint</label>
+          <input id="endpoint" type="url" spellcheck="false" value="http://localhost:11434/v1" placeholder="https://gateway.example/v1" />
+          <label for="model">Model</label>
+          <input id="model" type="text" spellcheck="false" placeholder="Model ID" />
+          <label for="api-key">API key <span class="muted">remote providers</span></label>
+          <input id="api-key" type="password" autocomplete="off" placeholder="Saved in OS keychain" />
+          <p class="hint">Use your organization's Gateway URL or a local OpenAI-compatible server. Entered keys are saved to your OS keychain for that endpoint.</p>
+        </div>
+        <div class="sidebar-footer"><span class="status-dot"></span> Local session <span class="version">v0.1</span></div>
+      </aside>
+      <main class="main">
+        <header class="topbar"><div><p class="eyebrow">AGENT SESSION</p><h1>Workspace conversation</h1></div><div class="mode-control" role="group" aria-label="Agent mode"><button id="plan-mode" class="selected" type="button" aria-pressed="true">Plan</button><button id="act-mode" type="button" aria-pressed="false">Act</button></div></header>
+        <section id="transcript" class="transcript" aria-label="Conversation" aria-live="polite">
+          <div id="empty-state" class="empty-state"><div class="empty-symbol">⌘</div><p class="eyebrow">READY WHEN YOU ARE</p><h2>Start with a task.</h2><p>Choose a workspace and model, then ask the agent to explore or change a file. Act mode asks before every write.</p></div>
+        </section>
+        <div class="composer-wrap"><p id="status" class="status" role="status">Choose a workspace to begin.</p><form id="composer"><textarea id="prompt" rows="3" placeholder="What should the agent work on?" aria-label="Message" required></textarea><div class="composer-bottom"><span>Enter to send · Shift+Enter for a new line</span><button id="send" type="submit">Send <span aria-hidden="true">↗</span></button></div></form></div>
+      </main>
+    </div>
+    <dialog id="approval-dialog" aria-labelledby="approval-title"><div class="dialog-head"><p class="eyebrow">APPROVAL REQUIRED</p><h2 id="approval-title">Review file write</h2><p id="approval-path" class="path"></p></div><div class="diff"><div><h3>Current</h3><pre id="before"></pre></div><div><h3>Proposed</h3><pre id="after"></pre></div></div><div class="dialog-actions"><button id="reject" type="button" class="secondary">Reject</button><button id="approve" type="button">Approve write</button></div></dialog>
+    <script type="module" src="/src/renderer/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+[package]
+name = "moderado-desktop"
+version = "0.1.1"
+edition = "2021"
+
+[lib]
+name = "moderado_desktop"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
+cap-std = "4.0"
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3"

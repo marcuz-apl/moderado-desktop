@@ -1,10 +1,14 @@
 # Moderado Desktop
 
-Cross-platform desktop application for running autonomous AI coding agent sessions outside the IDE.
+Cross-platform desktop application for running autonomous AI coding agent sessions outside the IDE. Built with Tauri, Rust, and TypeScript.
 
 Moderado Desktop follows the Cline Desktop interaction model — parallel sessions, Plan/Act dual modes, explicit tool approval, and git-backed checkpoints — while remaining **provider-agnostic**: Moderado Gateway (first-party), NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
 
-## Features
+## Current build
+
+The first runnable slice supports one in-memory workspace session, Plan/Act mode, streaming from an OpenAI-compatible endpoint, workspace file listing and reading, and approval before each file write. The Rust dispatcher enforces Plan mode and checks paths against the selected workspace. API keys are stored in the OS keychain. Persistent sessions, commands, checkpoints, and the full provider matrix remain planned work.
+
+## Planned features
 
 - **Parallel sessions**: run multiple isolated agent sessions concurrently, each bound to its own workspace folder and provider/model.
 - **Plan/Act dual mode**: Plan mode is strictly read-only; Act mode enables mutating tools. Each mode can use a different model.
@@ -30,7 +34,7 @@ All providers normalize to a single `ChatCompletion` contract. API keys are stor
 
 ## Getting Started
 
-Prerequisites: Node.js ≥ 20, npm.
+Prerequisites: Node.js ≥ 20, npm, Rust, and the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
 git clone https://github.com/marcuz-apl/moderado-desktop.git
@@ -42,27 +46,28 @@ npm install
 
 ```bash
 npm run dev     # start in watch mode
-npm test        # run test suites (offline)
-npm run build   # compile production artifacts
+npm test        # run Rust tests (offline)
+npm run lint    # ESLint, TypeScript, and Clippy
+npm run build   # compile frontend and Rust app
 ```
 
-For local providers, make sure Ollama or LM Studio is running before starting the app. For remote providers, add your API key in **Settings → Providers** on first launch.
+Choose a workspace, enter an OpenAI-compatible endpoint and model, then send a task. The default endpoint is `http://localhost:11434/v1` for Ollama. For a remote provider, enter its HTTPS `/v1` endpoint and API key. The key is saved in the OS keychain for that endpoint. Checkpoints are not yet implemented.
 
 ## Architecture
 
 ```
-src/
-  main/        # Electron main process: sessions, scheduler, checkpoints, keychain
-  agent/       # Agent loop, tool dispatcher, approval gate, Plan/Act enforcement
-  providers/   # Provider adapters + shared OpenAI-compatible client
-  workspace/   # Workspace jail, file tools, git integration
-  renderer/    # UI: session tabs, chat, approval prompts, diffs, settings
-  shared/      # Types, contracts, zod schemas shared across processes
+src-tauri/src/
+  lib.rs       # Tauri commands, in-memory session, approval bridge
+  agent.rs     # Tool dispatcher and Plan/Act enforcement
+  provider.rs  # OpenAI-compatible streaming client
+  workspace.rs # Workspace jail and file operations
+src/renderer/  # TypeScript UI and styles
 ```
 
-- Session storage: SQLite (local app-data directory)
-- Checkpoints: git-backed snapshots per workspace
-- Provider contract: one `Provider` interface + `OpenAICompatibleProvider` base; vendor adapters override only what differs
+- Planned session storage: SQLite in the local app-data directory
+- Planned checkpoints: git-backed snapshots per workspace
+- Provider access stays in Rust; the webview cannot call file tools or provider HTTP APIs directly
+- `cap-std` keeps file operations relative to the chosen workspace, including when symlinks change during a turn
 
 ## Documentation
 

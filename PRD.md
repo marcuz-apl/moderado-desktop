@@ -97,7 +97,7 @@ Requirements:
 
 | ID | Requirement |
 | --- | --- |
-| N1 | Cross-platform: Windows, macOS, Linux (Electron + TypeScript). |
+| N1 | Cross-platform: Windows, macOS, Linux (Tauri + Rust + TypeScript). |
 | N2 | First app launch usable with zero accounts; local providers reachable immediately. |
 | N3 | Unit tests run offline; provider layer tested against recorded fixtures and a local mock server. |
 | N4 | No telemetry by default. |
@@ -107,13 +107,12 @@ Requirements:
 ## 8. Architecture (Proposed)
 
 ```
-src/
-  main/          # Electron main process: sessions, scheduler, checkpoint store, keychain
-  agent/         # Agent loop, tool dispatcher, approval gate, mode enforcement
-  providers/     # One adapter per provider + shared OpenAI-compatible client
-  workspace/     # Workspace jail, file tools, git integration
-  renderer/      # UI: session tabs, chat, approval prompts, diffs, settings
-  shared/        # Types, contracts, zod schemas shared across processes
+src-tauri/src/
+  lib.rs         # Tauri commands, sessions, scheduler, checkpoint store, keychain
+  agent.rs       # Agent loop, tool dispatcher, approval gate, mode enforcement
+  provider.rs    # Shared OpenAI-compatible streaming client and adapters
+  workspace.rs   # Workspace jail, file tools, git integration
+src/renderer/    # UI: session tabs, chat, approval prompts, diffs, settings
 ```
 
 - Session storage: SQLite (local app-data directory).

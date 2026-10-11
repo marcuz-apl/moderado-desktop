@@ -2,7 +2,7 @@
 
 > **Scope**: Guidelines and operating manual for AI coding agents and human contributors to `moderado-desktop`.
 > **Product**: Cross-platform desktop app for autonomous coding agent sessions (see `PRD.md`).
-> **Ecosystem**: Node.js / TypeScript / Electron
+> **Ecosystem**: Rust / Tauri / TypeScript
 
 ---
 
@@ -19,23 +19,22 @@ Follow the Decision Ladder:
 ## 2. Directory Layout & Architecture
 
 ```
-src/
-  main/          # Electron main process: session lifecycle, scheduler, checkpoints, keychain
-  agent/         # Agent loop, tool dispatcher, approval gate, Plan/Act mode enforcement
-  providers/     # Provider adapters (see §4)
-  workspace/     # Workspace jail, file tools, git/checkpoint integration
-  renderer/      # UI: session tabs, chat, approval prompts, diffs, settings
-  shared/        # Types, contracts, zod schemas shared across main/renderer
+src-tauri/src/
+  lib.rs         # Tauri commands and session lifecycle
+  agent.rs       # Tool dispatcher, approval gate, Plan/Act enforcement
+  provider.rs    # OpenAI-compatible streaming client
+  workspace.rs   # Workspace jail and file operations
+src/renderer/    # TypeScript UI
 ```
 
-- **One tool dispatcher.** All tool calls flow through `agent/` — no tool may bypass the approval gate or workspace jail.
-- **One provider contract.** All model access goes through `providers/`; never call provider HTTP APIs from UI or agent code directly.
+- **One tool dispatcher.** All tool calls flow through Rust `agent.rs` — no tool may bypass the approval gate or workspace jail.
+- **One provider contract.** All model access goes through Rust `provider.rs`; never call provider HTTP APIs from the webview.
 
 ## 3. Development Commands & Verification
 
 - `npm test`: Run automated test suites (must pass offline)
-- `npm run build`: Compile and build project artifacts
-- `npm run lint`: Lint TypeScript
+- `npm run build`: Compile the TypeScript frontend and Rust app
+- `npm run lint`: Lint TypeScript and Rust
 
 **Definition of done for any change**: typecheck clean, lint clean, tests green offline, relevant behavior covered by a test.
 
