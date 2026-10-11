@@ -1,0 +1,4 @@
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_agnes","function":{"name":"write_file","arguments":"{\"path\":\"m2.txt\",\"content\":\"ready\"}"}}]}}],"usage":null}
+
+data: [DONE]
+

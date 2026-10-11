@@ -6,7 +6,7 @@ Moderado Desktop follows the Cline Desktop interaction model — parallel sessio
 
 ## Current build
 
-The first runnable slice supports one in-memory workspace session, Plan/Act mode, streaming from an OpenAI-compatible endpoint, workspace file listing and reading, and approval before each file write. The Rust dispatcher enforces Plan mode and checks paths against the selected workspace. API keys are stored in the OS keychain. Persistent sessions, commands, checkpoints, and the full provider matrix remain planned work.
+M3 supports multiple sessions with independent conversations and per-session provider settings. Sessions and histories are saved in SQLite under the app-data directory and reload after restart. Sessions in separate workspaces can run concurrently. Approved writes create Git-backed checkpoints before changing files; the checkpoint list offers a diff preview and confirmed restore. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. Command execution remains planned work.
 
 ## Planned features
 
@@ -46,32 +46,45 @@ npm install
 
 ```bash
 npm run dev     # start in watch mode
-npm test        # run Rust tests (offline)
+npm test        # run Rust and frontend tests (offline)
 npm run lint    # ESLint, TypeScript, and Clippy
 npm run build   # compile frontend and Rust app
 ```
 
-Choose a workspace, enter an OpenAI-compatible endpoint and model, then send a task. The default endpoint is `http://localhost:11434/v1` for Ollama. For a remote provider, enter its HTTPS `/v1` endpoint and API key. The key is saved in the OS keychain for that endpoint. Checkpoints are not yet implemented.
+Create a session to choose its workspace folder, then select a provider. Moderado Gateway and custom providers require a base URL; the other profiles fill in their documented endpoints. Enter a key if needed, load available models, select Plan and Act models, and send a task. Local Ollama and LM Studio need a running server and no key. The provider choice and models are saved with the session when you send a task. A Gateway URL is required because there is no canonical URL configured in the app. You can switch sessions while a turn runs in another session. Turns sharing one workspace run in sequence to keep checkpoints and conversation context consistent.
+
+Each approved file write or edit creates a checkpoint of the workspace before applying the change. Select a checkpoint to review file differences, then confirm restore. Restore creates a safety checkpoint of the current workspace first. Git is required for checkpoints; the app uses the workspace's Git repository when the workspace is its root, or a separate Git store in app data otherwise. Checkpoint snapshots include nonignored workspace files, so inspect the restore preview before confirming.
+
+Changing the provider or its base URL starts a new conversation on the next task, so earlier local context is never sent to a newly selected remote provider. Switching between Plan and Act keeps the current conversation.
+
+The provider profiles use the same OpenAI-compatible streaming transport. Their preset URLs follow the providers' published API documentation: [NVIDIA NIM](https://docs.api.nvidia.com/nim/reference/llm-apis), [OpenRouter](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request), [Agnes AI](https://github.com/AgnesAI-Labs/AgnesAI-Models/blob/main/MODEL_CATALOG.md), [OrcaRouter](https://www.orcarouter.ai/switch/openrouter), and [LM Studio](https://lmstudio.ai/docs/developer/openai-compat). Some models may not support tool calls even if their provider accepts the API format; choose a tool-capable model for agent tasks.
 
 ## Architecture
 
 ```
 src-tauri/src/
-  lib.rs       # Tauri commands, in-memory session, approval bridge
+  lib.rs       # Tauri commands, session runtimes, approval bridge
   agent.rs     # Tool dispatcher and Plan/Act enforcement
-  provider.rs  # OpenAI-compatible streaming client
+  agent/runner.rs # Agent loop and conversation history
+  provider.rs  # Provider catalog and OpenAI-compatible streaming client
+  provider/settings.rs # Local provider settings without secrets
+  sessions.rs  # SQLite sessions, histories, and checkpoint metadata
+  checkpoints.rs # Git snapshots, diff preview, and restore
   workspace.rs # Workspace jail and file operations
 src/renderer/  # TypeScript UI and styles
 ```
 
-- Planned session storage: SQLite in the local app-data directory
-- Planned checkpoints: git-backed snapshots per workspace
+- Session storage: SQLite in the local app-data directory
+- Checkpoints: Git-backed snapshots per workspace, with a separate index to preserve the user's staged changes
 - Provider access stays in Rust; the webview cannot call file tools or provider HTTP APIs directly
 - `cap-std` keeps file operations relative to the chosen workspace, including when symlinks change during a turn
 
 ## Documentation
 
-- [PRD](./PRD.md) — full product specification, functional and non-functional requirements
+- [PRD](./docs/PRD.md) — full product specification, functional and non-functional requirements
+- [Milestone plan](./docs/task_plan.md) — implementation scope and verification for each milestone
+- [Progress notes](./docs/progress.md) — completed work and review outcomes
+- [Findings](./docs/findings.md) — implementation research and decisions
 - [AGENTS.md](./AGENTS.md) — coding guidelines and operating manual for AI agents and contributors
 
 ## Contributing

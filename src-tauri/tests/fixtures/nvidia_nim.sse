@@ -1,0 +1,6 @@
+data: {"choices":[{"delta":{"role":"assistant"}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_nim","function":{"name":"write_file","arguments":"{\"path\":\"m2.txt\",\"content\":\"ready\"}"}}]}}]}
+
+data: [DONE]
+

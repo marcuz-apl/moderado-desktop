@@ -1,0 +1,417 @@
+use crate::provider::settings::ProviderSettings;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+pub fn new_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!(
+        "{nanos:x}-{:x}-{:x}",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRecord {
+    pub id: String,
+    pub name: String,
+    pub workspace: String,
+    pub settings: ProviderSettings,
+    pub history: Vec<Value>,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub id: String,
+    pub name: String,
+    pub workspace: String,
+    pub settings: ProviderSettings,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointRecord {
+    pub id: String,
+    pub session_id: String,
+    pub git_ref: String,
+    pub path: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone)]
+pub struct SessionStore {
+    path: PathBuf,
+}
+
+impl SessionStore {
+    pub fn open(path: PathBuf) -> Result<Self, String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create app data: {error}"))?;
+        }
+        let store = Self { path };
+        let db = store.connect()?;
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                workspace TEXT NOT NULL,
+                settings_json TEXT NOT NULL,
+                history_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                git_ref TEXT NOT NULL,
+                path TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS checkpoints_session ON checkpoints(session_id, created_at DESC);",
+        ).map_err(|error| format!("Could not initialize session database: {error}"))?;
+        Ok(store)
+    }
+
+    fn connect(&self) -> Result<Connection, String> {
+        let db = Connection::open(&self.path)
+            .map_err(|error| format!("Could not open session database: {error}"))?;
+        db.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| error.to_string())?;
+        db.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|error| error.to_string())?;
+        Ok(db)
+    }
+
+    pub fn create(
+        &self,
+        workspace: &Path,
+        name: &str,
+        settings: ProviderSettings,
+    ) -> Result<SessionRecord, String> {
+        let workspace = workspace
+            .canonicalize()
+            .map_err(|error| format!("Workspace unavailable: {error}"))?;
+        if !workspace.is_dir() {
+            return Err("Workspace must be a directory".into());
+        }
+        validate_name(name)?;
+        let record = SessionRecord {
+            id: new_id(),
+            name: name.trim().to_owned(),
+            workspace: workspace.to_string_lossy().into_owned(),
+            settings,
+            history: Vec::new(),
+            updated_at: now(),
+        };
+        let db = self.connect()?;
+        db.execute(
+            "INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at) VALUES (?1,?2,?3,?4,'[]',?5)",
+            params![record.id, record.name, record.workspace, serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at],
+        ).map_err(|error| format!("Could not create session: {error}"))?;
+        Ok(record)
+    }
+
+    pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
+        let db = self.connect()?;
+        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at FROM sessions ORDER BY updated_at DESC, id DESC")
+            .map_err(|error| error.to_string())?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let (id, name, workspace, settings_json, updated_at) =
+                row.map_err(|error| error.to_string())?;
+            let settings = serde_json::from_str(&settings_json)
+                .map_err(|_| "Invalid saved provider settings")?;
+            Ok(SessionSummary {
+                id,
+                name,
+                workspace,
+                settings,
+                updated_at,
+            })
+        })
+        .collect()
+    }
+
+    pub fn get(&self, id: &str) -> Result<SessionRecord, String> {
+        let db = self.connect()?;
+        let row = db.query_row(
+            "SELECT id,name,workspace,settings_json,history_json,updated_at FROM sessions WHERE id=?1",
+            [id],
+            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?)),
+        ).optional().map_err(|error| error.to_string())?.ok_or("Session not found")?;
+        Ok(SessionRecord {
+            id: row.0,
+            name: row.1,
+            workspace: row.2,
+            settings: serde_json::from_str(&row.3)
+                .map_err(|_| "Invalid saved provider settings")?,
+            history: serde_json::from_str(&row.4).map_err(|_| "Invalid saved session history")?,
+            updated_at: row.5,
+        })
+    }
+
+    pub fn rename(&self, id: &str, name: &str) -> Result<(), String> {
+        validate_name(name)?;
+        let changed = self
+            .connect()?
+            .execute(
+                "UPDATE sessions SET name=?2,updated_at=?3 WHERE id=?1",
+                params![id, name.trim(), now()],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed == 0 {
+            return Err("Session not found".into());
+        }
+        Ok(())
+    }
+
+    pub fn delete(&self, id: &str) -> Result<(), String> {
+        let changed = self
+            .connect()?
+            .execute("DELETE FROM sessions WHERE id=?1", [id])
+            .map_err(|error| error.to_string())?;
+        if changed == 0 {
+            return Err("Session not found".into());
+        }
+        Ok(())
+    }
+
+    pub fn save_state(
+        &self,
+        id: &str,
+        settings: &ProviderSettings,
+        history: &[Value],
+    ) -> Result<(), String> {
+        let changed = self
+            .connect()?
+            .execute(
+                "UPDATE sessions SET settings_json=?2,history_json=?3,updated_at=?4 WHERE id=?1",
+                params![
+                    id,
+                    serde_json::to_string(settings).map_err(|error| error.to_string())?,
+                    serde_json::to_string(history).map_err(|error| error.to_string())?,
+                    now()
+                ],
+            )
+            .map_err(|error| format!("Could not save session: {error}"))?;
+        if changed == 0 {
+            return Err("Session not found".into());
+        }
+        Ok(())
+    }
+
+    pub fn add_checkpoint(&self, checkpoint: &CheckpointRecord) -> Result<(), String> {
+        self.connect()?.execute(
+            "INSERT INTO checkpoints (id,session_id,git_ref,path,created_at) VALUES (?1,?2,?3,?4,?5)",
+            params![checkpoint.id, checkpoint.session_id, checkpoint.git_ref, checkpoint.path, checkpoint.created_at],
+        ).map_err(|error| format!("Could not save checkpoint: {error}"))?;
+        Ok(())
+    }
+
+    pub fn list_checkpoints(&self, session_id: &str) -> Result<Vec<CheckpointRecord>, String> {
+        let db = self.connect()?;
+        let mut query = db.prepare("SELECT id,session_id,git_ref,path,created_at FROM checkpoints WHERE session_id=?1 ORDER BY created_at DESC,id DESC")
+            .map_err(|error| error.to_string())?;
+        let rows = query
+            .query_map([session_id], |row| {
+                Ok(CheckpointRecord {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    git_ref: row.get(2)?,
+                    path: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| row.map_err(|error| error.to_string()))
+            .collect()
+    }
+
+    pub fn get_checkpoint(&self, session_id: &str, id: &str) -> Result<CheckpointRecord, String> {
+        self.list_checkpoints(session_id)?
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or("Checkpoint not found".into())
+    }
+
+    pub fn append_restore_marker(
+        &self,
+        workspace: &str,
+        checkpoint_id: &str,
+        changed_files: usize,
+    ) -> Result<(), String> {
+        let mut db = self.connect()?;
+        let transaction = db.transaction().map_err(|error| error.to_string())?;
+        let sessions: Vec<(String, String)> = {
+            let mut query = transaction
+                .prepare("SELECT id,history_json FROM sessions WHERE workspace=?1")
+                .map_err(|error| error.to_string())?;
+            let rows = query
+                .query_map([workspace], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<_, _>>()
+                .map_err(|error| error.to_string())?;
+            rows
+        };
+        for (session_id, history_json) in sessions {
+            let mut history: Vec<Value> =
+                serde_json::from_str(&history_json).map_err(|_| "Invalid saved session history")?;
+            history.push(serde_json::json!({"role":"system","content":format!("Workspace restored from checkpoint {checkpoint_id}; {changed_files} files changed. Re-read files before relying on prior file contents or edits.")}));
+            transaction
+                .execute(
+                    "UPDATE sessions SET history_json=?2,updated_at=?3 WHERE id=?1",
+                    params![
+                        session_id,
+                        serde_json::to_string(&history).map_err(|error| error.to_string())?,
+                        now()
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())
+    }
+}
+
+fn validate_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() || name.len() > 100 {
+        return Err("Session name must be 1–100 characters".into());
+    }
+    Ok(())
+}
+
+pub fn checkpoint_time() -> i64 {
+    now()
+}
+
+pub fn repair_interrupted_tool_calls(history: &mut Vec<Value>) {
+    let mut pending = Vec::<String>::new();
+    let mut repaired = Vec::with_capacity(history.len());
+    for message in history.drain(..) {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if role != "tool" {
+            for id in pending.drain(..) {
+                repaired.push(serde_json::json!({"role":"tool","tool_call_id":id,"content":"Error: Previous turn was interrupted before this tool finished"}));
+            }
+        }
+        if role == "assistant" {
+            if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+                pending.extend(
+                    calls.iter().filter_map(|call| {
+                        call.get("id").and_then(Value::as_str).map(str::to_owned)
+                    }),
+                );
+            }
+        } else if role == "tool" {
+            if let Some(id) = message.get("tool_call_id").and_then(Value::as_str) {
+                pending.retain(|expected| expected != id);
+            }
+        }
+        repaired.push(message);
+    }
+    for id in pending {
+        repaired.push(serde_json::json!({"role":"tool","tool_call_id":id,"content":"Error: Previous turn was interrupted before this tool finished"}));
+    }
+    *history = repaired;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::ProviderId;
+    use serde_json::json;
+
+    fn settings() -> ProviderSettings {
+        ProviderSettings {
+            provider_id: ProviderId::Ollama,
+            base_url: "http://localhost:11434/v1".into(),
+            plan_model: "plan".into(),
+            act_model: "act".into(),
+        }
+    }
+
+    #[test]
+    fn sessions_and_history_survive_reopening_the_database() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("work");
+        std::fs::create_dir(&workspace).unwrap();
+        let path = root.path().join("app").join("sessions.sqlite");
+        let store = SessionStore::open(path.clone()).unwrap();
+        let first = store.create(&workspace, "First", settings()).unwrap();
+        let second = store.create(&workspace, "Second", settings()).unwrap();
+        store
+            .save_state(
+                &first.id,
+                &settings(),
+                &[json!({"role":"user","content":"one"})],
+            )
+            .unwrap();
+        drop(store);
+        let reopened = SessionStore::open(path).unwrap();
+        assert_eq!(reopened.list().unwrap().len(), 2);
+        assert_eq!(
+            reopened.get(&first.id).unwrap().history[0]["content"],
+            "one"
+        );
+        assert!(reopened.get(&second.id).unwrap().history.is_empty());
+        reopened
+            .append_restore_marker(&first.workspace, "checkpoint-1", 2)
+            .unwrap();
+        assert!(
+            reopened.get(&first.id).unwrap().history.last().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains("Re-read files")
+        );
+        assert_eq!(reopened.get(&second.id).unwrap().history.len(), 1);
+        reopened.rename(&second.id, "Renamed").unwrap();
+        assert_eq!(reopened.get(&second.id).unwrap().name, "Renamed");
+        reopened.delete(&second.id).unwrap();
+        assert_eq!(reopened.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn interrupted_tool_calls_are_repaired_before_resuming() {
+        let mut history = vec![
+            json!({"role":"assistant","tool_calls":[{"id":"one"},{"id":"two"}]}),
+            json!({"role":"tool","tool_call_id":"one","content":"done"}),
+        ];
+        repair_interrupted_tool_calls(&mut history);
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[2]["tool_call_id"], "two");
+        repair_interrupted_tool_calls(&mut history);
+        assert_eq!(history.len(), 3);
+    }
+}

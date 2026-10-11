@@ -63,6 +63,13 @@ pub fn write_text(root: &Path, relative: &str, content: &str) -> Result<(), Stri
     if content.len() as u64 > MAX_FILE_BYTES {
         return Err("Content exceeds 256 KiB limit".into());
     }
+    write_bytes(root, relative, content.as_bytes())
+}
+
+pub fn write_bytes(root: &Path, relative: &str, content: &[u8]) -> Result<(), String> {
+    if content.len() > 32 * 1024 * 1024 {
+        return Err("Checkpoint file exceeds 32 MiB limit".into());
+    }
     resolve_path(root, relative)?;
     let dir =
         Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
@@ -72,6 +79,13 @@ pub fn write_text(root: &Path, relative: &str, content: &str) -> Result<(), Stri
     resolve_path(root, relative)?;
     dir.write(relative, content)
         .map_err(|error| error.to_string())
+}
+
+pub fn remove_file(root: &Path, relative: &str) -> Result<(), String> {
+    resolve_path(root, relative)?;
+    let dir =
+        Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    dir.remove_file(relative).map_err(|error| error.to_string())
 }
 
 pub fn list_files(root: &Path, relative: &str) -> Result<Vec<String>, String> {
@@ -100,6 +114,66 @@ pub fn list_files(root: &Path, relative: &str) -> Result<Vec<String>, String> {
     }
     entries.sort();
     Ok(entries)
+}
+
+pub fn search_files(root: &Path, query: &str) -> Result<Vec<String>, String> {
+    if query.is_empty() || query.len() > 200 {
+        return Err("Search query must be 1–200 characters".into());
+    }
+    let dir =
+        Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    let mut queue = vec![(PathBuf::from("."), 0usize)];
+    let mut results = Vec::new();
+    let mut visited = 0usize;
+    let mut skipped = 0usize;
+    while let Some((folder, depth)) = queue.pop() {
+        for entry in dir.read_dir(&folder).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if kind.is_symlink() {
+                continue;
+            }
+            let name = entry.file_name();
+            if name == ".git" || name == "node_modules" || name == "target" || name == "dist" {
+                continue;
+            }
+            let relative = folder.join(name);
+            if kind.is_dir() {
+                if depth < 8 {
+                    queue.push((relative, depth + 1));
+                }
+            } else if kind.is_file() {
+                visited += 1;
+                if visited > 1000 {
+                    return Err("Search stopped after 1,000 files".into());
+                }
+                match read_text(root, &relative.to_string_lossy()) {
+                    Ok(text) => {
+                        for (line, content) in text.lines().enumerate() {
+                            if content.contains(query) {
+                                let snippet: String = content.chars().take(200).collect();
+                                let display = relative.strip_prefix(".").unwrap_or(&relative);
+                                results.push(format!(
+                                    "{}:{}:{}",
+                                    display.to_string_lossy().replace('\\', "/"),
+                                    line + 1,
+                                    snippet
+                                ));
+                                if results.len() == 100 {
+                                    return Ok(results);
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => skipped += 1,
+                }
+            }
+        }
+    }
+    if skipped > 0 {
+        results.push(format!("Skipped {skipped} unreadable or oversized files"));
+    }
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -179,5 +253,18 @@ mod tests {
         assert!(list_files(root.path(), ".")
             .unwrap()
             .contains(&"a.txt".to_string()));
+    }
+
+    #[test]
+    fn searches_nested_text_files() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("src")).unwrap();
+        fs::write(
+            root.path().join("src").join("a.txt"),
+            "one\nneedle here\nthree",
+        )
+        .unwrap();
+        let matches = search_files(root.path(), "needle").unwrap();
+        assert_eq!(matches, vec!["src/a.txt:2:needle here"]);
     }
 }

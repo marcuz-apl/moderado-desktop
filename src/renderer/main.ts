@@ -1,25 +1,106 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { lineDiff } from './diff';
 
-type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done'; value?: string };
-type ApprovalEvent = { id: number; path: string; before: string; after: string };
+type ProviderId = 'gateway' | 'nvidia_nim' | 'open_router' | 'agnes_ai' | 'orca_router' | 'ollama' | 'lm_studio' | 'custom';
+type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean };
+type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
+type LocalProviderStatus = { id: ProviderId; available: boolean };
+type HistoryMessage = { role: string; content?: string };
+type SessionSummary = { id: string; name: string; workspace: string; settings: ProviderSettings; updatedAt: number };
+type SessionRecord = SessionSummary & { history: HistoryMessage[] };
+type DisplayMessage = { role: string; content: string };
+type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done'; session_id: string; value?: string };
+type ApprovalEvent = { sessionId: string; id: number; path: string; before: string; after: string };
+type ApprovalExpired = { sessionId: string; id: number };
+type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
+type CheckpointPreview = { checkpointId: string; currentTree: string; changes: { path: string; before: string; after: string }[] };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const transcript = $<HTMLElement>('transcript');
 const status = $<HTMLElement>('status');
 const prompt = $<HTMLTextAreaElement>('prompt');
 const send = $<HTMLButtonElement>('send');
-const dialog = $<HTMLDialogElement>('approval-dialog');
-let workspace = '';
+const providerSelect = $<HTMLSelectElement>('provider-select');
+const endpoint = $<HTMLInputElement>('endpoint');
+const keyField = $<HTMLInputElement>('api-key');
+const approvalDialog = $<HTMLDialogElement>('approval-dialog');
+const restoreDialog = $<HTMLDialogElement>('restore-dialog');
+const emptyState = $('empty-state').cloneNode(true);
+
+let providers: ProviderPreset[] = [];
+let initialized = false;
+let activeProvider: ProviderId = 'gateway';
+let activeSessionId: string | null = null;
 let mode: 'plan' | 'act' = 'plan';
-let assistantText: HTMLElement | null = null;
-let busy = false;
-let pendingApproval: number | null = null;
+let currentApproval: ApprovalEvent | null = null;
+let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
+let approvalBefore = '';
+let summaries: SessionSummary[] = [];
+const sessions = new Map<string, SessionRecord>();
+const views = new Map<string, DisplayMessage[]>();
+const running = new Set<string>();
+const approvalQueue: ApprovalEvent[] = [];
+const modeBySession = new Map<string, 'plan' | 'act'>();
+const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>();
+const conversationBindings = new Map<string, string>();
 
 function setStatus(message: string): void { status.textContent = message; }
+function activeSession(): SessionRecord | null { return activeSessionId ? sessions.get(activeSessionId) ?? null : null; }
+function binding(settings: ProviderSettings): string { return `${settings.providerId}\n${settings.baseUrl.trim()}`; }
 
-function addMessage(role: string, content = ''): HTMLElement {
-  $('empty-state')?.remove();
+function currentSettings(): ProviderSettings {
+  return {
+    providerId: activeProvider,
+    baseUrl: endpoint.value.trim(),
+    planModel: $<HTMLInputElement>('plan-model').value.trim(),
+    actModel: $<HTMLInputElement>('act-model').value.trim(),
+  };
+}
+
+function selectProvider(id: ProviderId): void {
+  if (providers.length === 0) return;
+  if (initialized) providerDrafts.set(activeProvider, currentSettings());
+  const preset = providers.find((item) => item.id === id);
+  if (!preset) return;
+  activeProvider = id;
+  providerSelect.value = id;
+  const draft = providerDrafts.get(id);
+  endpoint.value = draft?.baseUrl ?? preset.defaultBaseUrl;
+  endpoint.readOnly = !preset.editableUrl;
+  endpoint.placeholder = id === 'gateway' ? 'https://your-gateway.example/v1' : 'https://your-endpoint.example/v1';
+  $<HTMLInputElement>('plan-model').value = draft?.planModel ?? '';
+  $<HTMLInputElement>('act-model').value = draft?.actModel ?? '';
+  $('available-models').replaceChildren();
+  keyField.value = '';
+  keyField.disabled = preset.local;
+  if (activeSession()) setStatus(`${preset.name} selected. Changing provider starts a new conversation on the next task.`);
+}
+
+function applySessionSettings(settings: ProviderSettings): void {
+  selectProvider(settings.providerId);
+  endpoint.value = settings.baseUrl;
+  $<HTMLInputElement>('plan-model').value = settings.planModel;
+  $<HTMLInputElement>('act-model').value = settings.actModel;
+}
+
+async function saveEnteredKey(settings: ProviderSettings): Promise<void> {
+  if (!keyField.value) return;
+  await invoke('save_provider_key', { providerId: settings.providerId, baseUrl: settings.baseUrl, apiKey: keyField.value });
+  keyField.value = '';
+}
+
+function historyToView(history: HistoryMessage[]): DisplayMessage[] {
+  return history.flatMap((message) => {
+    if (message.role === 'user') return [{ role: 'You', content: message.content ?? '' }];
+    if (message.role === 'tool') return [{ role: 'Tool', content: message.content ?? '' }];
+    if (message.role === 'system') return [{ role: 'System', content: message.content ?? '' }];
+    if (message.role === 'assistant' && message.content) return [{ role: 'Agent', content: message.content }];
+    return [];
+  });
+}
+
+function messageElement(role: string, content: string): HTMLElement {
   const card = document.createElement('article');
   card.className = `message ${role.toLowerCase()}`;
   const label = document.createElement('span');
@@ -29,78 +110,363 @@ function addMessage(role: string, content = ''): HTMLElement {
   body.className = 'message-body';
   body.textContent = content;
   card.append(label, body);
-  transcript.append(card);
+  return card;
+}
+
+function renderTranscript(): void {
+  const messages = activeSessionId ? views.get(activeSessionId) ?? [] : [];
+  transcript.replaceChildren(...(messages.length ? messages.map((item) => messageElement(item.role, item.content)) : [emptyState.cloneNode(true)]));
   transcript.scrollTop = transcript.scrollHeight;
-  return body;
+}
+
+function addDisplay(sessionId: string, role: string, content: string, append = false): void {
+  const messages = views.get(sessionId) ?? [];
+  const last = messages.at(-1);
+  if (append && last?.role === role) last.content += content;
+  else messages.push({ role, content });
+  views.set(sessionId, messages);
+  if (sessionId !== activeSessionId) return;
+  if (append && last?.role === role) {
+    const body = transcript.lastElementChild?.querySelector('.message-body');
+    if (body) body.textContent = last.content;
+    else renderTranscript();
+  } else {
+    $('empty-state')?.remove();
+    transcript.append(messageElement(role, content));
+  }
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+function renderSessions(): void {
+  const list = $('session-list');
+  list.replaceChildren(...summaries.map((session) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
+    button.textContent = `${running.has(session.id) ? '● ' : ''}${session.name}`;
+    button.title = session.workspace;
+    button.addEventListener('click', () => { void selectSession(session.id); });
+    return button;
+  }));
+}
+
+async function refreshSummaries(): Promise<void> {
+  summaries = await invoke<SessionSummary[]>('list_sessions');
+  renderSessions();
+}
+
+async function refreshSession(id: string, replaceView = false): Promise<SessionRecord> {
+  const record = await invoke<SessionRecord>('get_session', { sessionId: id });
+  sessions.set(id, record);
+  if (replaceView || !views.has(id)) views.set(id, historyToView(record.history));
+  conversationBindings.set(id, binding(record.settings));
+  if (id === activeSessionId && replaceView) renderTranscript();
+  return record;
+}
+
+async function selectSession(id: string): Promise<void> {
+  const record = await refreshSession(id);
+  activeSessionId = id;
+  applySessionSettings(record.settings);
+  mode = modeBySession.get(id) ?? 'plan';
+  setMode(mode);
+  $('workspace-name').textContent = record.name;
+  $('workspace-path').textContent = record.workspace;
+  $('session-title').textContent = record.name;
+  renderSessions();
+  renderTranscript();
+  updateControls();
+  await refreshCheckpoints();
+  setStatus(running.has(id) ? 'Agent is working…' : 'Session ready.');
+}
+
+function updateControls(): void {
+  const busy = activeSessionId ? running.has(activeSessionId) : false;
+  send.disabled = !activeSessionId || busy;
+  providerSelect.disabled = busy;
+  endpoint.disabled = busy;
+  keyField.disabled = busy || (providers.find((item) => item.id === activeProvider)?.local ?? false);
+  $<HTMLInputElement>('plan-model').disabled = busy;
+  $<HTMLInputElement>('act-model').disabled = busy;
+  $<HTMLButtonElement>('load-models').disabled = busy;
+  $<HTMLButtonElement>('plan-mode').disabled = busy;
+  $<HTMLButtonElement>('act-mode').disabled = busy;
+  $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
+  $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
 }
 
 function setMode(next: 'plan' | 'act'): void {
   mode = next;
+  if (activeSessionId) modeBySession.set(activeSessionId, next);
   for (const value of ['plan', 'act'] as const) {
     const button = $<HTMLButtonElement>(`${value}-mode`);
-    const selected = value === next;
-    button.classList.toggle('selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
+    button.classList.toggle('selected', value === next);
+    button.setAttribute('aria-pressed', String(value === next));
   }
-  setStatus(next === 'plan' ? 'Plan mode: read only.' : 'Act mode: writes require approval.');
 }
 
-$('plan-mode').addEventListener('click', () => setMode('plan'));
-$('act-mode').addEventListener('click', () => setMode('act'));
-
-$('workspace-button').addEventListener('click', async () => {
-  if (busy) return;
+async function refreshCheckpoints(): Promise<void> {
+  const list = $('checkpoint-list');
+  const id = activeSessionId;
+  if (!id) { list.textContent = 'Select a session.'; return; }
   try {
-    workspace = await invoke<string>('choose_workspace');
-    $('workspace-name').textContent = workspace.split(/[\\/]/).filter(Boolean).at(-1) ?? workspace;
-    $('workspace-path').textContent = workspace;
-    transcript.replaceChildren();
-    setStatus('Workspace ready.');
-    prompt.focus();
-  } catch (error) {
-    if (String(error) !== 'No workspace selected') setStatus(String(error));
-  }
-});
+    const checkpoints = await invoke<Checkpoint[]>('list_checkpoints', { sessionId: id });
+    if (id !== activeSessionId) return;
+    if (!checkpoints.length) { list.textContent = 'No checkpoints yet.'; return; }
+    list.replaceChildren(...checkpoints.map((checkpoint) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'checkpoint-item';
+      button.textContent = `${checkpoint.path} · ${new Date(checkpoint.createdAt * 1000).toLocaleString()}`;
+      button.addEventListener('click', () => { void previewCheckpoint(id, checkpoint.id); });
+      return button;
+    }));
+  } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
+}
 
-void listen<TurnEvent>('turn-event', ({ payload }) => {
-  if (payload.kind === 'text') {
-    if (!assistantText) assistantText = addMessage('Agent');
-    assistantText.textContent += payload.value ?? '';
-    transcript.scrollTop = transcript.scrollHeight;
-  } else if (payload.kind === 'tool') {
-    addMessage('Tool', payload.value ?? '');
-    assistantText = null;
-  } else if (payload.kind === 'error') {
-    addMessage('Error', payload.value ?? 'Unknown error');
-    setStatus('Turn failed.');
-  } else {
-    setStatus('Ready.');
-  }
-});
-
-void listen<ApprovalEvent>('approval-request', ({ payload }) => {
-  pendingApproval = payload.id;
-  $('approval-path').textContent = payload.path;
-  $('before').textContent = payload.before || '(new file)';
-  $('after').textContent = payload.after || '(empty file)';
-  dialog.showModal();
-  setStatus('Waiting for your approval.');
-});
-
-async function answerApproval(accepted: boolean): Promise<void> {
-  const id = pendingApproval;
-  if (id === null) return;
-  pendingApproval = null;
-  dialog.close();
+async function previewCheckpoint(sessionId: string, checkpointId: string): Promise<void> {
   try {
-    await invoke('respond_approval', { id, accepted });
-    setStatus(accepted ? 'Write approved.' : 'Write rejected.');
+    const preview = await invoke<CheckpointPreview>('preview_checkpoint', { sessionId, checkpointId });
+    pendingRestore = { sessionId, preview };
+    $('restore-description').textContent = `${preview.changes.length} file changes will be restored in ${sessions.get(sessionId)?.name ?? 'this session'}.`;
+    const container = $('restore-changes');
+    container.replaceChildren(...preview.changes.map((change) => {
+      const section = document.createElement('section');
+      const title = document.createElement('h3');
+      title.textContent = change.path;
+      const diff = document.createElement('pre');
+      diff.replaceChildren(...lineDiff(change.before, change.after).map(({ kind, text }) => {
+        const line = document.createElement('span');
+        line.className = `diff-${kind}`;
+        line.textContent = `${kind === 'added' ? '+' : kind === 'removed' ? '-' : ' '} ${text}\n`;
+        return line;
+      }));
+      section.append(title, diff);
+      return section;
+    }));
+    $<HTMLButtonElement>('confirm-restore').disabled = preview.changes.length === 0;
+    restoreDialog.showModal();
   } catch (error) { setStatus(String(error)); }
 }
 
+function showChanges(before: string, after: string): void {
+  $('change-summary').replaceChildren(...lineDiff(before, after).map(({ kind, text }) => {
+    const line = document.createElement('span');
+    line.className = `diff-${kind}`;
+    line.textContent = `${kind === 'added' ? '+' : kind === 'removed' ? '-' : ' '} ${text}\n`;
+    return line;
+  }));
+}
+
+function showNextApproval(): void {
+  if (currentApproval || approvalDialog.open) return;
+  const next = approvalQueue.shift();
+  if (!next) return;
+  currentApproval = next;
+  approvalBefore = next.before;
+  $('approval-session').textContent = sessions.get(next.sessionId)?.name ?? next.sessionId;
+  $('approval-path').textContent = next.path;
+  $('before').textContent = next.before || '(new file)';
+  const editor = $<HTMLTextAreaElement>('after');
+  editor.value = next.after;
+  editor.readOnly = true;
+  showChanges(next.before, next.after);
+  approvalDialog.showModal();
+  void invoke('activate_approval', { sessionId: next.sessionId, id: next.id }).catch((error) => {
+    if (currentApproval?.sessionId === next.sessionId && currentApproval.id === next.id) {
+      currentApproval = null;
+      approvalDialog.close();
+      setStatus(String(error));
+      showNextApproval();
+    }
+  });
+  setStatus('Waiting for your approval.');
+}
+
+async function answerApproval(accepted: boolean): Promise<void> {
+  const current = currentApproval;
+  if (!current) return;
+  currentApproval = null;
+  approvalDialog.close();
+  try {
+    await invoke('respond_approval', { sessionId: current.sessionId, id: current.id, content: accepted ? $<HTMLTextAreaElement>('after').value : null });
+    setStatus(accepted ? 'Write approved.' : 'Write rejected.');
+  } catch (error) { setStatus(String(error)); }
+  showNextApproval();
+}
+
+async function initialize(): Promise<void> {
+  try {
+    providers = await invoke<ProviderPreset[]>('provider_catalog');
+    providerSelect.replaceChildren(...providers.map((provider) => {
+      const option = document.createElement('option');
+      option.value = provider.id;
+      option.textContent = provider.name;
+      return option;
+    }));
+    let saved: ProviderSettings | null = null;
+    try { saved = await invoke<ProviderSettings | null>('load_provider_settings'); }
+    catch (error) { setStatus(`Saved provider settings could not be loaded: ${String(error)}. Using defaults.`); }
+    if (saved) providerDrafts.set(saved.providerId, { baseUrl: saved.baseUrl, planModel: saved.planModel, actModel: saved.actModel });
+    selectProvider(saved?.providerId ?? 'gateway');
+    initialized = true;
+    await refreshSummaries();
+    const first = summaries[0];
+    if (first) await selectSession(first.id);
+    else updateControls();
+    const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
+    for (const item of local) {
+      const preset = providers.find((provider) => provider.id === item.id);
+      const option = Array.from(providerSelect.options).find((candidate) => candidate.value === item.id);
+      if (preset && option) option.textContent = `${preset.name} (${item.available ? 'available' : 'offline'})`;
+    }
+  } catch (error) { setStatus(`Session setup failed: ${String(error)}`); }
+}
+
+providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
+$('plan-mode').addEventListener('click', () => setMode('plan'));
+$('act-mode').addEventListener('click', () => setMode('act'));
+
+$('load-models').addEventListener('click', async () => {
+  const settings = currentSettings();
+  if (!initialized || !settings.baseUrl) { setStatus('Select a provider and enter its URL first.'); return; }
+  const button = $<HTMLButtonElement>('load-models');
+  button.disabled = true;
+  setStatus('Loading models…');
+  try {
+    await saveEnteredKey(settings);
+    const models = await invoke<string[]>('discover_models', { providerId: settings.providerId, baseUrl: settings.baseUrl });
+    if (settings.providerId === activeProvider && settings.baseUrl === endpoint.value.trim()) {
+      $('available-models').replaceChildren(...models.map((id) => {
+        const option = document.createElement('option');
+        option.value = id;
+        return option;
+      }));
+      const first = models[0];
+      if (first && !$<HTMLInputElement>('plan-model').value) $<HTMLInputElement>('plan-model').value = first;
+      if (first && !$<HTMLInputElement>('act-model').value) $<HTMLInputElement>('act-model').value = first;
+    }
+    setStatus(models.length ? `${models.length} models available.` : 'The endpoint returned no models.');
+  } catch (error) { setStatus(String(error)); }
+  finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
+});
+
+$('workspace-button').addEventListener('click', async () => {
+  if (!initialized) { setStatus('Session setup is still loading.'); return; }
+  try {
+    const record = await invoke<SessionRecord>('create_session', { settings: currentSettings() });
+    sessions.set(record.id, record);
+    views.set(record.id, []);
+    await refreshSummaries();
+    await selectSession(record.id);
+    prompt.focus();
+  } catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
+});
+
+$('rename-session').addEventListener('click', async () => {
+  const session = activeSession();
+  if (!session || running.has(session.id)) return;
+  const name = window.prompt('Session name', session.name);
+  if (name === null) return;
+  try {
+    await invoke('rename_session', { sessionId: session.id, name });
+    session.name = name.trim();
+    $('session-title').textContent = session.name;
+    $('workspace-name').textContent = session.name;
+    await refreshSummaries();
+  } catch (error) { setStatus(String(error)); }
+});
+
+$('delete-session').addEventListener('click', async () => {
+  const session = activeSession();
+  if (!session || running.has(session.id) || !window.confirm(`Delete session “${session.name}”? Workspace files will remain.`)) return;
+  try {
+    await invoke('delete_session', { sessionId: session.id });
+    sessions.delete(session.id);
+    views.delete(session.id);
+    conversationBindings.delete(session.id);
+    activeSessionId = null;
+    await refreshSummaries();
+    const first = summaries[0];
+    if (first) await selectSession(first.id);
+    else {
+      $('session-title').textContent = 'Workspace conversation';
+      $('workspace-name').textContent = 'No session selected';
+      $('workspace-path').textContent = 'Agent files stay in this folder.';
+      renderTranscript();
+      await refreshCheckpoints();
+      updateControls();
+      setStatus('Create a session to begin.');
+    }
+  } catch (error) { setStatus(String(error)); }
+});
+
+const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
+  const id = payload.session_id;
+  if (payload.kind === 'text') addDisplay(id, 'Agent', payload.value ?? '', true);
+  else if (payload.kind === 'tool') addDisplay(id, 'Tool', payload.value ?? '');
+  else if (payload.kind === 'error') {
+    running.delete(id);
+    if (id === activeSessionId) setStatus(payload.value ?? 'Turn failed.');
+  } else {
+    running.delete(id);
+    if (id === activeSessionId) setStatus('Ready.');
+    void refreshSession(id, true).then(() => refreshSummaries()).catch((error) => setStatus(String(error)));
+  }
+  renderSessions();
+  updateControls();
+});
+
+const approvalListenerReady = listen<ApprovalEvent>('approval-request', ({ payload }) => {
+  approvalQueue.push(payload);
+  showNextApproval();
+});
+
+const approvalExpiryReady = listen<ApprovalExpired>('approval-expired', ({ payload }) => {
+  const queued = approvalQueue.findIndex((item) => item.sessionId === payload.sessionId && item.id === payload.id);
+  if (queued >= 0) approvalQueue.splice(queued, 1);
+  if (currentApproval?.sessionId === payload.sessionId && currentApproval.id === payload.id) {
+    currentApproval = null;
+    approvalDialog.close();
+    setStatus('Approval expired. The file was not changed.');
+    showNextApproval();
+  }
+});
+
+const checkpointListenerReady = listen<Checkpoint>('checkpoint-created', ({ payload }) => {
+  if (payload.sessionId === activeSessionId) void refreshCheckpoints();
+});
+
 $('approve').addEventListener('click', () => { void answerApproval(true); });
 $('reject').addEventListener('click', () => { void answerApproval(false); });
-dialog.addEventListener('cancel', (event) => { event.preventDefault(); void answerApproval(false); });
+$('edit-approval').addEventListener('click', () => {
+  const editor = $<HTMLTextAreaElement>('after');
+  editor.readOnly = false;
+  editor.focus();
+});
+$<HTMLTextAreaElement>('after').addEventListener('input', (event) => showChanges(approvalBefore, (event.target as HTMLTextAreaElement).value));
+approvalDialog.addEventListener('cancel', (event) => { event.preventDefault(); void answerApproval(false); });
+
+$('cancel-restore').addEventListener('click', () => { pendingRestore = null; restoreDialog.close(); });
+restoreDialog.addEventListener('cancel', () => { pendingRestore = null; });
+$('confirm-restore').addEventListener('click', async () => {
+  const pending = pendingRestore;
+  if (!pending) return;
+  const button = $<HTMLButtonElement>('confirm-restore');
+  button.disabled = true;
+  try {
+    await invoke<number>('restore_checkpoint', { sessionId: pending.sessionId, checkpointId: pending.preview.checkpointId, expectedTree: pending.preview.currentTree });
+    restoreDialog.close();
+    pendingRestore = null;
+    await refreshSession(pending.sessionId, true);
+    if (activeSessionId && activeSessionId !== pending.sessionId && sessions.get(activeSessionId)?.workspace === sessions.get(pending.sessionId)?.workspace) {
+      await refreshSession(activeSessionId, true);
+    }
+    await refreshCheckpoints();
+    setStatus('Checkpoint restored.');
+  } catch (error) { setStatus(String(error)); }
+  finally { button.disabled = false; }
+});
 
 prompt.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -111,32 +477,41 @@ prompt.addEventListener('keydown', (event) => {
 
 $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (busy) return;
-  if (!workspace) { setStatus('Choose a workspace first.'); return; }
+  const id = activeSessionId;
+  if (!id) { setStatus('Create a session first.'); return; }
+  if (running.has(id)) return;
   const text = prompt.value.trim();
-  const baseUrl = $<HTMLInputElement>('endpoint').value.trim();
-  const model = $<HTMLInputElement>('model').value.trim();
-  const apiKey = $<HTMLInputElement>('api-key').value;
-  if (!text || !baseUrl || !model) { setStatus('Enter an endpoint, model, and task.'); return; }
-  busy = true;
-  send.disabled = true;
-  $('workspace-button').setAttribute('disabled', '');
-  addMessage('You', text);
-  prompt.value = '';
-  assistantText = null;
-  setStatus('Agent is working…');
+  const settings = currentSettings();
+  const turnMode = mode;
+  const model = turnMode === 'plan' ? settings.planModel : settings.actModel;
+  if (!text || !settings.baseUrl || !model) { setStatus('Enter an endpoint, model, and task.'); return; }
+  running.add(id);
+  updateControls();
+  renderSessions();
   try {
-    if (apiKey) {
-      await invoke('save_provider_key', { baseUrl, apiKey });
-      $<HTMLInputElement>('api-key').value = '';
+    await Promise.all([turnListenerReady, approvalListenerReady, approvalExpiryReady, checkpointListenerReady]);
+    await saveEnteredKey(settings);
+    await invoke('save_provider_settings', { settings });
+    const previous = conversationBindings.get(id);
+    if (previous && previous !== binding(settings)) {
+      views.set(id, []);
+      if (id === activeSessionId) renderTranscript();
+      addDisplay(id, 'System', 'New conversation started for the selected provider and URL.');
     }
-    await invoke('start_turn', { baseUrl, model, mode, prompt: text });
+    conversationBindings.set(id, binding(settings));
+    addDisplay(id, 'You', text);
+    prompt.value = '';
+    if (id === activeSessionId) setStatus('Agent is working…');
+    await invoke('start_turn', { sessionId: id, settings, mode: turnMode, prompt: text });
   } catch (error) {
-    setStatus(String(error));
+    addDisplay(id, 'Error', String(error));
+    if (id === activeSessionId) setStatus(String(error));
   } finally {
-    busy = false;
-    send.disabled = false;
-    $('workspace-button').removeAttribute('disabled');
-    prompt.focus();
+    running.delete(id);
+    renderSessions();
+    updateControls();
+    if (id === activeSessionId) prompt.focus();
   }
 });
+
+void initialize();

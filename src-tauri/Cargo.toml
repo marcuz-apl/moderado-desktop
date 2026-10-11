@@ -1,6 +1,6 @@
 [package]
 name = "moderado-desktop"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [lib]
@@ -20,6 +20,7 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 cap-std = "4.0"
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

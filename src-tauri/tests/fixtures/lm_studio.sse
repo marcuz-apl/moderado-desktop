@@ -1,0 +1,6 @@
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_lms","function":{"name":"write_file"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"m2.txt\",\"content\":\"ready\"}"}}]}}]}
+
+data: [DONE]
+

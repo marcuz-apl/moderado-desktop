@@ -1,7 +1,7 @@
 # moderado-desktop Agent Guidelines (`AGENTS.md`)
 
 > **Scope**: Guidelines and operating manual for AI coding agents and human contributors to `moderado-desktop`.
-> **Product**: Cross-platform desktop app for autonomous coding agent sessions (see `PRD.md`).
+> **Product**: Cross-platform desktop app for autonomous coding agent sessions (see `docs/PRD.md`).
 > **Ecosystem**: Rust / Tauri / TypeScript
 
 ---

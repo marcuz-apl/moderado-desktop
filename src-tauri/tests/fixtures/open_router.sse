@@ -1,0 +1,6 @@
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_router","function":{"name":"write_","arguments":"{\"path\":\"m2.txt\",\"content\":\""}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"file","arguments":"ready\"}"}}]}}]}
+
+data: [DONE]
+
