@@ -19,6 +19,16 @@ type Schedule = { id: string; sessionId: string; prompt: string; mode: 'plan' | 
 type SearchSettings = { enabled: boolean; endpoint: string };
 type ScheduleStarted = { sessionId: string; scheduleId: string; prompt: string };
 type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null };
+type ProjectEntry = { name: string; path: string; isDir: boolean };
+type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
+type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
+type SidebarPanel = 'sessions' | 'workspace' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
+type GatewayMode = 'prod' | 'dev';
+
+const GATEWAY_URLS: Record<GatewayMode, string> = {
+  prod: 'https://mod.alfazen.org/v1',
+  dev: 'http://127.0.0.1:4788/v1',
+};
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const transcript = $<HTMLElement>('transcript');
@@ -37,6 +47,7 @@ const emptyState = $('empty-state').cloneNode(true);
 let providers: ProviderPreset[] = [];
 let initialized = false;
 let activeProvider: ProviderId = 'gateway';
+let gatewayMode: GatewayMode = 'prod';
 let activeSessionId: string | null = null;
 let scheduleSessionId: string | null = null;
 let importSessionId: string | null = null;
@@ -44,6 +55,9 @@ let mode: 'plan' | 'act' = 'plan';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
+let activePanel: SidebarPanel | null = 'sessions';
+const projectEntries = new Map<string, ProjectEntry[]>();
+const expandedFolders = new Set<string>();
 let summaries: SessionSummary[] = [];
 const sessions = new Map<string, SessionRecord>();
 const views = new Map<string, DisplayMessage[]>();
@@ -62,9 +76,41 @@ function currentSettings(): ProviderSettings {
   return {
     providerId: activeProvider,
     baseUrl: endpoint.value.trim(),
-    planModel: $<HTMLInputElement>('plan-model').value.trim(),
-    actModel: $<HTMLInputElement>('act-model').value.trim(),
+    planModel: $<HTMLSelectElement>('plan-model').value.trim(),
+    actModel: $<HTMLSelectElement>('act-model').value.trim(),
   };
+}
+
+function setModelOptions(models: string[], planValue: string, actValue: string): void {
+  for (const [id, selected] of [['plan-model', planValue], ['act-model', actValue]] as const) {
+    const select = $<HTMLSelectElement>(id);
+    const options = [new Option('Choose a model', '')];
+    for (const model of models) options.push(new Option(model, model));
+    if (selected && !models.includes(selected)) options.push(new Option(selected, selected));
+    select.replaceChildren(...options);
+    select.value = selected;
+  }
+}
+
+function setGatewayMode(next: GatewayMode, persistDraft = true): void {
+  const changed = gatewayMode !== next;
+  gatewayMode = next;
+  endpoint.value = GATEWAY_URLS[next];
+  document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
+    const selected = button.dataset.gatewayMode === next;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  if (changed && activeProvider === 'gateway') {
+    setModelOptions([], $<HTMLSelectElement>('plan-model').value, $<HTMLSelectElement>('act-model').value);
+  }
+  if (persistDraft && activeProvider === 'gateway') {
+    providerDrafts.set('gateway', {
+      baseUrl: endpoint.value,
+      planModel: $<HTMLSelectElement>('plan-model').value,
+      actModel: $<HTMLSelectElement>('act-model').value,
+    });
+  }
 }
 
 function selectProvider(id: ProviderId): void {
@@ -75,12 +121,16 @@ function selectProvider(id: ProviderId): void {
   activeProvider = id;
   providerSelect.value = id;
   const draft = providerDrafts.get(id);
-  endpoint.value = draft?.baseUrl ?? preset.defaultBaseUrl;
-  endpoint.readOnly = !preset.editableUrl;
+  const isGateway = id === 'gateway';
+  if (isGateway) {
+    setGatewayMode(draft?.baseUrl === GATEWAY_URLS.dev ? 'dev' : 'prod', false);
+  } else {
+    endpoint.value = draft?.baseUrl ?? preset.defaultBaseUrl;
+  }
+  endpoint.readOnly = isGateway || !preset.editableUrl;
+  $('gateway-mode').toggleAttribute('hidden', !isGateway);
   endpoint.placeholder = id === 'gateway' ? 'https://your-gateway.example/v1' : 'https://your-endpoint.example/v1';
-  $<HTMLInputElement>('plan-model').value = draft?.planModel ?? '';
-  $<HTMLInputElement>('act-model').value = draft?.actModel ?? '';
-  $('available-models').replaceChildren();
+  setModelOptions([], draft?.planModel ?? '', draft?.actModel ?? '');
   keyField.value = '';
   keyField.disabled = preset.local;
   if (activeSession()) setStatus(`${preset.name} selected. Changing provider starts a new conversation on the next task.`);
@@ -88,9 +138,12 @@ function selectProvider(id: ProviderId): void {
 
 function applySessionSettings(settings: ProviderSettings): void {
   selectProvider(settings.providerId);
-  endpoint.value = settings.baseUrl;
-  $<HTMLInputElement>('plan-model').value = settings.planModel;
-  $<HTMLInputElement>('act-model').value = settings.actModel;
+  if (settings.providerId === 'gateway') {
+    setGatewayMode(settings.baseUrl === GATEWAY_URLS.dev ? 'dev' : 'prod', false);
+  } else {
+    endpoint.value = settings.baseUrl;
+  }
+  setModelOptions([], settings.planModel, settings.actModel);
 }
 
 async function saveEnteredKey(settings: ProviderSettings): Promise<void> {
@@ -182,11 +235,18 @@ async function selectSession(id: string): Promise<void> {
   $('workspace-name').textContent = record.name;
   $('workspace-path').textContent = record.workspace;
   $('session-title').textContent = record.name;
+  $('profile-session').textContent = record.name;
+  $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.planModel || 'No plan model'}`;
+  $('project-root-name').textContent = record.workspace;
   renderSessions();
   renderTranscript();
   updateControls();
   await refreshCheckpoints();
   await refreshSchedules();
+  projectEntries.clear();
+  expandedFolders.clear();
+  if (activePanel === 'workspace') await refreshProjectTree();
+  if (activePanel === 'source-control') await refreshSourceControl();
   const searchSettings = await invoke<SearchSettings>('get_search_settings', { sessionId: id });
   if (id !== activeSessionId) return;
   $<HTMLInputElement>('search-enabled').checked = searchSettings.enabled;
@@ -201,8 +261,8 @@ function updateControls(): void {
   providerSelect.disabled = busy;
   endpoint.disabled = busy;
   keyField.disabled = busy || (providers.find((item) => item.id === activeProvider)?.local ?? false);
-  $<HTMLInputElement>('plan-model').disabled = busy;
-  $<HTMLInputElement>('act-model').disabled = busy;
+  $<HTMLSelectElement>('plan-model').disabled = busy;
+  $<HTMLSelectElement>('act-model').disabled = busy;
   $<HTMLButtonElement>('load-models').disabled = busy;
   $<HTMLButtonElement>('plan-mode').disabled = busy;
   $<HTMLButtonElement>('act-mode').disabled = busy;
@@ -291,6 +351,138 @@ async function refreshSchedules(): Promise<void> {
       return item;
     }));
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
+}
+
+function switchPanel(panel: SidebarPanel): void {
+  activePanel = activePanel === panel ? null : panel;
+  document.querySelector<HTMLElement>('.app')?.classList.toggle('sidebar-collapsed', activePanel === null);
+  document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
+    const selected = button.dataset.panel === activePanel;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
+    section.classList.toggle('active', section.dataset.panelContent === panel);
+  });
+  if (activePanel === 'workspace') void refreshProjectTree();
+  if (activePanel === 'source-control') void refreshSourceControl();
+}
+
+async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
+  const id = activeSessionId;
+  if (!id) return [];
+  const entries = await invoke<ProjectEntry[]>('list_project_entries', { sessionId: id, path });
+  if (id !== activeSessionId) return [];
+  projectEntries.set(path, entries);
+  return entries;
+}
+
+async function refreshProjectTree(): Promise<void> {
+  const tree = $('project-tree');
+  const id = activeSessionId;
+  projectEntries.clear();
+  expandedFolders.clear();
+  if (!id) { tree.textContent = 'Select a session to browse its workspace.'; return; }
+  tree.textContent = 'Loading project files…';
+  $('project-root-name').textContent = sessions.get(id)?.workspace ?? '';
+  try {
+    await loadProjectFolder('.');
+    if (id === activeSessionId) renderProjectTree();
+  } catch (error) { if (id === activeSessionId) tree.textContent = `Could not load project files: ${String(error)}`; }
+}
+
+function renderProjectTree(): void {
+  const tree = $('project-tree');
+  const fragment = document.createDocumentFragment();
+  const append = (entries: ProjectEntry[], depth: number): void => {
+    for (const entry of entries) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `tree-row${entry.isDir ? ' tree-folder' : ' tree-file'}`;
+      row.style.paddingLeft = `${12 + depth * 14}px`;
+      row.setAttribute('role', 'treeitem');
+      if (entry.isDir) {
+        const open = expandedFolders.has(entry.path);
+        row.setAttribute('aria-expanded', String(open));
+        row.textContent = `${open ? '▾' : '▸'}  ${entry.name}`;
+        row.addEventListener('click', async () => {
+          if (expandedFolders.has(entry.path)) expandedFolders.delete(entry.path);
+          else {
+            expandedFolders.add(entry.path);
+            if (!projectEntries.has(entry.path)) {
+              try { await loadProjectFolder(entry.path); }
+              catch (error) { setStatus(`Could not read ${entry.path}: ${String(error)}`); expandedFolders.delete(entry.path); }
+            }
+          }
+          renderProjectTree();
+        });
+      } else {
+        row.textContent = `   ${entry.name}`;
+        row.addEventListener('click', () => { void previewProjectFile(entry); });
+      }
+      fragment.append(row);
+      if (entry.isDir && expandedFolders.has(entry.path)) append(projectEntries.get(entry.path) ?? [], depth + 1);
+    }
+  };
+  const rootEntries = projectEntries.get('.');
+  if (!rootEntries?.length) { tree.textContent = 'This folder is empty.'; return; }
+  append(rootEntries, 0);
+  tree.replaceChildren(fragment);
+}
+
+async function previewProjectFile(entry: ProjectEntry): Promise<void> {
+  const id = activeSessionId;
+  if (!id) return;
+  const dialog = $<HTMLDialogElement>('file-preview-dialog');
+  $('file-preview-title').textContent = entry.name;
+  $('file-preview-path').textContent = entry.path;
+  $('file-preview-content').textContent = 'Loading…';
+  dialog.showModal();
+  try {
+    const contents = await invoke<string>('read_project_file', { sessionId: id, path: entry.path });
+    if (id === activeSessionId) $('file-preview-content').textContent = contents;
+  } catch (error) { $('file-preview-content').textContent = `Could not preview file: ${String(error)}`; }
+}
+
+async function refreshSourceControl(): Promise<void> {
+  const id = activeSessionId;
+  const branch = $('source-branch');
+  const message = $('source-control-message');
+  const changes = $('source-changes');
+  const history = $('commit-history');
+  changes.replaceChildren();
+  history.replaceChildren();
+  if (!id) { branch.textContent = 'Select a session'; message.textContent = 'Open a workspace to inspect Git.'; return; }
+  branch.textContent = 'Loading…';
+  message.textContent = 'Reading local Git status…';
+  try {
+    const snapshot = await invoke<SourceControlSnapshot>('get_source_control', { sessionId: id });
+    if (id !== activeSessionId) return;
+    branch.textContent = snapshot.branch;
+    message.textContent = snapshot.changes.length ? `${snapshot.changes.length} changed file${snapshot.changes.length === 1 ? '' : 's'}` : 'Working tree clean';
+    changes.replaceChildren(...snapshot.changes.map((path) => {
+      const row = document.createElement('div');
+      row.className = 'source-change';
+      row.textContent = path;
+      row.title = path;
+      return row;
+    }));
+    if (!snapshot.commits.length) history.textContent = 'No commits yet.';
+    else history.replaceChildren(...snapshot.commits.map((commit) => {
+      const row = document.createElement('article');
+      row.className = 'commit-item';
+      const subject = document.createElement('strong');
+      subject.textContent = commit.subject || '(no subject)';
+      const meta = document.createElement('span');
+      meta.textContent = `${commit.hash} · ${commit.author} · ${new Date(commit.timestamp * 1000).toLocaleDateString()}`;
+      row.append(subject, meta);
+      return row;
+    }));
+  } catch (error) {
+    if (id !== activeSessionId) return;
+    branch.textContent = 'Unavailable';
+    message.textContent = String(error);
+  }
 }
 
 async function previewCheckpoint(sessionId: string, checkpointId: string): Promise<void> {
@@ -402,6 +594,15 @@ async function initialize(): Promise<void> {
 }
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
+document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
+  button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
+});
+document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
+  button.addEventListener('click', () => switchPanel(button.dataset.panel as SidebarPanel));
+});
+$<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
+$<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });
+$<HTMLButtonElement>('close-file-preview').addEventListener('click', () => $<HTMLDialogElement>('file-preview-dialog').close());
 $('plan-mode').addEventListener('click', () => setMode('plan'));
 $('act-mode').addEventListener('click', () => setMode('act'));
 
@@ -415,14 +616,10 @@ $('load-models').addEventListener('click', async () => {
     await saveEnteredKey(settings);
     const models = await invoke<string[]>('discover_models', { providerId: settings.providerId, baseUrl: settings.baseUrl });
     if (settings.providerId === activeProvider && settings.baseUrl === endpoint.value.trim()) {
-      $('available-models').replaceChildren(...models.map((id) => {
-        const option = document.createElement('option');
-        option.value = id;
-        return option;
-      }));
       const first = models[0];
-      if (first && !$<HTMLInputElement>('plan-model').value) $<HTMLInputElement>('plan-model').value = first;
-      if (first && !$<HTMLInputElement>('act-model').value) $<HTMLInputElement>('act-model').value = first;
+      const planModel = $<HTMLSelectElement>('plan-model').value || first || '';
+      const actModel = $<HTMLSelectElement>('act-model').value || first || '';
+      setModelOptions(models, planModel, actModel);
     }
     setStatus(models.length ? `${models.length} models available.` : 'The endpoint returned no models.');
   } catch (error) { setStatus(String(error)); }
@@ -544,9 +741,14 @@ $('delete-session').addEventListener('click', async () => {
       $('session-title').textContent = 'Workspace conversation';
       $('workspace-name').textContent = 'No session selected';
       $('workspace-path').textContent = 'Agent files stay in this folder.';
+      $('profile-session').textContent = 'No session selected';
+      $('profile-provider').textContent = 'Not configured';
+      $('project-root-name').textContent = 'No workspace selected';
       renderTranscript();
       await refreshCheckpoints();
       await refreshSchedules();
+      if (activePanel === 'workspace') await refreshProjectTree();
+      if (activePanel === 'source-control') await refreshSourceControl();
       updateControls();
       setStatus('Create a session to begin.');
     }
@@ -563,7 +765,11 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
   } else {
     if (!scheduledPending.has(id)) running.delete(id);
     if (id === activeSessionId) setStatus('Ready.');
-    void refreshSession(id, true).then(() => refreshSummaries()).catch((error) => setStatus(String(error)));
+    void refreshSession(id, true).then(async () => {
+      await refreshSummaries();
+      if (id === activeSessionId && activePanel === 'workspace') await refreshProjectTree();
+      if (id === activeSessionId && activePanel === 'source-control') await refreshSourceControl();
+    }).catch((error) => setStatus(String(error)));
   }
   renderSessions();
   updateControls();

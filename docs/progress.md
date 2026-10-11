@@ -39,3 +39,14 @@
 - Added a per-session web search toggle, configurable API endpoint, and optional key stored in the OS keychain. The agent sees web search only when the endpoint is configured and search is enabled.
 - Read-only review identified interrupted-run recovery, recurring backlog, startup approval delivery, and provider and search capability binding risks; fixes were applied. Search endpoints with a pre-existing `q` parameter are rejected.
 - Final verification: 49 Rust tests and 1 frontend test passed offline; lint and build passed; Vite and the Tauri executable started successfully.
+
+
+## Activity Bar and Project Browser
+
+- Added a VS Code inspired Activity Bar for Sessions, Workspace, Checkpoints, Schedules, and Source Control, with local Profile and Settings actions at the bottom.
+- Grouped Connection and Web Search under Settings and preserved the existing per-session settings behavior.
+- Added a lazy, read-only project tree and UTF-8 file preview through workspace-jailed Tauri commands.
+- Added read-only Git branch, working tree, and 50-commit history views. Git inspection rejects repositories rooted outside the selected workspace.
+- Settings now place API Key directly after Base URL, use dropdowns for Plan and Act models, and select the fixed Gateway Prod or Dev endpoint with Prod as the default.
+- `npm test`: 54 Rust tests and 1 frontend test passed offline; `npm run lint` and `npm run build` passed.
+- Playwright UI checks passed at 760 px for the sidebar and Gateway settings flows; `npm run dev` started Vite and the Tauri executable successfully.

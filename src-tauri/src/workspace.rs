@@ -1,9 +1,19 @@
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
+use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_FILE_BYTES: u64 = 256 * 1024;
+const MAX_PROJECT_ENTRIES: usize = 1000;
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
 
 pub fn resolve_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let root = root
@@ -116,6 +126,47 @@ pub fn list_files(root: &Path, relative: &str) -> Result<Vec<String>, String> {
     Ok(entries)
 }
 
+pub fn list_project_entries(root: &Path, relative: &str) -> Result<Vec<ProjectEntry>, String> {
+    resolve_path(root, relative)?;
+    let dir =
+        Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    let relative_path = if relative.is_empty() { "." } else { relative };
+    let mut entries = Vec::new();
+    for entry in dir
+        .read_dir(relative_path)
+        .map_err(|error| error.to_string())?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if file_type.is_symlink() || name == ".git" {
+            continue;
+        }
+        if entries.len() == MAX_PROJECT_ENTRIES {
+            return Err(format!(
+                "Folder exceeds {MAX_PROJECT_ENTRIES} visible entries"
+            ));
+        }
+        let path = Path::new(relative_path)
+            .join(&name)
+            .to_string_lossy()
+            .replace('\\', "/");
+        entries.push(ProjectEntry {
+            name,
+            path,
+            is_dir: file_type.is_dir(),
+        });
+    }
+    entries.sort_by(|left, right| {
+        right
+            .is_dir
+            .cmp(&left.is_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(entries)
+}
+
 pub fn search_files(root: &Path, query: &str) -> Result<Vec<String>, String> {
     if query.is_empty() || query.len() > 200 {
         return Err("Search query must be 1–200 characters".into());
@@ -180,6 +231,30 @@ pub fn search_files(root: &Path, query: &str) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn project_entries_sort_folders_first_and_hide_git_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("z-folder")).unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        fs::write(root.path().join("a.txt"), "text").unwrap();
+        let entries = list_project_entries(root.path(), ".").unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["z-folder", "a.txt"]
+        );
+        assert!(entries[0].is_dir);
+        assert!(!entries[1].is_dir);
+    }
+
+    #[test]
+    fn project_entries_reject_parent_escape() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(list_project_entries(root.path(), "../").is_err());
+    }
 
     #[test]
     fn rejects_parent_escape() {

@@ -122,7 +122,15 @@ Make the desktop sidebar navigable like an editor workbench while preserving the
 
 ## Phases
 
-1. Workspace browser and Git snapshot contracts with offline tests — pending
-2. Activity rail, contextual panels, tree, and history UI — pending
-3. Accessibility and responsive layout review — pending
-4. Full offline tests, lint, build, and Tauri startup — pending
+1. Workspace browser and Git snapshot contracts with offline tests ? complete
+2. Activity rail, contextual panels, tree, and history UI ? complete
+3. Accessibility and responsive layout review - complete; browser screenshot automation unavailable because Python Playwright is not installed
+4. Full offline tests, lint, build, and Tauri startup ? complete
+
+## Verification
+
+- `npm test`: 54 Rust tests and 1 frontend test passed offline.
+- `npm run lint`: ESLint, TypeScript, and Clippy passed.
+- `npm run build`: frontend and Rust builds passed.
+- `npm run dev`: Vite and the Tauri executable started successfully; the process was stopped after startup.
+- `git diff --check`: passed.

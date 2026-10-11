@@ -8,36 +8,52 @@
   </head>
   <body>
     <div class="app">
-      <aside class="sidebar">
-        <div class="brand"><span class="brand-mark">M</span><span>moderado<small>DESKTOP</small></span></div>
-        <div class="sidebar-section">
-          <p class="eyebrow">SESSIONS</p>
-          <button id="workspace-button" class="workspace-button" type="button"><span>+ New session</span><span>↗</span></button>
-          <div id="session-list" class="session-list" aria-label="Sessions"></div>
-          <p class="eyebrow workspace-label">WORKSPACE</p>
-          <p id="workspace-name" class="workspace-name">No session selected</p>
-          <p id="workspace-path" class="path">Agent files stay in this folder.</p>
+      <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-2 2v-9.5a7.5 7.5 0 1 1 15 0Z"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></symbol>
+        <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 6.5h7l2 2h9v10H3z"/><path d="M3 8.5V5h7l2 2"/></symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M20 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10"/></symbol>
+        <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="icon-source" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M18 17v-2a4 4 0 0 0-4-4h-4a4 4 0 0 1-4-4"/></symbol>
+        <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4L5.3 15a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1L9 7.4h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1-.1 2Z" transform="translate(1 0)"/></symbol>
+      </svg>
+      <nav class="activity-bar" aria-label="Workbench views">
+        <div class="activity-group">
+          <button class="activity-button selected" data-panel="sessions" type="button" aria-label="Sessions" title="Sessions" aria-pressed="true"><svg><use href="#icon-chat"/></svg></button>
+          <button class="activity-button" data-panel="workspace" type="button" aria-label="Workspace" title="Workspace" aria-pressed="false"><svg><use href="#icon-folder"/></svg></button>
+          <button class="activity-button" data-panel="checkpoints" type="button" aria-label="Checkpoints" title="Checkpoints" aria-pressed="false"><svg><use href="#icon-check"/></svg></button>
+          <button class="activity-button" data-panel="schedules" type="button" aria-label="Schedules" title="Schedules" aria-pressed="false"><svg><use href="#icon-clock"/></svg></button>
+          <button class="activity-button" data-panel="source-control" type="button" aria-label="Source Control" title="Source Control" aria-pressed="false"><svg><use href="#icon-source"/></svg></button>
         </div>
-        <div class="sidebar-section checkpoint-section"><p class="eyebrow">CHECKPOINTS</p><div id="checkpoint-list" class="checkpoint-list">No checkpoints yet.</div></div>
-        <div class="sidebar-section schedule-section"><p class="eyebrow">SCHEDULES</p><div id="schedule-list" class="schedule-list">Select a session.</div><button id="new-schedule" class="text-button" type="button">+ Schedule task</button><button id="import-transcript" class="text-button" type="button">Import transcript</button></div>
-        <div class="sidebar-section settings">
+        <div class="activity-group">
+          <button class="activity-button" data-panel="profile" type="button" aria-label="Profile" title="Profile" aria-pressed="false"><svg><use href="#icon-user"/></svg></button>
+          <button class="activity-button" data-panel="settings" type="button" aria-label="Settings" title="Settings" aria-pressed="false"><svg><use href="#icon-settings"/></svg></button>
+        </div>
+      </nav>
+      <aside class="sidebar">
+        <section class="sidebar-panel active" data-panel-content="sessions"><header class="panel-heading"><h2>Sessions</h2><button id="workspace-button" class="text-button" type="button">+ New session</button></header><div class="panel-body"><div id="session-list" class="session-list" aria-label="Sessions"></div><div class="session-context"><p class="eyebrow">WORKSPACE</p><p id="workspace-name" class="workspace-name">No session selected</p><p id="workspace-path" class="path">Agent files stay in this folder.</p></div></div></section>
+        <section class="sidebar-panel" data-panel-content="workspace"><header class="panel-heading"><div><h2>Project Browser</h2><p id="project-root-name" class="path">No workspace selected</p></div><button id="refresh-project" class="icon-action" type="button" aria-label="Refresh project files" title="Refresh">Refresh</button></header><div id="project-tree" class="panel-body project-tree" role="tree" aria-label="Project files">Select a session to browse its workspace.</div></section>
+        <section class="sidebar-panel" data-panel-content="checkpoints"><header class="panel-heading"><h2>Checkpoints</h2></header><div id="checkpoint-list" class="panel-body checkpoint-list">No checkpoints yet.</div></section>
+        <section class="sidebar-panel" data-panel-content="schedules"><header class="panel-heading"><h2>Schedules</h2><button id="new-schedule" class="text-button" type="button">+ New</button></header><div id="schedule-list" class="panel-body schedule-list">Select a session.</div><div class="panel-actions"><button id="import-transcript" class="text-button" type="button">Import transcript</button></div></section>
+        <section class="sidebar-panel" data-panel-content="source-control"><header class="panel-heading"><div><h2>Source Control</h2><p id="source-branch" class="path">Select a session</p></div><button id="refresh-source-control" class="icon-action" type="button" aria-label="Refresh source control" title="Refresh">Refresh</button></header><div class="panel-body"><p id="source-control-message" class="hint">Open a workspace to inspect Git.</p><div id="source-changes" class="source-changes"></div><h3 class="panel-subheading">Recent commits</h3><div id="commit-history" class="commit-history"></div></div></section>
+        <section class="sidebar-panel" data-panel-content="profile"><header class="panel-heading"><h2>Local Profile</h2></header><div class="panel-body"><p class="hint">This profile is stored on this device.</p><p class="eyebrow">CURRENT SESSION</p><p id="profile-session" class="workspace-name">No session selected</p><p class="eyebrow">PROVIDER</p><p id="profile-provider" class="path">Not configured</p></div></section>
+        <section class="sidebar-panel" data-panel-content="settings"><header class="panel-heading"><h2>Settings</h2></header><div class="panel-body settings-body"><div class="settings-group">
           <p class="eyebrow">CONNECTION</p>
           <label for="provider-select">Provider</label>
           <select id="provider-select" aria-label="Provider"></select>
+          <div id="gateway-mode" class="gateway-mode" role="group" aria-label="Gateway environment" hidden><button type="button" data-gateway-mode="prod" class="selected" aria-pressed="true">Prod Mode</button><button type="button" data-gateway-mode="dev" aria-pressed="false">Dev Mode</button></div>
           <label for="endpoint">Base URL</label>
           <input id="endpoint" type="url" spellcheck="false" placeholder="https://your-gateway.example/v1" />
-          <label for="plan-model">Plan model</label>
-          <input id="plan-model" type="text" list="available-models" spellcheck="false" placeholder="Model ID for planning" />
-          <label for="act-model">Act model</label>
-          <input id="act-model" type="text" list="available-models" spellcheck="false" placeholder="Model ID for changes" />
-          <datalist id="available-models"></datalist>
-          <button id="load-models" class="text-button" type="button">Load available models</button>
           <label for="api-key">API key <span class="muted">remote providers</span></label>
           <input id="api-key" type="password" autocomplete="off" placeholder="Saved in OS keychain" />
-          <p class="hint">Gateway and custom URLs are configurable. Remote keys are saved in your OS keychain. Local providers need no key.</p>
+          <label for="plan-model">Plan model</label>
+          <select id="plan-model" aria-label="Plan model"><option value="">Load models to choose</option></select>
+          <label for="act-model">Act model</label>
+          <select id="act-model" aria-label="Act model"><option value="">Load models to choose</option></select>
+          <button id="load-models" class="text-button" type="button">Load available models</button>
+          <p class="hint">Gateway uses the selected environment. Custom URLs can be entered directly. Remote keys are saved in your OS keychain; local providers need no key.</p>
         </div>
-        <div class="sidebar-section settings"><p class="eyebrow">WEB SEARCH</p><label class="checkbox-label" for="search-enabled"><input id="search-enabled" type="checkbox" checked /> Enable for this session</label><label for="search-endpoint">Search API endpoint</label><input id="search-endpoint" type="url" spellcheck="false" placeholder="https://search.example/api" /><label for="search-key">Optional API key</label><input id="search-key" type="password" autocomplete="off" placeholder="Saved in OS keychain" /><button id="save-search" class="text-button" type="button">Save search settings</button><p class="hint">GET endpoint?q=term returns JSON: {"results":[{"title":"...","url":"...","snippet":"..."}]}. Search is available after an endpoint is saved.</p></div>
-        <div class="sidebar-footer"><span class="status-dot"></span> Local sessions <span class="version">v0.1.3</span></div>
+        <div class="settings-group"><p class="eyebrow">WEB SEARCH</p><label class="checkbox-label" for="search-enabled"><input id="search-enabled" type="checkbox" checked /> Enable for this session</label><label for="search-endpoint">Search API endpoint</label><input id="search-endpoint" type="url" spellcheck="false" placeholder="https://search.example/api" /><label for="search-key">Optional API key</label><input id="search-key" type="password" autocomplete="off" placeholder="Saved in OS keychain" /><button id="save-search" class="text-button" type="button">Save search settings</button><p class="hint">GET endpoint?q=term returns JSON: {"results":[{"title":"...","url":"...","snippet":"..."}]}. Search is available after an endpoint is saved.</p></div></div></section>
       </aside>
       <main class="main">
         <header class="topbar"><div><p class="eyebrow">AGENT SESSION</p><h1 id="session-title">Workspace conversation</h1><div class="session-actions"><button id="rename-session" type="button">Rename</button><button id="delete-session" type="button">Delete</button></div></div><div class="mode-control" role="group" aria-label="Agent mode"><button id="plan-mode" class="selected" type="button" aria-pressed="true">Plan</button><button id="act-mode" type="button" aria-pressed="false">Act</button></div></header>
@@ -48,6 +64,7 @@
       </main>
     </div>
     <dialog id="approval-dialog" aria-labelledby="approval-title"><div class="dialog-head"><p class="eyebrow">APPROVAL REQUIRED</p><h2 id="approval-title">Review file write</h2><p id="approval-session" class="path"></p><p id="approval-path" class="path"></p></div><pre id="change-summary" aria-label="Line changes"></pre><div class="diff"><div><h3>Current</h3><pre id="before"></pre></div><div><h3>Proposed</h3><textarea id="after" aria-label="Proposed file content" readonly></textarea></div></div><div class="dialog-actions"><button id="edit-approval" type="button" class="secondary">Edit proposed content</button><button id="reject" type="button" class="secondary">Reject</button><button id="approve" type="button">Approve write</button></div></dialog>
+    <dialog id="file-preview-dialog" aria-labelledby="file-preview-title"><div class="dialog-head"><p class="eyebrow">READ ONLY PREVIEW</p><h2 id="file-preview-title">Project file</h2><p id="file-preview-path" class="path"></p></div><pre id="file-preview-content" class="file-preview-content"></pre><div class="dialog-actions"><button id="close-file-preview" type="button" class="secondary">Close</button></div></dialog>
     <dialog id="restore-dialog" aria-labelledby="restore-title"><div class="dialog-head"><p class="eyebrow">RESTORE CHECKPOINT</p><h2 id="restore-title">Review rollback</h2><p id="restore-description" class="path"></p></div><div id="restore-changes" class="restore-changes"></div><div class="dialog-actions"><button id="cancel-restore" type="button" class="secondary">Cancel</button><button id="confirm-restore" type="button">Restore files</button></div></dialog>
     <dialog id="schedule-dialog" aria-labelledby="schedule-title"><form id="schedule-form"><div class="dialog-head"><p class="eyebrow">SCHEDULE TASK</p><h2 id="schedule-title">Run later</h2><p class="path">Schedules run while Moderado Desktop is open.</p></div><label for="schedule-prompt">Task</label><textarea id="schedule-prompt" rows="4" required maxlength="64000"></textarea><div class="form-grid"><div><label for="schedule-time">First run</label><input id="schedule-time" type="datetime-local" required /></div><div><label for="schedule-repeat">Repeat every (minutes)</label><input id="schedule-repeat" type="number" min="1" max="43200" placeholder="Blank for one-time" /></div><div><label for="schedule-mode">Mode</label><select id="schedule-mode"><option value="plan">Plan</option><option value="act">Act</option></select></div><div><label for="schedule-policy">Write approval</label><select id="schedule-policy"><option value="prompt">Ask me</option><option value="auto_write">Auto-approve writes</option></select></div></div><p class="hint">Auto-approved Act tasks can change workspace files unattended. A checkpoint is saved before the run and before each write.</p><div class="dialog-actions"><button id="cancel-schedule" type="button" class="secondary">Cancel</button><button type="submit">Create schedule</button></div></form></dialog>
     <dialog id="import-dialog" aria-labelledby="import-title"><form id="import-form"><div class="dialog-head"><p class="eyebrow">IMPORT TRANSCRIPT</p><h2 id="import-title">Continue a conversation</h2><p class="path">Text messages become context for this session's provider when you send the next task.</p></div><label for="import-name">New session name</label><input id="import-name" type="text" required maxlength="100" /><label for="import-format">Source format</label><select id="import-format"><option value="codex">Codex JSONL</option><option value="claude_code">Claude Code JSONL</option></select><div class="dialog-actions"><button id="cancel-import" type="button" class="secondary">Cancel</button><button type="submit">Choose JSONL file</button></div></form></dialog>
