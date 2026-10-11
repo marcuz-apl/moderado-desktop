@@ -10,7 +10,7 @@ type HistoryMessage = { role: string; content?: string };
 type SessionSummary = { id: string; name: string; workspace: string; settings: ProviderSettings; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string };
-type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done'; session_id: string; value?: string };
+type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done' | 'cancelled'; session_id: string; value?: string };
 type ApprovalEvent = { sessionId: string; id: number; path: string; before: string; after: string };
 type ApprovalExpired = { sessionId: string; id: number };
 type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
@@ -35,6 +35,7 @@ const transcript = $<HTMLElement>('transcript');
 const status = $<HTMLElement>('status');
 const prompt = $<HTMLTextAreaElement>('prompt');
 const send = $<HTMLButtonElement>('send');
+const stop = $<HTMLButtonElement>('stop');
 const providerSelect = $<HTMLSelectElement>('provider-select');
 const endpoint = $<HTMLInputElement>('endpoint');
 const keyField = $<HTMLInputElement>('api-key');
@@ -67,6 +68,7 @@ const approvalQueue: ApprovalEvent[] = [];
 const modeBySession = new Map<string, 'plan' | 'act'>();
 const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>();
 const conversationBindings = new Map<string, string>();
+const btwHistory = new Map<string, Array<{ question: string; answer: string }>>();
 
 function setStatus(message: string): void { status.textContent = message; }
 function activeSession(): SessionRecord | null { return activeSessionId ? sessions.get(activeSessionId) ?? null : null; }
@@ -258,12 +260,15 @@ async function selectSession(id: string): Promise<void> {
 function updateControls(): void {
   const busy = activeSessionId ? running.has(activeSessionId) : false;
   send.disabled = !activeSessionId || busy;
+  stop.hidden = !busy;
+  stop.disabled = !busy;
   providerSelect.disabled = busy;
   endpoint.disabled = busy;
   keyField.disabled = busy || (providers.find((item) => item.id === activeProvider)?.local ?? false);
   $<HTMLSelectElement>('plan-model').disabled = busy;
   $<HTMLSelectElement>('act-model').disabled = busy;
   $<HTMLButtonElement>('load-models').disabled = busy;
+  $<HTMLButtonElement>('save-provider-settings').disabled = busy;
   $<HTMLButtonElement>('plan-mode').disabled = busy;
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
@@ -605,6 +610,15 @@ $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => {
 $<HTMLButtonElement>('close-file-preview').addEventListener('click', () => $<HTMLDialogElement>('file-preview-dialog').close());
 $('plan-mode').addEventListener('click', () => setMode('plan'));
 $('act-mode').addEventListener('click', () => setMode('act'));
+$('close-btw').addEventListener('click', () => $<HTMLDialogElement>('btw-dialog').close());
+stop.addEventListener('click', async () => {
+  const id = activeSessionId;
+  if (!id || !running.has(id)) return;
+  stop.disabled = true;
+  setStatus('Stopping task…');
+  try { await invoke('stop_turn', { sessionId: id }); }
+  catch (error) { setStatus(String(error)); stop.disabled = false; }
+});
 
 $('load-models').addEventListener('click', async () => {
   const settings = currentSettings();
@@ -622,6 +636,26 @@ $('load-models').addEventListener('click', async () => {
       setModelOptions(models, planModel, actModel);
     }
     setStatus(models.length ? `${models.length} models available.` : 'The endpoint returned no models.');
+  } catch (error) { setStatus(String(error)); }
+  finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
+});
+
+$<HTMLButtonElement>('save-provider-settings').addEventListener('click', async () => {
+  const settings = currentSettings();
+  if (!initialized) { setStatus('Settings are still loading.'); return; }
+  const button = $<HTMLButtonElement>('save-provider-settings');
+  button.disabled = true;
+  try {
+    await saveEnteredKey(settings);
+    await invoke('save_provider_settings', { sessionId: activeSessionId, settings });
+    providerDrafts.set(settings.providerId, { baseUrl: settings.baseUrl, planModel: settings.planModel, actModel: settings.actModel });
+    if (activeSessionId) {
+      const record = sessions.get(activeSessionId);
+      if (record) record.settings = settings;
+      conversationBindings.set(activeSessionId, binding(settings));
+      await refreshSummaries();
+    }
+    setStatus('Settings saved on this device.');
   } catch (error) { setStatus(String(error)); }
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
@@ -763,8 +797,17 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     if (!scheduledPending.has(id)) running.delete(id);
     if (id === activeSessionId) setStatus(payload.value ?? 'Turn failed.');
   } else {
+    if (payload.kind === 'cancelled') {
+      for (let index = approvalQueue.length - 1; index >= 0; index--) {
+        if (approvalQueue[index]?.sessionId === id) approvalQueue.splice(index, 1);
+      }
+      if (currentApproval?.sessionId === id) {
+        currentApproval = null;
+        approvalDialog.close();
+      }
+    }
     if (!scheduledPending.has(id)) running.delete(id);
-    if (id === activeSessionId) setStatus('Ready.');
+    if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
       await refreshSummaries();
       if (id === activeSessionId && activePanel === 'workspace') await refreshProjectTree();
@@ -861,17 +904,41 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   if (!id) { setStatus('Create a session first.'); return; }
   if (running.has(id)) return;
   const text = prompt.value.trim();
+  const btw = /^\/btw(?:\s|$)/i.test(text);
+  if (btw && !activeSessionId) { setStatus('Create a session first.'); return; }
+  if (btw && text.replace(/^\/btw\s*/i, '').trim() === '') {
+    const history = btwHistory.get(id) ?? [];
+    const content = history.length
+      ? history.slice(-5).reverse().map((item) => `Q: ${item.question}\nA: ${item.answer}`).join('\n\n---\n\n')
+      : 'Ask a quick side question with /btw <question>. Side questions are not added to session history.';
+    $('btw-content').textContent = content;
+    $<HTMLDialogElement>('btw-dialog').showModal();
+    prompt.value = '';
+    return;
+  }
   const settings = currentSettings();
   const turnMode = mode;
   const model = turnMode === 'plan' ? settings.planModel : settings.actModel;
-  if (!text || !settings.baseUrl || !model) { setStatus('Enter an endpoint, model, and task.'); return; }
+  const sideQuestion = btw ? text.replace(/^\/btw\s*/i, '').trim() : '';
+  if (!text || !settings.baseUrl || (btw ? !settings.planModel : !model)) { setStatus('Enter an endpoint, choose a model, and enter a task.'); return; }
   running.add(id);
   updateControls();
   renderSessions();
   try {
     await Promise.all([turnListenerReady, approvalListenerReady, approvalExpiryReady, checkpointListenerReady, scheduleStartedReady, scheduleRunReady, schedulerErrorReady]);
     await saveEnteredKey(settings);
-    await invoke('save_provider_settings', { settings });
+    await invoke('save_provider_settings', { sessionId: id, settings });
+    if (btw) {
+      setStatus('Thinking about your side question…');
+      const answer = await invoke<string>('ask_btw', { sessionId: id, settings, model: settings.planModel, question: sideQuestion });
+      const history = btwHistory.get(id) ?? [];
+      history.push({ question: sideQuestion, answer });
+      btwHistory.set(id, history);
+      $('btw-content').textContent = `Q: ${sideQuestion}\n\n${answer}\n\n(Not saved to session history)`;
+      $<HTMLDialogElement>('btw-dialog').showModal();
+      if (id === activeSessionId) setStatus('Ready.');
+      return;
+    }
     const previous = conversationBindings.get(id);
     if (previous && previous !== binding(settings)) {
       views.set(id, []);
@@ -884,8 +951,9 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     if (id === activeSessionId) setStatus('Agent is working…');
     await invoke('start_turn', { sessionId: id, settings, mode: turnMode, prompt: text });
   } catch (error) {
-    addDisplay(id, 'Error', String(error));
-    if (id === activeSessionId) setStatus(String(error));
+    const detail = String(error);
+    if (!detail.includes('stopped by user')) addDisplay(id, 'Error', detail);
+    if (id === activeSessionId) setStatus(detail.includes('stopped by user') ? 'Side question stopped.' : detail);
   } finally {
     if (!scheduledPending.has(id)) running.delete(id);
     renderSessions();

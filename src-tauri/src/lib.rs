@@ -22,13 +22,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 
-#[derive(Default)]
 struct SessionRuntime {
     pending: Mutex<Option<PendingApproval>>,
     turn_lock: AsyncMutex<()>,
     next_approval: AtomicU64,
+    cancel_turn: watch::Sender<bool>,
+}
+
+impl Default for SessionRuntime {
+    fn default() -> Self {
+        let (cancel_turn, _) = watch::channel(false);
+        Self {
+            pending: Mutex::new(None),
+            turn_lock: AsyncMutex::new(()),
+            next_approval: AtomicU64::new(0),
+            cancel_turn,
+        }
+    }
 }
 
 struct PendingApproval {
@@ -95,6 +107,7 @@ enum TurnEvent {
     Tool { session_id: String, value: String },
     Error { session_id: String, value: String },
     Done { session_id: String },
+    Cancelled { session_id: String },
 }
 
 #[derive(Serialize, Clone)]
@@ -582,11 +595,64 @@ fn load_provider_settings(app: tauri::AppHandle) -> Result<Option<ProviderSettin
 #[tauri::command]
 async fn save_provider_settings(
     app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
     settings: ProviderSettings,
 ) -> Result<ProviderSettings, String> {
     let base_url = settings.provider_id.base_url(&settings.base_url)?;
     let key = configured_key(settings.provider_id, &base_url).await?;
-    provider::settings::save(&settings_path(&app)?, settings, &key).await
+    let saved = provider::settings::save(&settings_path(&app)?, settings, &key).await?;
+    if let Some(id) = session_id {
+        let record = state.store.get(&id)?;
+        state.store.save_state(&id, &saved, &record.history)?;
+    }
+    Ok(saved)
+}
+
+#[tauri::command]
+async fn stop_turn(state: tauri::State<'_, AppState>, session_id: String) -> Result<(), String> {
+    let runtime = state.runtime(&session_id)?;
+    runtime.cancel_turn.send_replace(true);
+    Ok(())
+}
+
+#[tauri::command]
+async fn ask_btw(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    settings: ProviderSettings,
+    model: String,
+    question: String,
+) -> Result<String, String> {
+    if question.trim().is_empty() || question.len() > 8_000 {
+        return Err("Side question must be 1–8,000 characters".into());
+    }
+    if model.trim().is_empty() || model.len() > 200 {
+        return Err("Model name is required".into());
+    }
+    let runtime = state.runtime(&session_id)?;
+    let _guard = runtime
+        .turn_lock
+        .try_lock()
+        .map_err(|_| "This session is already running")?;
+    runtime.cancel_turn.send_replace(false);
+    let mut cancel = runtime.cancel_turn.subscribe();
+    let (base_url, api_key) = (
+        settings.provider_id.base_url(&settings.base_url)?,
+        configured_key(
+            settings.provider_id,
+            &settings.provider_id.base_url(&settings.base_url)?,
+        )
+        .await?,
+    );
+    let messages = vec![
+        serde_json::json!({"role":"system","content":"You are Moderado answering a quick side question (by-the-way). Answer in 1 to 3 short sentences or under 35 words. No conversational filler, pleasantries, or preambles. Output only the direct answer or code."}),
+        serde_json::json!({"role":"user","content":question}),
+    ];
+    tokio::select! {
+        result = provider::chat_completion(&base_url, &model, &api_key, &messages, &[], |_| {}) => result.map(|completion| completion.content),
+        _ = cancel.changed() => Err("Side question stopped by user".into()),
+    }
 }
 
 async fn await_approval(
@@ -716,6 +782,8 @@ async fn execute_turn(
             .try_lock()
             .map_err(|_| "This session is already running")?
     };
+    runtime.cancel_turn.send_replace(false);
+    let mut cancel = runtime.cancel_turn.subscribe();
     let record = state.store.get(&session_id)?;
     let workspace = PathBuf::from(&record.workspace);
     let workspace_lock = state.workspace_lock(&record.workspace)?;
@@ -773,7 +841,7 @@ async fn execute_turn(
         state.store.add_checkpoint(&checkpoint)?;
         let _ = app.emit("checkpoint-created", &checkpoint);
     }
-    let result = run_turn_with_hooks(
+    let turn = run_turn_with_hooks(
         RunConfig {
             workspace: &workspace,
             base_url: &base_url,
@@ -824,15 +892,18 @@ async fn execute_turn(
             Ok(())
         },
         |history| state.store.save_state(&session_id, &settings, history),
-    )
-    .await;
+    );
+    let result = tokio::select! {
+        result = turn => Some(result),
+        _ = cancel.changed() => None,
+    };
     state.store.save_state(&session_id, &settings, &messages)?;
     match result {
-        Ok(()) => {
+        Some(Ok(())) => {
             let _ = app.emit("turn-event", TurnEvent::Done { session_id });
             Ok(())
         }
-        Err(error) => {
+        Some(Err(error)) => {
             let _ = app.emit(
                 "turn-event",
                 TurnEvent::Error {
@@ -841,6 +912,17 @@ async fn execute_turn(
                 },
             );
             Err(error)
+        }
+        None => {
+            if let Ok(mut pending) = runtime.pending.lock() {
+                if let Some(pending) = pending.take() {
+                    let _ = pending.decision.send(None);
+                }
+            }
+            sessions::repair_interrupted_tool_calls(&mut messages);
+            state.store.save_state(&session_id, &settings, &messages)?;
+            let _ = app.emit("turn-event", TurnEvent::Cancelled { session_id });
+            Ok(())
         }
     }
 }
@@ -1002,7 +1084,9 @@ pub fn run() {
             probe_local_providers,
             load_provider_settings,
             save_provider_settings,
-            start_turn
+            start_turn,
+            stop_turn,
+            ask_btw
         ])
         .run(tauri::generate_context!())
         .expect("error while running Moderado Desktop");

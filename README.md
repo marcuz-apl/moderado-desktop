@@ -48,10 +48,10 @@ npm install
 npm run dev     # start in watch mode
 npm test        # run Rust and frontend tests (offline)
 npm run lint    # ESLint, TypeScript, and Clippy
-npm run build   # compile frontend and Rust app
+npm run build   # build the standalone app at src-tauri/target/release/moderado-desktop.exe
 ```
 
-Create a session to choose its workspace folder, then select a provider. Moderado Gateway and custom providers require a base URL; the other profiles fill in their documented endpoints. Enter a key if needed, load available models, select Plan and Act models, and send a task. Local Ollama and LM Studio need a running server and no key. The provider choice and models are saved with the session when you send a task. A Gateway URL is required because there is no canonical URL configured in the app. You can switch sessions while a turn runs in another session. Turns sharing one workspace run in sequence to keep checkpoints and conversation context consistent.
+Create a session to choose its workspace folder, then select a provider in Settings. Moderado Gateway uses Prod Mode by default and can switch to Dev Mode; custom providers accept a base URL. Enter a key if needed, load available models, select Plan and Act models, and send a task. Local Ollama and LM Studio need a running server and no key. The provider choice and models are saved with the session when you send a task. You can switch sessions while a turn runs in another session. Turns sharing one workspace run in sequence to keep checkpoints and conversation context consistent.
 
 Each approved file write or edit creates a checkpoint of the workspace before applying the change. Select a checkpoint to review file differences, then confirm restore. Restore creates a safety checkpoint of the current workspace first. Git is required for checkpoints; the app uses the workspace's Git repository when the workspace is its root, or a separate Git store in app data otherwise. Checkpoint snapshots include nonignored workspace files, so inspect the restore preview before confirming.
 
