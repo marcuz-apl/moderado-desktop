@@ -4,6 +4,7 @@ pub mod provider;
 pub mod schedules;
 pub mod search;
 pub mod sessions;
+pub mod source_control;
 pub mod transcript;
 pub mod workspace;
 
@@ -152,6 +153,35 @@ fn get_session(
     session_id: String,
 ) -> Result<SessionRecord, String> {
     state.store.get(&session_id)
+}
+
+#[tauri::command]
+fn list_project_entries(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    path: String,
+) -> Result<Vec<workspace::ProjectEntry>, String> {
+    let session = state.store.get(&session_id)?;
+    workspace::list_project_entries(PathBuf::from(session.workspace).as_path(), &path)
+}
+
+#[tauri::command]
+fn read_project_file(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    path: String,
+) -> Result<String, String> {
+    let session = state.store.get(&session_id)?;
+    workspace::read_text(PathBuf::from(session.workspace).as_path(), &path)
+}
+
+#[tauri::command]
+fn get_source_control(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<source_control::SourceControlSnapshot, String> {
+    let session = state.store.get(&session_id)?;
+    source_control::get_source_control(PathBuf::from(session.workspace).as_path())
 }
 
 #[tauri::command]
@@ -947,6 +977,9 @@ pub fn run() {
             create_session,
             list_sessions,
             get_session,
+            list_project_entries,
+            read_project_file,
+            get_source_control,
             rename_session,
             delete_session,
             create_schedule,
