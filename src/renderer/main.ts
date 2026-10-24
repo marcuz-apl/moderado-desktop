@@ -371,9 +371,14 @@ async function refreshSchedules(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
+let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleCollapse(): void {
+  if (collapseTimer) clearTimeout(collapseTimer);
+  collapseTimer = setTimeout(() => { activePanel = null; document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed'); document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((b) => { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }); document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((s) => s.classList.remove('active')); }, 30000);
+}
 function switchPanel(panel: SidebarPanel): void {
-  activePanel = activePanel === panel ? null : panel;
-  document.querySelector<HTMLElement>('.app')?.classList.toggle('sidebar-collapsed', activePanel === null);
+  activePanel = panel;
+  document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
   document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
     const selected = button.dataset.panel === activePanel;
     button.classList.toggle('selected', selected);
@@ -384,6 +389,7 @@ function switchPanel(panel: SidebarPanel): void {
   });
   if (activePanel === 'workspace') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
+  scheduleCollapse();
 }
 
 async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
@@ -816,6 +822,21 @@ $('delete-session').addEventListener('click', async () => {
   } catch (error) { setStatus(String(error)); }
 });
 
+$('selected-model').addEventListener('click', () => switchPanel('settings'));
+$('selected-model').style.cursor = 'pointer';
+const sidebar = document.querySelector<HTMLElement>('.sidebar');
+let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+sidebar?.addEventListener('mouseleave', () => { leaveTimer = setTimeout(() => { activePanel = null; document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed'); document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((b) => { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }); document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((s) => s.classList.remove('active')); }, 10000); });
+sidebar?.addEventListener('mouseenter', () => { if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; } });
+document.querySelectorAll<HTMLElement>('.panel-heading').forEach((heading) => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '×';
+  btn.className = 'text-button';
+  btn.style.marginLeft = 'auto';
+  btn.addEventListener('click', () => { activePanel = null; document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed'); document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((b) => { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }); document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((s) => s.classList.remove('active')); });
+  heading.append(btn);
+});
 const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
   const id = payload.session_id;
   if (payload.kind === 'text') addDisplay(id, 'Agent', payload.value ?? '', true);
