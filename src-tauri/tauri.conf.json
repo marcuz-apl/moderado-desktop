@@ -9,7 +9,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Moderado Desktop", "width": 1180, "height": 760, "minWidth": 760, "minHeight": 540 }],
+    "windows": [{ "title": "Moderado Desktop", "width": 1180, "height": 760, "minWidth": 760, "minHeight": 540, "maximized": true }],
     "security": { "csp": "default-src 'self'; connect-src 'self' http://localhost:1420 ws://localhost:1420; style-src 'self' 'unsafe-inline'" }
   },
   "bundle": { "active": false }

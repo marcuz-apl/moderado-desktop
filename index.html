@@ -15,7 +15,7 @@
         <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
         <symbol id="icon-source" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M18 17v-2a4 4 0 0 0-4-4h-4a4 4 0 0 1-4-4"/></symbol>
         <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
-        <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4L5.3 15a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1L9 7.4h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1-.1 2Z" transform="translate(1 0)"/></symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M9.59 4.58 10.09 2.18h3.82l.5 2.4 1.13.47 2.05-1.34 2.7 2.7-1.34 2.05.47 1.13 2.4.5v3.82l-2.4.5-.47 1.13 1.34 2.05-2.7 2.7-2.05-1.34-1.13.47-.5 2.4h-3.82l-.5-2.4-1.13-.47-2.05 1.34-2.7-2.7 1.34-2.05-.47-1.13-2.4-.5v-3.82l2.4-.5.47-1.13-1.34-2.05 2.7-2.7 2.05 1.34Z"/><circle cx="12" cy="12" r="3"/></symbol>
       </svg>
       <nav class="activity-bar" aria-label="Workbench views">
         <div class="activity-group">
@@ -50,8 +50,10 @@
           <select id="plan-model" aria-label="Plan model"><option value="">Load models to choose</option></select>
           <label for="act-model">Act model</label>
           <select id="act-model" aria-label="Act model"><option value="">Load models to choose</option></select>
-          <button id="save-provider-settings" class="text-button" type="button">Save settings</button>
-          <button id="load-models" class="text-button" type="button">Load available models</button>
+          <div class="settings-row">
+            <button id="save-provider-settings" class="text-button" type="button">Save settings</button>
+            <button id="load-models" class="text-button" type="button">Load available models</button>
+          </div>
           <p class="hint">Settings save on this device. Remote API keys are stored in your OS keychain; local providers need no key.</p>
         </div>
         <div class="settings-group"><p class="eyebrow">WEB SEARCH</p><label class="checkbox-label" for="search-enabled"><input id="search-enabled" type="checkbox" checked /> Enable for this session</label><label for="search-endpoint">Search API endpoint</label><input id="search-endpoint" type="url" spellcheck="false" placeholder="https://search.example/api" /><label for="search-key">Optional API key</label><input id="search-key" type="password" autocomplete="off" placeholder="Saved in OS keychain" /><button id="save-search" class="text-button" type="button">Save search settings</button><p class="hint">GET endpoint?q=term returns JSON: {"results":[{"title":"...","url":"...","snippet":"..."}]}. Search is available after an endpoint is saved.</p></div></div></section>
@@ -59,9 +61,9 @@
       <main class="main">
         <header class="topbar"><div><p class="eyebrow">AGENT SESSION</p><h1 id="session-title">Workspace conversation</h1><div class="session-actions"><button id="rename-session" type="button">Rename</button><button id="delete-session" type="button">Delete</button></div></div><div class="mode-control" role="group" aria-label="Agent mode"><button id="plan-mode" class="selected" type="button" aria-pressed="true">Plan</button><button id="act-mode" type="button" aria-pressed="false">Act</button></div></header>
         <section id="transcript" class="transcript" aria-label="Conversation" aria-live="polite">
-          <div id="empty-state" class="empty-state"><div class="empty-symbol">⌘</div><p class="eyebrow">READY WHEN YOU ARE</p><h2>Start with a task.</h2><p>Choose a workspace and model, then ask the agent to explore or change a file. Act mode asks before every write.</p></div>
+          <div id="empty-state" class="empty-state"><div class="empty-symbol">⌘</div><p class="eyebrow">READY WHEN YOU ARE</p><h2>Start with a task.</h2><p>Choose a model and send a task. Your first message will prompt you to choose a workspace. Act mode asks before every write.</p></div>
         </section>
-        <div class="composer-wrap"><p id="status" class="status" role="status">Choose a workspace to begin.</p><form id="composer"><textarea id="prompt" rows="3" placeholder="What should the agent work on?" aria-label="Message" required></textarea><div class="composer-bottom"><span>Enter to send · Shift+Enter for a new line · /btw for a side question</span><div><button id="stop" class="secondary" type="button" hidden>Stop</button> <button id="send" type="submit">Send <span aria-hidden="true">↗</span></button></div></div></form></div>
+        <div class="composer-wrap"><p id="status" class="status" role="status">Choose a model, then send a task.</p><form id="composer"><textarea id="prompt" rows="3" placeholder="What should the agent work on?" aria-label="Message" required></textarea><div class="composer-bottom"><div class="composer-meta"><div id="selected-model" aria-live="polite">Plan model: None selected</div><span class="composer-shortcuts">Enter to send · Shift+Enter for a new line · /btw for a side question</span></div><div class="composer-actions"><button id="stop" class="secondary" type="button" hidden>Stop</button> <button id="send" type="submit">Send <span aria-hidden="true">↗</span></button></div></div></form></div>
       </main>
     </div>
     <dialog id="approval-dialog" aria-labelledby="approval-title"><div class="dialog-head"><p class="eyebrow">APPROVAL REQUIRED</p><h2 id="approval-title">Review file write</h2><p id="approval-session" class="path"></p><p id="approval-path" class="path"></p></div><pre id="change-summary" aria-label="Line changes"></pre><div class="diff"><div><h3>Current</h3><pre id="before"></pre></div><div><h3>Proposed</h3><textarea id="after" aria-label="Proposed file content" readonly></textarea></div></div><div class="dialog-actions"><button id="edit-approval" type="button" class="secondary">Edit proposed content</button><button id="reject" type="button" class="secondary">Reject</button><button id="approve" type="button">Approve write</button></div></dialog>

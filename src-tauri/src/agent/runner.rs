@@ -319,7 +319,7 @@ mod tests {
         use crate::provider::ProviderId;
         let fixtures = [
             (
-                ProviderId::Gateway,
+                ProviderId::Moderado,
                 include_str!("../../tests/fixtures/gateway.sse"),
             ),
             (
@@ -331,14 +331,6 @@ mod tests {
                 include_str!("../../tests/fixtures/open_router.sse"),
             ),
             (
-                ProviderId::AgnesAi,
-                include_str!("../../tests/fixtures/agnes_ai.sse"),
-            ),
-            (
-                ProviderId::OrcaRouter,
-                include_str!("../../tests/fixtures/orca_router.sse"),
-            ),
-            (
                 ProviderId::Ollama,
                 include_str!("../../tests/fixtures/ollama.sse"),
             ),
@@ -347,7 +339,7 @@ mod tests {
                 include_str!("../../tests/fixtures/lm_studio.sse"),
             ),
             (
-                ProviderId::Custom,
+                ProviderId::OpenAiCompatible,
                 include_str!("../../tests/fixtures/custom.sse"),
             ),
         ];

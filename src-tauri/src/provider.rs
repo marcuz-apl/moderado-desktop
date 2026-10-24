@@ -13,14 +13,12 @@ const MAX_MODEL_LIST_BYTES: usize = 4 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderId {
-    Gateway,
+    Moderado,
     NvidiaNim,
     OpenRouter,
-    AgnesAi,
-    OrcaRouter,
     Ollama,
     LmStudio,
-    Custom,
+    OpenAiCompatible,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -35,15 +33,15 @@ pub struct ProviderPreset {
 
 pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
-        id: ProviderId::Gateway,
-        name: "Moderado Gateway",
-        default_base_url: "",
+        id: ProviderId::Moderado,
+        name: "Moderado",
+        default_base_url: "https://modr.alfazen.org/v1",
         editable_url: true,
         local: false,
     },
     ProviderPreset {
         id: ProviderId::NvidiaNim,
-        name: "NVIDIA NIM",
+        name: "Nvidia NIM",
         default_base_url: "https://integrate.api.nvidia.com/v1",
         editable_url: false,
         local: false,
@@ -56,36 +54,22 @@ pub const PRESETS: &[ProviderPreset] = &[
         local: false,
     },
     ProviderPreset {
-        id: ProviderId::AgnesAi,
-        name: "Agnes AI",
-        default_base_url: "https://apihub.agnes-ai.com/v1",
-        editable_url: false,
-        local: false,
-    },
-    ProviderPreset {
-        id: ProviderId::OrcaRouter,
-        name: "OrcaRouter",
-        default_base_url: "https://api.orcarouter.ai/v1",
-        editable_url: false,
-        local: false,
-    },
-    ProviderPreset {
         id: ProviderId::Ollama,
-        name: "Ollama",
+        name: "Ollama - Local",
         default_base_url: "http://localhost:11434/v1",
         editable_url: false,
         local: true,
     },
     ProviderPreset {
         id: ProviderId::LmStudio,
-        name: "LM Studio",
+        name: "LM Studio - Local",
         default_base_url: "http://localhost:1234/v1",
         editable_url: false,
         local: true,
     },
     ProviderPreset {
-        id: ProviderId::Custom,
-        name: "Custom endpoint",
+        id: ProviderId::OpenAiCompatible,
+        name: "Other OpenAI Compatible Endpoints",
         default_base_url: "",
         editable_url: true,
         local: false,
@@ -428,7 +412,7 @@ mod tests {
 
     #[test]
     fn provider_catalog_resolves_supported_endpoints() {
-        assert_eq!(PRESETS.len(), 8);
+        assert_eq!(PRESETS.len(), 6);
         for preset in PRESETS {
             let entered = if preset.editable_url {
                 "https://example.test/v1"
@@ -455,10 +439,10 @@ mod tests {
                 )
             );
         }
-        assert!(ProviderId::Custom
+        assert!(ProviderId::OpenAiCompatible
             .base_url("http://example.test/v1")
             .is_err());
-        assert!(ProviderId::Gateway.base_url("").is_err());
+        assert!(ProviderId::Moderado.base_url("").is_err());
     }
 
     #[test]

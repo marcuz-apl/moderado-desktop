@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { lineDiff } from './diff';
+import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 
-type ProviderId = 'gateway' | 'nvidia_nim' | 'open_router' | 'agnes_ai' | 'orca_router' | 'ollama' | 'lm_studio' | 'custom';
+export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
@@ -26,7 +27,7 @@ type SidebarPanel = 'sessions' | 'workspace' | 'checkpoints' | 'schedules' | 'so
 type GatewayMode = 'prod' | 'dev';
 
 const GATEWAY_URLS: Record<GatewayMode, string> = {
-  prod: 'https://mod.alfazen.org/v1',
+  prod: 'https://modr.alfazen.org/v1',
   dev: 'http://127.0.0.1:4788/v1',
 };
 
@@ -34,6 +35,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const transcript = $<HTMLElement>('transcript');
 const status = $<HTMLElement>('status');
 const prompt = $<HTMLTextAreaElement>('prompt');
+const selectedModel = $('selected-model');
 const send = $<HTMLButtonElement>('send');
 const stop = $<HTMLButtonElement>('stop');
 const providerSelect = $<HTMLSelectElement>('provider-select');
@@ -47,7 +49,8 @@ const emptyState = $('empty-state').cloneNode(true);
 
 let providers: ProviderPreset[] = [];
 let initialized = false;
-let activeProvider: ProviderId = 'gateway';
+let creatingSession = false;
+let activeProvider: ProviderId = 'moderado';
 let gatewayMode: GatewayMode = 'prod';
 let activeSessionId: string | null = null;
 let scheduleSessionId: string | null = null;
@@ -83,6 +86,12 @@ function currentSettings(): ProviderSettings {
   };
 }
 
+function updateSelectedModel(): void {
+  const settings = currentSettings();
+  selectedModel.textContent = selectedModelLabel(mode, settings);
+  selectedModel.title = mode === 'plan' ? settings.planModel : settings.actModel;
+}
+
 function setModelOptions(models: string[], planValue: string, actValue: string): void {
   for (const [id, selected] of [['plan-model', planValue], ['act-model', actValue]] as const) {
     const select = $<HTMLSelectElement>(id);
@@ -92,6 +101,7 @@ function setModelOptions(models: string[], planValue: string, actValue: string):
     select.replaceChildren(...options);
     select.value = selected;
   }
+  updateSelectedModel();
 }
 
 function setGatewayMode(next: GatewayMode, persistDraft = true): void {
@@ -103,11 +113,11 @@ function setGatewayMode(next: GatewayMode, persistDraft = true): void {
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-pressed', String(selected));
   });
-  if (changed && activeProvider === 'gateway') {
+  if (changed && activeProvider === 'moderado') {
     setModelOptions([], $<HTMLSelectElement>('plan-model').value, $<HTMLSelectElement>('act-model').value);
   }
-  if (persistDraft && activeProvider === 'gateway') {
-    providerDrafts.set('gateway', {
+  if (persistDraft && activeProvider === 'moderado') {
+    providerDrafts.set('moderado', {
       baseUrl: endpoint.value,
       planModel: $<HTMLSelectElement>('plan-model').value,
       actModel: $<HTMLSelectElement>('act-model').value,
@@ -123,15 +133,15 @@ function selectProvider(id: ProviderId): void {
   activeProvider = id;
   providerSelect.value = id;
   const draft = providerDrafts.get(id);
-  const isGateway = id === 'gateway';
-  if (isGateway) {
+  const isModerado = id === 'moderado';
+  if (isModerado) {
     setGatewayMode(draft?.baseUrl === GATEWAY_URLS.dev ? 'dev' : 'prod', false);
   } else {
     endpoint.value = draft?.baseUrl ?? preset.defaultBaseUrl;
   }
-  endpoint.readOnly = isGateway || !preset.editableUrl;
-  $('gateway-mode').toggleAttribute('hidden', !isGateway);
-  endpoint.placeholder = id === 'gateway' ? 'https://your-gateway.example/v1' : 'https://your-endpoint.example/v1';
+  endpoint.readOnly = isModerado || !preset.editableUrl;
+  $('gateway-mode').toggleAttribute('hidden', !isModerado);
+  endpoint.placeholder = id === 'moderado' ? 'https://your-gateway.example/v1' : 'https://your-endpoint.example/v1';
   setModelOptions([], draft?.planModel ?? '', draft?.actModel ?? '');
   keyField.value = '';
   keyField.disabled = preset.local;
@@ -140,7 +150,7 @@ function selectProvider(id: ProviderId): void {
 
 function applySessionSettings(settings: ProviderSettings): void {
   selectProvider(settings.providerId);
-  if (settings.providerId === 'gateway') {
+  if (settings.providerId === 'moderado') {
     setGatewayMode(settings.baseUrl === GATEWAY_URLS.dev ? 'dev' : 'prod', false);
   } else {
     endpoint.value = settings.baseUrl;
@@ -190,6 +200,7 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
   else messages.push({ role, content });
   views.set(sessionId, messages);
   if (sessionId !== activeSessionId) return;
+  const stickToBottom = role === 'You' || shouldAutoScroll(transcript.scrollTop, transcript.scrollHeight, transcript.clientHeight);
   if (append && last?.role === role) {
     const body = transcript.lastElementChild?.querySelector('.message-body');
     if (body) body.textContent = last.content;
@@ -198,7 +209,7 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
     $('empty-state')?.remove();
     transcript.append(messageElement(role, content));
   }
-  transcript.scrollTop = transcript.scrollHeight;
+  if (stickToBottom) transcript.scrollTop = transcript.scrollHeight;
 }
 
 function renderSessions(): void {
@@ -259,7 +270,7 @@ async function selectSession(id: string): Promise<void> {
 
 function updateControls(): void {
   const busy = activeSessionId ? running.has(activeSessionId) : false;
-  send.disabled = !activeSessionId || busy;
+  send.disabled = !canSend(initialized, busy || creatingSession);
   stop.hidden = !busy;
   stop.disabled = !busy;
   providerSelect.disabled = busy;
@@ -273,6 +284,7 @@ function updateControls(): void {
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
+  $<HTMLButtonElement>('workspace-button').disabled = !initialized || creatingSession;
   $<HTMLButtonElement>('new-schedule').disabled = !activeSessionId;
   $<HTMLButtonElement>('import-transcript').disabled = !activeSessionId;
   $<HTMLButtonElement>('save-search').disabled = !activeSessionId || busy;
@@ -289,6 +301,7 @@ function setMode(next: 'plan' | 'act'): void {
     button.classList.toggle('selected', value === next);
     button.setAttribute('aria-pressed', String(value === next));
   }
+  updateSelectedModel();
 }
 
 async function refreshCheckpoints(): Promise<void> {
@@ -583,7 +596,7 @@ async function initialize(): Promise<void> {
     try { saved = await invoke<ProviderSettings | null>('load_provider_settings'); }
     catch (error) { setStatus(`Saved provider settings could not be loaded: ${String(error)}. Using defaults.`); }
     if (saved) providerDrafts.set(saved.providerId, { baseUrl: saved.baseUrl, planModel: saved.planModel, actModel: saved.actModel });
-    selectProvider(saved?.providerId ?? 'gateway');
+    selectProvider(saved?.providerId ?? 'moderado');
     initialized = true;
     await refreshSummaries();
     const first = summaries[0];
@@ -599,6 +612,8 @@ async function initialize(): Promise<void> {
 }
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
+$<HTMLSelectElement>('plan-model').addEventListener('change', updateSelectedModel);
+$<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel);
 document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
   button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
 });
@@ -660,16 +675,28 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
 
-$('workspace-button').addEventListener('click', async () => {
-  if (!initialized) { setStatus('Session setup is still loading.'); return; }
+async function createSession(settings: ProviderSettings): Promise<string> {
+  if (!initialized) throw new Error('Session setup is still loading.');
+  if (creatingSession) throw new Error('Workspace picker is already open.');
+  creatingSession = true;
+  updateControls();
   try {
-    const record = await invoke<SessionRecord>('create_session', { settings: currentSettings() });
+    const record = await invoke<SessionRecord>('create_session', { settings });
     sessions.set(record.id, record);
     views.set(record.id, []);
     await refreshSummaries();
     await selectSession(record.id);
     prompt.focus();
-  } catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
+    return record.id;
+  } finally {
+    creatingSession = false;
+    updateControls();
+  }
+}
+
+$('workspace-button').addEventListener('click', async () => {
+  try { await createSession(currentSettings()); }
+  catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
 });
 
 function localDateTime(date: Date): string {
@@ -900,14 +927,12 @@ prompt.addEventListener('keydown', (event) => {
 
 $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const id = activeSessionId;
-  if (!id) { setStatus('Create a session first.'); return; }
-  if (running.has(id)) return;
+  if (!initialized || creatingSession || (activeSessionId && running.has(activeSessionId))) return;
   const text = prompt.value.trim();
   const btw = /^\/btw(?:\s|$)/i.test(text);
-  if (btw && !activeSessionId) { setStatus('Create a session first.'); return; }
+  if (!text) return;
   if (btw && text.replace(/^\/btw\s*/i, '').trim() === '') {
-    const history = btwHistory.get(id) ?? [];
+    const history = activeSessionId ? btwHistory.get(activeSessionId) ?? [] : [];
     const content = history.length
       ? history.slice(-5).reverse().map((item) => `Q: ${item.question}\nA: ${item.answer}`).join('\n\n---\n\n')
       : 'Ask a quick side question with /btw <question>. Side questions are not added to session history.';
@@ -921,6 +946,9 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   const model = turnMode === 'plan' ? settings.planModel : settings.actModel;
   const sideQuestion = btw ? text.replace(/^\/btw\s*/i, '').trim() : '';
   if (!text || !settings.baseUrl || (btw ? !settings.planModel : !model)) { setStatus('Enter an endpoint, choose a model, and enter a task.'); return; }
+  let id: string;
+  try { id = await sessionForSubmit(activeSessionId, () => createSession(settings)); }
+  catch (error) { setStatus(String(error) === 'No workspace selected' ? 'Choose a workspace to send your message.' : String(error)); return; }
   running.add(id);
   updateControls();
   renderSessions();

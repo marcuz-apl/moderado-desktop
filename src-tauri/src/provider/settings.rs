@@ -29,13 +29,13 @@ pub async fn save(
     key: &str,
 ) -> Result<ProviderSettings, String> {
     settings.base_url = settings.provider_id.base_url(&settings.base_url)?;
-    if settings.plan_model.trim().is_empty() || settings.act_model.trim().is_empty() {
-        return Err("Select both Plan and Act models before saving".into());
+    if settings.plan_model.trim().is_empty() && settings.act_model.trim().is_empty() {
+        return Err("Select a Plan or Act model before saving".into());
     }
     if settings.plan_model.len() > 200 || settings.act_model.len() > 200 {
         return Err("Model name is too long".into());
     }
-    if settings.provider_id == ProviderId::Custom
+    if settings.provider_id == ProviderId::OpenAiCompatible
         && list_models(&settings.base_url, key).await?.is_empty()
     {
         return Err("Custom endpoint returned no models".into());
@@ -70,7 +70,7 @@ mod tests {
             write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
         });
         let settings = ProviderSettings {
-            provider_id: ProviderId::Custom,
+            provider_id: ProviderId::OpenAiCompatible,
             base_url,
             plan_model: "test-model".into(),
             act_model: "test-model".into(),
@@ -81,7 +81,7 @@ mod tests {
         server.join().unwrap();
         assert_eq!(
             load(&path).unwrap().unwrap().provider_id,
-            ProviderId::Custom
+            ProviderId::OpenAiCompatible
         );
         assert!(!fs::read_to_string(&path)
             .unwrap()
@@ -93,7 +93,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("settings.json");
         let settings = ProviderSettings {
-            provider_id: ProviderId::Custom,
+            provider_id: ProviderId::OpenAiCompatible,
             base_url: "http://example.com/v1".into(),
             plan_model: "one".into(),
             act_model: "two".into(),
@@ -110,5 +110,19 @@ mod tests {
         assert!(load(&path)
             .unwrap_err()
             .contains("Invalid provider settings"));
+    }
+
+    #[tokio::test]
+    async fn saves_model_for_one_mode_without_requiring_the_other() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("settings.json");
+        let settings = ProviderSettings {
+            provider_id: ProviderId::Ollama,
+            base_url: "http://localhost:11434/v1".into(),
+            plan_model: "selected-model".into(),
+            act_model: String::new(),
+        };
+        save(&path, settings.clone(), "").await.unwrap();
+        assert_eq!(load(&path).unwrap(), Some(settings));
     }
 }

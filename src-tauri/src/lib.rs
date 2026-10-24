@@ -580,11 +580,9 @@ async fn probe_local_providers() -> Vec<provider::LocalProviderStatus> {
     provider::probe_local_providers().await
 }
 
-fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_config_dir()
-        .map(|path| path.join("provider.json"))
-        .map_err(|error| format!("Settings location unavailable: {error}"))
+fn settings_path(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    Ok(home.join(".moderado").join("config.json"))
 }
 
 #[tauri::command]

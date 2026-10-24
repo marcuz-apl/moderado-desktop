@@ -1,6 +1,6 @@
 #!/bin/sh
 VERSION_FILE=VERSION
-IDENT_RE='^v[0-9]+\.[0-9]+\.[0-9]+[+-][0-9]{6}[0-9a-z]$'
+IDENT_RE='^v[0-9]+\.[0-9]\.[0-9][+-][0-9]{6}[1-9a-z]$'
 
 die() { echo "alfazen-versioning: $*" >&2; exit 1; }
 utc_yymmdd() { TZ=UTC LC_ALL=C date -u +%y%m%d; }
@@ -17,6 +17,16 @@ validate_identifier() {
   printf '%s' "$id" | grep -Eq "$IDENT_RE" || die "malformed identifier '$id' in $VERSION_FILE"
   case $id in *+*) build=${id#*+} ;; *-*) build=${id#*-} ;; esac
   bdate=${build%?}
+  printf '%s\n' "$bdate" | awk '
+    {
+      year = 2000 + substr($0, 1, 2)
+      month = substr($0, 3, 2) + 0
+      day = substr($0, 5, 2) + 0
+      leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+      days = (month == 2 ? 28 + leap : (month == 4 || month == 6 || month == 9 || month == 11 ? 30 : 31))
+      if (month < 1 || month > 12 || day < 1 || day > days) exit 1
+    }
+  ' || die "invalid BUILD date in '$id'"
   today=$(utc_yymmdd)
   [ "$bdate" -le "$today" ] || die "future-dated BUILD in '$id'"
 }
@@ -25,7 +35,7 @@ detect_bump_type() {
   msg=$1
   case "$msg" in
     *BREAKING\ CHANGE*|*!:\ *) echo "major_requires_approval" ;;
-    feat:*|feat\(*\):*)        echo "minor" ;;
+    feat:*|feat\(*\):*)        echo "patch" ;;
     fix:*|fix\(*\):*|perf:*)   echo "patch" ;;
     *)                         echo "build" ;;
   esac
@@ -47,7 +57,12 @@ bump_semver() {
       die "Major version bump (m) detected. Major version increments require explicit user approval. Set ALFAZEN_MAJOR_APPROVED=1 to proceed, or stage as minor/patch."
       ;;
     minor) echo "v${m}.$((n + 1)).0" ;;
-    patch) echo "v${m}.${n}.$((p + 1))" ;;
+    patch)
+      if [ "$p" -eq 9 ]; then
+        if [ "$n" -eq 9 ]; then echo "v$((m + 1)).0.0"
+        else echo "v${m}.$((n + 1)).0"; fi
+      else echo "v${m}.${n}.$((p + 1))"; fi
+      ;;
     *)     echo "v${m}.${n}.${p}" ;;
   esac
 }
