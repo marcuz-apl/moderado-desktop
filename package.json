@@ -8,6 +8,9 @@
     "build": "tsc --noEmit && vite build && tauri build --no-bundle",
     "dev": "tauri dev",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml && node --test tests/*.test.mjs",
+    "version:patch": "node scripts/bump-version.mjs patch",
+    "version:minor": "node scripts/bump-version.mjs minor",
+    "version:major": "node scripts/bump-version.mjs major",
     "lint": "eslint src && tsc --noEmit && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings"
   },
   "dependencies": {

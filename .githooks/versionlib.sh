@@ -31,12 +31,13 @@ validate_identifier() {
   [ "$bdate" -le "$today" ] || die "future-dated BUILD in '$id'"
 }
 
+# Only feat commits move the patch digit. Every other commit keeps the same
+# semver and advances the build counter, so the identifier still changes.
 detect_bump_type() {
   msg=$1
   case "$msg" in
     *BREAKING\ CHANGE*|*!:\ *) echo "major_requires_approval" ;;
     feat:*|feat\(*\):*)        echo "patch" ;;
-    fix:*|fix\(*\):*|perf:*)   echo "patch" ;;
     *)                         echo "build" ;;
   esac
 }

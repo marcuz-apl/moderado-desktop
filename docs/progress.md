@@ -67,3 +67,10 @@
 - `oppositeTheme` moved into `theme.ts` so the toggle is covered by the offline unit tests.
 - Browser check: 36x36 icon 10 px right of the Plan/Act group on the same row, no button text, initial state light at 12:15 with the sun icon, click flipped to the moon and persisted across reload, second click returned to light.
 - `npm test`: 58 Rust tests and 4 frontend suites passed offline; `npm run lint` and `npm run build` passed.
+
+## Versioning: Patch Digit Only on Demand
+
+- Commits no longer move the patch digit. The pre-commit hook advances only the daily build counter, so a docs or chore commit keeps the same semver and only `+YYMMDD<n>` changes.
+- Added `npm run version:patch|minor|major` (scripts/bump-version.mjs), which moves the semver before a feature commit and mirrors the hook's single-digit rollover rules. The hook keeps the new semver and advances the counter.
+- The message-driven bump is impossible in one pass: git writes the commit message after `pre-commit` runs, and index changes made in `prepare-commit-msg` or `commit-msg` stay staged without reaching the commit. Verified against this git build, so `prepare-commit-msg` now prints a reminder when a feat commit kept the semver instead of failing it.
+- `npm test`: 58 Rust tests and 6 versioning tests passed offline.

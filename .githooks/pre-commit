@@ -4,7 +4,13 @@ HOOKDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 old=$(read_version)
 validate_identifier "$old"
-new=$(next_identifier "$old" "$(utc_yymmdd)" patch) || exit 1
+
+# Git writes the commit message after this hook runs, so the message cannot
+# decide the bump here. Only the build counter advances; the patch digit moves
+# through `npm run version:patch` before a feature commit. Staging has to
+# happen in this hook: index changes made in prepare-commit-msg or commit-msg
+# are left staged and do not reach the commit.
+new=$(next_identifier "$old" "$(utc_yymmdd)" build) || exit 1
 
 printf '%s\n' "$new" > "$VERSION_FILE"
 git add -- "$VERSION_FILE"
