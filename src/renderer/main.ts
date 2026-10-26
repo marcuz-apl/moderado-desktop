@@ -1,10 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
+import { parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
-type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean };
+type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type HistoryMessage = { role: string; content?: string };
@@ -41,6 +43,7 @@ const stop = $<HTMLButtonElement>('stop');
 const providerSelect = $<HTMLSelectElement>('provider-select');
 const endpoint = $<HTMLInputElement>('endpoint');
 const keyField = $<HTMLInputElement>('api-key');
+const keyApplyLink = $<HTMLAnchorElement>('apply-key-link');
 const approvalDialog = $<HTMLDialogElement>('approval-dialog');
 const restoreDialog = $<HTMLDialogElement>('restore-dialog');
 const scheduleDialog = $<HTMLDialogElement>('schedule-dialog');
@@ -74,6 +77,34 @@ const conversationBindings = new Map<string, string>();
 const btwHistory = new Map<string, Array<{ question: string; answer: string }>>();
 
 function setStatus(message: string): void { status.textContent = message; }
+const themeStorageKey = 'moderado-theme';
+let themePreference: ThemePreference = 'auto';
+try { themePreference = parseThemePreference(localStorage.getItem(themeStorageKey)); }
+catch (error) { setStatus(`Theme preference could not be loaded: ${String(error)}`); }
+
+function applyTheme(): void {
+  const theme = resolveTheme(themePreference, new Date());
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  document.querySelectorAll<HTMLButtonElement>('[data-theme-preference]').forEach((button) => {
+    const selected = button.dataset.themePreference === themePreference;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    if (button.dataset.themePreference === 'auto') button.title = `Use local time (currently ${theme})`;
+  });
+}
+
+document.querySelectorAll<HTMLButtonElement>('[data-theme-preference]').forEach((button) => {
+  button.addEventListener('click', () => {
+    themePreference = parseThemePreference(button.dataset.themePreference ?? null);
+    applyTheme();
+    try { localStorage.setItem(themeStorageKey, themePreference); }
+    catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
+  });
+});
+applyTheme();
+setInterval(() => { if (themePreference === 'auto') applyTheme(); }, 60_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && themePreference === 'auto') applyTheme(); });
 function activeSession(): SessionRecord | null { return activeSessionId ? sessions.get(activeSessionId) ?? null : null; }
 function binding(settings: ProviderSettings): string { return `${settings.providerId}\n${settings.baseUrl.trim()}`; }
 
@@ -145,6 +176,16 @@ function selectProvider(id: ProviderId): void {
   setModelOptions([], draft?.planModel ?? '', draft?.actModel ?? '');
   keyField.value = '';
   keyField.disabled = preset.local;
+  const applyUrl = preset.applyKeyUrl;
+  if (applyUrl) {
+    keyApplyLink.href = applyUrl;
+    keyApplyLink.textContent = preset.applyKeyLabel || 'Get API key';
+    keyApplyLink.removeAttribute('disabled');
+    keyApplyLink.style.display = '';
+  } else {
+    keyApplyLink.setAttribute('disabled', '');
+    keyApplyLink.style.display = 'none';
+  }
   if (activeSession()) setStatus(`${preset.name} selected. Changing provider starts a new conversation on the next task.`);
 }
 
@@ -621,6 +662,13 @@ async function initialize(): Promise<void> {
 }
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
+keyApplyLink.addEventListener('click', async (event) => {
+  event.preventDefault();
+  const url = keyApplyLink.href;
+  if (!url || url === '#') return;
+  try { await openUrl(url); }
+  catch (error) { setStatus(`Could not open apply page: ${String(error)}`); }
+});
 $<HTMLSelectElement>('plan-model').addEventListener('change', updateSelectedModel);
 $<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel);
 document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {

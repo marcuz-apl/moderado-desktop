@@ -1,0 +1,107 @@
+.topbar-controls{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.theme-control{display:flex;padding:3px;background:#1e354a;border:1px solid #34536b;border-radius:9px}
+.theme-control button{min-width:48px;padding:7px 9px;background:transparent;color:#9eb8c7;border:0;border-radius:6px;cursor:pointer}
+.theme-control button.selected{background:#65cbbd;color:#0d2635;font-weight:700}
+@media(max-width:650px){.topbar{flex-wrap:wrap;gap:12px}.topbar-controls{width:100%;justify-content:flex-end}.theme-control button{min-width:44px}}
+
+:root[data-theme="light"]{
+  color:#203744;
+  background:#f5f9fa;
+  --light-border:#c9d9de;
+  --light-muted:#536b77;
+  --light-accent:#08766d;
+  --light-panel:#edf4f6;
+  --light-surface:#fff;
+}
+:root[data-theme="light"] .activity-bar{background:#e5eff2;border-color:var(--light-border)}
+:root[data-theme="light"] .activity-button{color:#526b78}
+:root[data-theme="light"] .activity-button:hover,
+:root[data-theme="light"] .activity-button.selected{color:#123f42;background:#d4e8e8}
+:root[data-theme="light"] .activity-button.selected{border-left-color:var(--light-accent)}
+:root[data-theme="light"] .sidebar{background:var(--light-panel);border-color:var(--light-border)}
+:root[data-theme="light"] .main{background:radial-gradient(circle at 80% 0%,#e9f4f5 0%,#f8fbfc 55%)}
+:root[data-theme="light"] .topbar,
+:root[data-theme="light"] .panel-heading,
+:root[data-theme="light"] .settings-group,
+:root[data-theme="light"] .session-context,
+:root[data-theme="light"] .commit-item{border-color:var(--light-border)}
+:root[data-theme="light"] .eyebrow,
+:root[data-theme="light"] .message-role{color:#526e79}
+:root[data-theme="light"] .path,
+:root[data-theme="light"] .hint,
+:root[data-theme="light"] .status,
+:root[data-theme="light"] .composer-shortcuts,
+:root[data-theme="light"] .checkpoint-list,
+:root[data-theme="light"] .schedule-list,
+:root[data-theme="light"] .commit-item span{color:var(--light-muted)}
+:root[data-theme="light"] .workspace-name,
+:root[data-theme="light"] .panel-subheading,
+:root[data-theme="light"] .settings-group label,
+:root[data-theme="light"] .form-grid label,
+:root[data-theme="light"] #schedule-form>label,
+:root[data-theme="light"] #import-form>label{color:#203744}
+:root[data-theme="light"] .mode-control,
+:root[data-theme="light"] .theme-control{background:#e3eff1;border-color:var(--light-border)}
+:root[data-theme="light"] .mode-control button,
+:root[data-theme="light"] .theme-control button{color:#4c6571}
+:root[data-theme="light"] .mode-control button.selected,
+:root[data-theme="light"] .theme-control button.selected{background:var(--light-accent);color:#fff}
+:root[data-theme="light"] .empty-state>p:last-child{color:#4e6875}
+:root[data-theme="light"] .empty-symbol{color:var(--light-accent);border-color:#8ab8b7}
+:root[data-theme="light"] .message.you .message-body{background:#e9f3f4;border-color:var(--light-border)}
+:root[data-theme="light"] .message.tool .message-body{color:#175f58;background:#e5f3f0;border-color:var(--light-accent)}
+:root[data-theme="light"] .message.system .message-body{color:#4b6872}
+:root[data-theme="light"] .message.error .message-body,
+:root[data-theme="light"] .schedule-item .schedule-error{color:#a13631}
+:root[data-theme="light"] #composer,
+:root[data-theme="light"] dialog{background:var(--light-surface);border-color:var(--light-border);color:#203744;box-shadow:0 12px 40px #40606a20}
+:root[data-theme="light"] #composer:focus-within{border-color:var(--light-accent)}
+:root[data-theme="light"] textarea{color:#203744}
+:root[data-theme="light"] textarea::placeholder{color:#667e88}
+:root[data-theme="light"] #selected-model{color:#315865}
+:root[data-theme="light"] #send,
+:root[data-theme="light"] .dialog-actions #approve{background:var(--light-accent);color:#fff}
+:root[data-theme="light"] #send:hover,
+:root[data-theme="light"] .dialog-actions #approve:hover{background:#09645d}
+:root[data-theme="light"] .secondary{color:#294451;border-color:#98afb8}
+:root[data-theme="light"] dialog::backdrop{background:#18313a80}
+:root[data-theme="light"] .diff{background:var(--light-border);border-color:var(--light-border)}
+:root[data-theme="light"] .diff>div,
+:root[data-theme="light"] .diff h3,
+:root[data-theme="light"] .restore-changes h3{background:#e6eff2;color:#3b5965}
+:root[data-theme="light"] .diff textarea,
+:root[data-theme="light"] .diff>div:last-child pre{background:#e8f4ec;color:#234235}
+:root[data-theme="light"] .restore-changes section,
+:root[data-theme="light"] .restore-changes pre,
+:root[data-theme="light"] #change-summary,
+:root[data-theme="light"] .file-preview-content{background:#f4f8f9;border-color:var(--light-border);color:#203744}
+:root[data-theme="light"] .diff-context{color:#516b76}
+:root[data-theme="light"] .diff-removed{color:#8f2925;background:#f8dfdc}
+:root[data-theme="light"] .diff-added{color:#13604a;background:#daf0e2}
+:root[data-theme="light"] .session-item,
+:root[data-theme="light"] .checkpoint-item,
+:root[data-theme="light"] .tree-row{color:#385461}
+:root[data-theme="light"] .session-item:hover,
+:root[data-theme="light"] .checkpoint-item:hover,
+:root[data-theme="light"] .tree-row:hover{background:#dbeaec}
+:root[data-theme="light"] .session-item.selected{background:#d5e9e8;border-color:#84b7b3;color:#134846}
+:root[data-theme="light"] .tree-folder{color:#234b55}
+:root[data-theme="light"] .source-change,
+:root[data-theme="light"] .schedule-item{background:#e3eff1;border-color:var(--light-border);color:#294652}
+:root[data-theme="light"] .schedule-item strong{color:#203744}
+:root[data-theme="light"] .icon-action,
+:root[data-theme="light"] .gateway-mode{background:#e2edef;border-color:var(--light-border);color:#294652}
+:root[data-theme="light"] .gateway-mode button{color:#45616c}
+:root[data-theme="light"] .gateway-mode button.selected{background:var(--light-accent);color:#fff}
+:root[data-theme="light"] .settings-group input,
+:root[data-theme="light"] .settings-group select,
+:root[data-theme="light"] #schedule-form>textarea,
+:root[data-theme="light"] #schedule-form input,
+:root[data-theme="light"] #schedule-form select,
+:root[data-theme="light"] #import-form input,
+:root[data-theme="light"] #import-form select{background:var(--light-surface);border-color:#a9bec5;color:#203744}
+:root[data-theme="light"] .settings input[readonly]{background:#e7eff1;color:#536b77}
+:root[data-theme="light"] .text-button,
+:root[data-theme="light"] .session-actions button,
+:root[data-theme="light"] .schedule-item button{color:var(--light-accent)}
+:root[data-theme="light"] .key-apply-link{color:var(--light-accent)}

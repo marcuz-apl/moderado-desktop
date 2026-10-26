@@ -1045,6 +1045,7 @@ async fn poll_schedules(app: tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("sessions.sqlite");
             let store = SessionStore::open(path.clone()).map_err(std::io::Error::other)?;

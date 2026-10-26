@@ -29,6 +29,8 @@ pub struct ProviderPreset {
     pub default_base_url: &'static str,
     pub editable_url: bool,
     pub local: bool,
+    pub apply_key_url: Option<&'static str>,
+    pub apply_key_label: &'static str,
 }
 
 pub const PRESETS: &[ProviderPreset] = &[
@@ -38,6 +40,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://modr.alfazen.org/v1",
         editable_url: true,
         local: false,
+        apply_key_url: Some("https://modr.alfazen.org/account?mode=signin"),
+        apply_key_label: "Get API key",
     },
     ProviderPreset {
         id: ProviderId::NvidiaNim,
@@ -45,6 +49,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://integrate.api.nvidia.com/v1",
         editable_url: false,
         local: false,
+        apply_key_url: Some("https://build.nvidia.com/settings/api-keys"),
+        apply_key_label: "Get API key",
     },
     ProviderPreset {
         id: ProviderId::OpenRouter,
@@ -52,6 +58,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://openrouter.ai/api/v1",
         editable_url: false,
         local: false,
+        apply_key_url: Some("https://openrouter.ai/settings/keys"),
+        apply_key_label: "Get API key",
     },
     ProviderPreset {
         id: ProviderId::Ollama,
@@ -59,6 +67,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "http://localhost:11434/v1",
         editable_url: false,
         local: true,
+        apply_key_url: None,
+        apply_key_label: "",
     },
     ProviderPreset {
         id: ProviderId::LmStudio,
@@ -66,6 +76,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "http://localhost:1234/v1",
         editable_url: false,
         local: true,
+        apply_key_url: None,
+        apply_key_label: "",
     },
     ProviderPreset {
         id: ProviderId::OpenAiCompatible,
@@ -73,6 +85,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "",
         editable_url: true,
         local: false,
+        apply_key_url: None,
+        apply_key_label: "",
     },
 ];
 
