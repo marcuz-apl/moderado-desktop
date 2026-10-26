@@ -8,3 +8,6 @@ new=$(next_identifier "$old" "$(utc_yymmdd)" patch) || exit 1
 
 printf '%s\n' "$new" > "$VERSION_FILE"
 git add -- "$VERSION_FILE"
+
+# VERSION is the single source of truth; every other manifest follows it.
+sync_manifests "$new"

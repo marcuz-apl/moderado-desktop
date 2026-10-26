@@ -89,3 +89,74 @@ next_identifier() {
   fi
   printf '%s+%s%s\n' "$ver" "$today" "$nctr"
 }
+
+# Replace the first "<key>": "..." value in a JSON file without needing GNU sed.
+set_json_version() {
+  file=$1; version=$2
+  [ -f "$file" ] || return 0
+  tmp=$(mktemp) || die "could not create a temp file for $file"
+  awk -v v="$version" '
+    !done && /"version"[[:space:]]*:/ {
+      sub(/"version"[[:space:]]*:[[:space:]]*"[^"]*"/, "\"version\": \"" v "\"")
+      done = 1
+    }
+    { print }
+  ' "$file" > "$tmp" && mv -f -- "$tmp" "$file" || die "could not update $file"
+  git add -- "$file"
+}
+
+# Replace the first "version = "..." line, which is the [package] version.
+set_toml_version() {
+  file=$1; version=$2
+  [ -f "$file" ] || return 0
+  tmp=$(mktemp) || die "could not create a temp file for $file"
+  awk -v v="$version" '
+    !done && /^version[[:space:]]*=/ { sub(/"[^"]*"/, "\"" v "\""); done = 1 }
+    { print }
+  ' "$file" > "$tmp" && mv -f -- "$tmp" "$file" || die "could not update $file"
+  git add -- "$file"
+}
+
+# Replace the version of this crate's own entry in Cargo.lock.
+set_lock_version() {
+  file=$1; version=$2; crate=$3
+  [ -f "$file" ] || return 0
+  tmp=$(mktemp) || die "could not create a temp file for $file"
+  awk -v v="$version" -v crate="$crate" '
+    $0 == "name = \"" crate "\"" { found = 1; print; next }
+    found && /^version[[:space:]]*=/ { sub(/"[^"]*"/, "\"" v "\""); found = 0 }
+    { print }
+  ' "$file" > "$tmp" && mv -f -- "$tmp" "$file" || die "could not update $file"
+  git add -- "$file"
+}
+
+# Read the [package] name so Cargo.lock can be updated without hardcoding it.
+cargo_package_name() {
+  [ -f src-tauri/Cargo.toml ] || return 0
+  awk '
+    /^\[package\]/ { section = 1; next }
+    /^\[/ { section = 0 }
+    section && /^name[[:space:]]*=/ {
+      line = $0
+      sub(/^name[[:space:]]*=[[:space:]]*"/, "", line)
+      sub(/".*/, "", line)
+      print line
+      exit
+    }
+  ' src-tauri/Cargo.toml
+}
+
+# Keep every manifest on the same semver as VERSION, minus the build metadata.
+# Manifests are optional so the hook still works in a bare test repository.
+sync_manifests() {
+  identifier=$1
+  semver=${identifier#v}
+  semver=${semver%%+*}
+  semver=${semver%%-*}
+  set_json_version package.json "$semver"
+  set_json_version src-tauri/tauri.conf.json "$semver"
+  set_toml_version src-tauri/Cargo.toml "$semver"
+  crate=$(cargo_package_name)
+  [ -n "$crate" ] && set_lock_version src-tauri/Cargo.lock "$semver" "$crate"
+  return 0
+}

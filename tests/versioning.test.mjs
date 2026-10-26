@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -81,6 +81,49 @@ test('feat patch rollover carries into the minor digit', () => {
   const root = repository('v0.1.9+2610114');
   try {
     assert.equal(commit(root, 'feat: next patch', 'one').version, `v0.2.0+${today}1`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('every manifest follows VERSION without build metadata', () => {
+  const root = repository('v0.1.3+2610114');
+  try {
+    writeFileSync(join(root, 'package.json'), '{\n  "name": "app",\n  "version": "0.1.3",\n  "private": true\n}\n');
+    mkdirSync(join(root, 'src-tauri'), { recursive: true });
+    writeFileSync(join(root, 'src-tauri', 'tauri.conf.json'), '{\n  "productName": "App",\n  "version": "0.1.3"\n}\n');
+    writeFileSync(join(root, 'src-tauri', 'Cargo.toml'), '[package]\nname = "app"\nversion = "0.1.3"\nedition = "2021"\n');
+    writeFileSync(
+      join(root, 'src-tauri', 'Cargo.lock'),
+      '[[package]]\nname = "app"\nversion = "0.1.3"\n\n[[package]]\nname = "serde"\nversion = "1.0.0"\n',
+    );
+    writeFileSync(join(root, 'change.txt'), 'one');
+    git(root, 'add', '.');
+    git(root, 'commit', '-qm', 'feat: manifests');
+
+    const version = readFileSync(join(root, 'VERSION'), 'utf8').trim();
+    assert.equal(version, `v0.1.4+${today}1`);
+    assert.equal(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version, '0.1.4');
+    assert.equal(JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8')).version, '0.1.4');
+    assert.match(readFileSync(join(root, 'src-tauri', 'Cargo.toml'), 'utf8'), /^version = "0\.1\.4"$/m);
+
+    const lock = readFileSync(join(root, 'src-tauri', 'Cargo.lock'), 'utf8');
+    assert.match(lock, /name = "app"\nversion = "0\.1\.4"/);
+    assert.match(lock, /name = "serde"\nversion = "1\.0\.0"/);
+
+    // The hook stages what it rewrites, so the commit carries the new versions.
+    assert.equal(git(root, 'show', 'HEAD:package.json').includes('"version": "0.1.4"'), true);
+    assert.equal(git(root, 'show', 'HEAD:src-tauri/Cargo.toml').includes('version = "0.1.4"'), true);
+    assert.equal(git(root, 'status', '--porcelain'), '');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a repository without manifests still commits', () => {
+  const root = repository('v0.1.3+2610114');
+  try {
+    assert.equal(commit(root, 'feat: no manifests', 'one').version, `v0.1.4+${today}1`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
