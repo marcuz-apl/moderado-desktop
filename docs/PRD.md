@@ -93,6 +93,10 @@ Requirements:
 - F16 — Import conversation history from supported external agent formats (e.g., Claude Code, Codex session transcripts) into a new Moderado session.
 - F17 — Optional web-search toggle per session (default on for new sessions).
 
+### 6.7 Appearance & Provider Setup (P2)
+- F18 — Light and dark themes with an Auto mode that follows local time (light between 07:00 and 18:59); the control sits beside the Plan/Act selector and the choice persists across restarts.
+- F19 — Each provider in Settings links to where the user obtains it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and an installer page for the local Ollama and LM Studio runtimes. The link opens in the system browser, never inside the app webview.
+
 ## 7. Non-Functional Requirements
 
 | ID | Requirement |

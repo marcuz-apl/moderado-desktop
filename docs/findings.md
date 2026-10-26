@@ -25,3 +25,10 @@
 - VS Code uses the Activity Bar on the outer edge to switch views in the Primary Side Bar. Account and Manage buttons normally sit at its bottom. Source Control has a distinct view and graph/history area. Moderado will use the same information architecture with its own visual style and local SVG icons.
 - Existing `workspace::read_text` already enforces the workspace jail and a 256 KiB text limit. A new typed directory listing can reuse the same jailed root; no general file execution is needed.
 - Existing checkpoints use Git internally, but Source Control must inspect only a repository rooted at the selected workspace so it does not read outside the workspace jail.
+
+## Appearance and Provider Links
+
+- The theme is applied by setting `data-theme` on the root element, so the light palette is a `:root[data-theme="light"]` override layer over the existing dark styles instead of a second stylesheet. The saved choice lives in `localStorage` and Auto uses local time with a 07:00–18:59 light window, which needs no permission and no network. Applying it from the module script means the first paint is dark; that flash is short on a local webview and was accepted rather than duplicating the time window in an inline boot script.
+- Tauri v2 removed `@tauri-apps/api/shell`, so an external link cannot be opened from the renderer without a plugin. `tauri-plugin-opener` is the official replacement; its `opener:allow-open-url` permission plus the `opener:allow-default-urls` scope covers https links without granting filesystem reveal or arbitrary commands.
+- The provider key URL belongs in the Rust catalog, not the renderer: `provider_catalog` already returns the preset list, so a second map in the renderer would be a second source of truth for provider data (AGENTS.md P4).
+- Ollama and LM Studio have no key page for local use — the API key field is disabled for them — so their link points at the installer and is labelled per preset instead of saying "apply for API key".

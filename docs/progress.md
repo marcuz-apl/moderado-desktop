@@ -50,3 +50,12 @@
 - Settings now place API Key directly after Base URL, use dropdowns for Plan and Act models, and select the fixed Gateway Prod or Dev endpoint with Prod as the default.
 - `npm test`: 54 Rust tests and 1 frontend test passed offline; `npm run lint` and `npm run build` passed.
 - Playwright UI checks passed at 760 px for the sidebar and Gateway settings flows; `npm run dev` started Vite and the Tauri executable successfully.
+
+## Appearance and Provider Setup Links
+
+- Added a theme control beside the Plan/Act selector with Auto, Light, and Dark. Auto resolves from local time (light 07:00–18:59), re-resolves every minute and when the window regains focus, and persists the choice in `localStorage`. Light is a `:root[data-theme="light"]` override layer, so dark stays the default.
+- Added the missing provider links in Settings. Moderado Gateway, NVIDIA NIM, and OpenRouter point at their key pages; Ollama and LM Studio point at their installer pages because neither local runtime needs a key. The link renders immediately right of the API key box and hides for a custom endpoint.
+- Replaced the removed `@tauri-apps/api/shell` module with the Tauri opener plugin, and dropped the duplicated key-URL map so the URL comes from the Rust provider catalog instead of a second source in the renderer.
+- Added `provider::tests::every_named_provider_links_to_a_key_or_install_page`, which fails if any named provider loses its https link or label, and pins the Moderado Gateway URL.
+- Browser checks against the dev server: the theme control sits 10 px right of the Plan/Act group, Auto resolved to light at 11:00 local, Light and Dark persisted across reload, and all five providers showed their link 8 px right of the API key box.
+- `npm test`: 58 Rust tests and 4 frontend suites passed offline; `npm run lint` and `npm run build` passed.
