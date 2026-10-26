@@ -85,6 +85,9 @@ Limits for the first cut: 256 KiB per text file (the same bound the workspace re
 
 ## Rollout
 
+Status: step 1 is partly done — `db.rs` migrations, `SessionKind`, and the record and summary fields
+have shipped; the scratch root has not. Steps 2 to 5 are not started.
+
 1. Schema migration, `SessionKind`, record and summary fields, scratch root. No behaviour change; all tests still pass.
 2. Tool gating and dispatch rejection for Work sessions, with tests. No UI yet.
 3. Attachment store: copy, validate, expand on send, replay after restart. Rust tests with a local mock provider, including one that asserts the image part arrives as a data URL.

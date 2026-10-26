@@ -73,6 +73,7 @@ src-tauri/src/
   agent/runner.rs # Agent loop and conversation history
   provider.rs  # Provider catalog and OpenAI-compatible streaming client
   provider/settings.rs # Local provider settings without secrets
+  db.rs        # Schema ownership, numbered migrations, and connection setup
   sessions.rs  # SQLite sessions, histories, and checkpoint metadata
   schedules.rs # Persistent schedules and due-run claiming
   search.rs    # Per-session search settings and configured API client
@@ -83,6 +84,7 @@ src/renderer/  # TypeScript UI and styles
 ```
 
 - Session storage: SQLite in the local app-data directory
+- Schema: `db.rs` owns every table and applies numbered migrations recorded in `PRAGMA user_version`, so an upgrade carries existing sessions forward instead of recreating the database
 - Checkpoints: Git-backed snapshots per workspace, with a separate index to preserve the user's staged changes
 - Provider access stays in Rust; the webview cannot call file tools or provider HTTP APIs directly
 - `cap-std` keeps file operations relative to the chosen workspace, including when symlinks change during a turn
@@ -92,6 +94,7 @@ src/renderer/  # TypeScript UI and styles
 ## Documentation
 
 - [PRD](./docs/PRD.md) — full product specification, functional and non-functional requirements
+- [Work and Code modes](./docs/work-code-modes.md) — design for the two session kinds and attachments
 - [Milestone plan](./docs/task_plan.md) — implementation scope and verification for each milestone
 - [Progress notes](./docs/progress.md) — completed work and review outcomes
 - [Findings](./docs/findings.md) — implementation research and decisions

@@ -32,3 +32,10 @@
 - Tauri v2 removed `@tauri-apps/api/shell`, so an external link cannot be opened from the renderer without a plugin. `tauri-plugin-opener` is the official replacement; its `opener:allow-open-url` permission plus the `opener:allow-default-urls` scope covers https links without granting filesystem reveal or arbitrary commands.
 - The provider key URL belongs in the Rust catalog, not the renderer: `provider_catalog` already returns the preset list, so a second map in the renderer would be a second source of truth for provider data (AGENTS.md P4).
 - Ollama and LM Studio have no key page for local use — the API key field is disabled for them — so their link points at the installer and is labelled per preset instead of saying "apply for API key".
+
+## Schema Migrations and Versioning
+
+- The schema had no version marker: tables were created with `CREATE TABLE IF NOT EXISTS` by whichever store opened the database first, and schedule columns were repaired with `PRAGMA table_info` checks inside `ScheduleStore::open`. That works once and does not extend, so `db.rs` now owns every table and records the applied version in `PRAGMA user_version`.
+- `PRAGMA user_version` was chosen over a migration crate: it is one integer in the database header, needs no dependency, and every migration here is plain SQL. A migration library would add a dependency for behaviour that fits in about forty lines (Decision Ladder, N6).
+- Version 1 has to be idempotent rather than conditional. An existing install reports `user_version = 0` while already holding the tables, so version 1 is written with `IF NOT EXISTS` and carries the old column repair. That lets one code path serve both a fresh database and a pre-versioning one, with no baseline detection branch.
+- Staging inside `prepare-commit-msg` or `commit-msg` does not reach the commit: git freezes the tree after `pre-commit`. That is why the version bump stays in `pre-commit`, and why the patch digit moves through an explicit `npm run version:patch` rather than from the commit message.

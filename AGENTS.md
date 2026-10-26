@@ -23,18 +23,21 @@ src-tauri/src/
   lib.rs         # Tauri commands and session lifecycle
   agent.rs       # Tool dispatcher, approval gate, Plan/Act enforcement
   provider.rs    # OpenAI-compatible streaming client
+  db.rs          # Schema ownership, numbered migrations, connection setup
   workspace.rs   # Workspace jail and file operations
 src/renderer/    # TypeScript UI
 ```
 
 - **One tool dispatcher.** All tool calls flow through Rust `agent.rs` — no tool may bypass the approval gate or workspace jail.
 - **One provider contract.** All model access goes through Rust `provider.rs`; never call provider HTTP APIs from the webview.
+- **One schema owner.** All DDL lives in Rust `db.rs` as a numbered migration; stores keep queries only.
 
 ## 3. Development Commands & Verification
 
 - `npm test`: Run automated test suites (must pass offline)
 - `npm run build`: Compile the TypeScript frontend and Rust app
 - `npm run lint`: Lint TypeScript and Rust
+- `npm run version:patch|minor|major`: Move the semver in `VERSION` before a `feat:` commit. Commits only advance the `+YYMMDD<n>` build counter, and the commit hook copies the semver into `package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`. A release is a `v*` tag, not a version number.
 
 **Definition of done for any change**: typecheck clean, lint clean, tests green offline, relevant behavior covered by a test.
 
@@ -66,6 +69,8 @@ Rules:
 ## 6. Data & State
 
 - Session history: SQLite in the local app-data directory; sessions resumable after restart.
+- Schema: every table is created in `db.rs` and every later change is a numbered migration recorded in `PRAGMA user_version`, applied in a transaction. Never add DDL to a store, and never edit a migration that has shipped — add the next one.
+- Provider defaults: `~/.moderado/config.json` (`$HOME` and `%USERPROFILE%` are the same folder). Secrets never go there; they live in the OS keychain.
 - Checkpoints: git-backed snapshots per workspace; created before the first mutating action of each agent step; restore requires confirmation with diff preview.
 - No telemetry by default. No data leaves the machine except calls to explicitly configured remote providers.
 

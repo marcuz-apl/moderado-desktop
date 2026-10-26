@@ -105,6 +105,7 @@ Requirements:
 | N4 | No telemetry by default. |
 | N5 | Secrets never written to disk unencrypted; never echoed into logs or session transcripts. |
 | N6 | Minimal dependency footprint (Decision Ladder: stdlib first, YAGNI). |
+| N7 | Schema changes ship as numbered migrations; an upgrade preserves existing sessions, schedules, and checkpoints without manual steps. |
 
 ## 8. Architecture (Proposed)
 
@@ -113,6 +114,7 @@ src-tauri/src/
   lib.rs         # Tauri commands, sessions, scheduler, checkpoint store, keychain
   agent.rs       # Agent loop, tool dispatcher, approval gate, mode enforcement
   provider.rs    # Shared OpenAI-compatible streaming client and adapters
+  db.rs          # Schema ownership and numbered migrations
   workspace.rs   # Workspace jail, file tools, git integration
 src/renderer/    # UI: session tabs, chat, approval prompts, diffs, settings
 ```
