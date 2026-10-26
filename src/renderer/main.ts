@@ -3,7 +3,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
-import { parseThemePreference, resolveTheme, type ThemePreference } from './theme';
+import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -44,6 +44,7 @@ const providerSelect = $<HTMLSelectElement>('provider-select');
 const endpoint = $<HTMLInputElement>('endpoint');
 const keyField = $<HTMLInputElement>('api-key');
 const keyApplyLink = $<HTMLAnchorElement>('apply-key-link');
+const themeToggle = $<HTMLButtonElement>('theme-toggle');
 const approvalDialog = $<HTMLDialogElement>('approval-dialog');
 const restoreDialog = $<HTMLDialogElement>('restore-dialog');
 const scheduleDialog = $<HTMLDialogElement>('schedule-dialog');
@@ -86,21 +87,17 @@ function applyTheme(): void {
   const theme = resolveTheme(themePreference, new Date());
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
-  document.querySelectorAll<HTMLButtonElement>('[data-theme-preference]').forEach((button) => {
-    const selected = button.dataset.themePreference === themePreference;
-    button.classList.toggle('selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
-    if (button.dataset.themePreference === 'auto') button.title = `Use local time (currently ${theme})`;
-  });
+  const next = oppositeTheme(theme);
+  themeToggle.setAttribute('aria-label', `Switch to ${next} theme`);
+  themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
+  themeToggle.title = `${theme === 'light' ? 'Light' : 'Dark'}${themePreference === 'auto' ? ', follows local time' : ''} — switch to ${next}`;
 }
 
-document.querySelectorAll<HTMLButtonElement>('[data-theme-preference]').forEach((button) => {
-  button.addEventListener('click', () => {
-    themePreference = parseThemePreference(button.dataset.themePreference ?? null);
-    applyTheme();
-    try { localStorage.setItem(themeStorageKey, themePreference); }
-    catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
-  });
+themeToggle.addEventListener('click', () => {
+  themePreference = oppositeTheme(resolveTheme(themePreference, new Date()));
+  applyTheme();
+  try { localStorage.setItem(themeStorageKey, themePreference); }
+  catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
 });
 applyTheme();
 setInterval(() => { if (themePreference === 'auto') applyTheme(); }, 60_000);

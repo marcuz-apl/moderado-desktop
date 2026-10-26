@@ -6,13 +6,13 @@ Moderado Desktop follows the Cline Desktop interaction model — parallel sessio
 
 ## Current build
 
-M4 supports multiple persistent sessions, one-time and repeating task schedules, and text transcript imports from Codex and Claude Code JSONL files. Scheduled runs work while the desktop app is open and use the session's configured provider and models. An explicit per-schedule approval choice controls whether Act-mode file writes wait for review or proceed unattended; scheduled Act runs create a checkpoint before contacting the model, and writes create another checkpoint before changing files. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. The workspace header carries a theme control beside the Plan/Act selector: pick Light or Dark, or leave Auto to follow local time. Command execution remains planned work.
+M4 supports multiple persistent sessions, one-time and repeating task schedules, and text transcript imports from Codex and Claude Code JSONL files. Scheduled runs work while the desktop app is open and use the session's configured provider and models. An explicit per-schedule approval choice controls whether Act-mode file writes wait for review or proceed unattended; scheduled Act runs create a checkpoint before contacting the model, and writes create another checkpoint before changing files. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. The workspace header carries a sun/moon button beside the Plan/Act selector; it follows local time until you click it. Command execution remains planned work.
 
 ## Capabilities
 
 - **Parallel sessions**: run multiple isolated agent sessions concurrently, each bound to its own workspace folder and provider/model.
 - **Plan/Act dual mode**: Plan mode is strictly read-only; Act mode enables mutating tools. Each mode can use a different model.
-- **Appearance**: light, dark, or Auto, chosen from the control beside the Plan/Act selector. Auto follows local time — light from 07:00 to 18:59 — and re-checks while the app is open.
+- **Appearance**: a sun/moon button beside the Plan/Act selector switches the theme. Until you click it, the theme follows local time — light from 07:00 to 18:59 — and re-checks while the app is open; after you choose, that choice sticks.
 - **Human-in-the-loop approval**: manual file writes and edits require explicit approval with a diff preview. Scheduled Act tasks can use an explicit auto-write preset.
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.
 - **Local-first**: fully usable offline with Ollama or LM Studio; no accounts required at first launch.

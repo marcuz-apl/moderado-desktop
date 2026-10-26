@@ -59,3 +59,11 @@
 - Added `provider::tests::every_named_provider_links_to_a_key_or_install_page`, which fails if any named provider loses its https link or label, and pins the Moderado Gateway URL.
 - Browser checks against the dev server: the theme control sits 10 px right of the Plan/Act group, Auto resolved to light at 11:00 local, Light and Dark persisted across reload, and all five providers showed their link 8 px right of the API key box.
 - `npm test`: 58 Rust tests and 4 frontend suites passed offline; `npm run lint` and `npm run build` passed.
+
+## Theme Toggle as an Icon
+
+- Replaced the Auto/Light/Dark text buttons with a single sun/moon icon button beside the Plan/Act selector. The icon shows the current theme and the accessible name and tooltip name the theme it switches to.
+- Auto is now the initial state rather than a visible option: with nothing saved, the theme resolves from local time (light 07:00–18:59) and re-checks every minute and on focus. The first click writes an explicit `light` or `dark` choice that persists across restarts.
+- `oppositeTheme` moved into `theme.ts` so the toggle is covered by the offline unit tests.
+- Browser check: 36x36 icon 10 px right of the Plan/Act group on the same row, no button text, initial state light at 12:15 with the sun icon, click flipped to the moon and persisted across reload, second click returned to light.
+- `npm test`: 58 Rust tests and 4 frontend suites passed offline; `npm run lint` and `npm run build` passed.

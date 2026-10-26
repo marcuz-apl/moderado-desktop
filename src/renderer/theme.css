@@ -1,8 +1,11 @@
 .topbar-controls{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.theme-control{display:flex;padding:3px;background:#1e354a;border:1px solid #34536b;border-radius:9px}
-.theme-control button{min-width:48px;padding:7px 9px;background:transparent;color:#9eb8c7;border:0;border-radius:6px;cursor:pointer}
-.theme-control button.selected{background:#65cbbd;color:#0d2635;font-weight:700}
-@media(max-width:650px){.topbar{flex-wrap:wrap;gap:12px}.topbar-controls{width:100%;justify-content:flex-end}.theme-control button{min-width:44px}}
+.theme-toggle{display:grid;place-items:center;width:36px;height:36px;padding:0;background:#1e354a;border:1px solid #34536b;border-radius:9px;color:#9eb8c7;cursor:pointer}
+.theme-toggle:hover{color:#e5f3f7;border-color:#65cbbd}
+.theme-toggle svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.theme-toggle .theme-sun{display:none}
+:root[data-theme="light"] .theme-toggle .theme-sun{display:block}
+:root[data-theme="light"] .theme-toggle .theme-moon{display:none}
+@media(max-width:650px){.topbar{flex-wrap:wrap;gap:12px}.topbar-controls{width:100%;justify-content:flex-end}}
 
 :root[data-theme="light"]{
   color:#203744;
@@ -41,11 +44,10 @@
 :root[data-theme="light"] #schedule-form>label,
 :root[data-theme="light"] #import-form>label{color:#203744}
 :root[data-theme="light"] .mode-control,
-:root[data-theme="light"] .theme-control{background:#e3eff1;border-color:var(--light-border)}
+:root[data-theme="light"] .theme-toggle{background:#e3eff1;border-color:var(--light-border)}
 :root[data-theme="light"] .mode-control button,
-:root[data-theme="light"] .theme-control button{color:#4c6571}
-:root[data-theme="light"] .mode-control button.selected,
-:root[data-theme="light"] .theme-control button.selected{background:var(--light-accent);color:#fff}
+:root[data-theme="light"] .theme-toggle{color:#4c6571}
+:root[data-theme="light"] .mode-control button.selected{background:var(--light-accent);color:#fff}
 :root[data-theme="light"] .empty-state>p:last-child{color:#4e6875}
 :root[data-theme="light"] .empty-symbol{color:var(--light-accent);border-color:#8ab8b7}
 :root[data-theme="light"] .message.you .message-body{background:#e9f3f4;border-color:var(--light-border)}

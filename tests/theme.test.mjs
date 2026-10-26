@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseThemePreference, resolveTheme } from '../src/renderer/theme.ts';
+import { oppositeTheme, parseThemePreference, resolveTheme } from '../src/renderer/theme.ts';
 
 test('auto theme follows local morning and evening boundaries', () => {
   assert.equal(resolveTheme('auto', new Date(2026, 9, 26, 6, 59)), 'dark');
@@ -20,4 +20,10 @@ test('unknown saved preference falls back to auto', () => {
   assert.equal(parseThemePreference('auto'), 'auto');
   assert.equal(parseThemePreference('unexpected'), 'auto');
   assert.equal(parseThemePreference(null), 'auto');
+});
+
+test('the icon toggle flips between light and dark', () => {
+  assert.equal(oppositeTheme('light'), 'dark');
+  assert.equal(oppositeTheme('dark'), 'light');
+  assert.equal(oppositeTheme(oppositeTheme('light')), 'light');
 });
