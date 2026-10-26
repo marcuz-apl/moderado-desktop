@@ -55,7 +55,7 @@ let gatewayMode: GatewayMode = 'prod';
 let activeSessionId: string | null = null;
 let scheduleSessionId: string | null = null;
 let importSessionId: string | null = null;
-let mode: 'plan' | 'act' = 'plan';
+let mode: 'plan' | 'act' = 'act';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
@@ -243,7 +243,7 @@ async function selectSession(id: string): Promise<void> {
   const record = await refreshSession(id);
   activeSessionId = id;
   applySessionSettings(record.settings);
-  mode = modeBySession.get(id) ?? 'plan';
+  mode = modeBySession.get(id) ?? 'act';
   setMode(mode);
   $('workspace-name').textContent = record.name;
   $('workspace-path').textContent = record.workspace;
@@ -371,10 +371,14 @@ async function refreshSchedules(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
-let collapseTimer: ReturnType<typeof setTimeout> | null = null;
-function scheduleCollapse(): void {
-  if (collapseTimer) clearTimeout(collapseTimer);
-  collapseTimer = setTimeout(() => { activePanel = null; document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed'); document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((b) => { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }); document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((s) => s.classList.remove('active')); }, 30000);
+function closePanel(): void {
+  activePanel = null;
+  document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed');
+  document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
+    button.classList.remove('selected');
+    button.setAttribute('aria-pressed', 'false');
+  });
+  document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
 }
 function switchPanel(panel: SidebarPanel): void {
   activePanel = panel;
@@ -389,7 +393,6 @@ function switchPanel(panel: SidebarPanel): void {
   });
   if (activePanel === 'workspace') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
-  scheduleCollapse();
 }
 
 async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
@@ -681,13 +684,13 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
 
-async function createSession(settings: ProviderSettings): Promise<string> {
+async function createSession(settings: ProviderSettings, chooseWorkspace = false): Promise<string> {
   if (!initialized) throw new Error('Session setup is still loading.');
-  if (creatingSession) throw new Error('Workspace picker is already open.');
+  if (creatingSession) throw new Error('Session setup is already in progress.');
   creatingSession = true;
   updateControls();
   try {
-    const record = await invoke<SessionRecord>('create_session', { settings });
+    const record = await invoke<SessionRecord>(chooseWorkspace ? 'create_session' : 'create_default_session', { settings });
     sessions.set(record.id, record);
     views.set(record.id, []);
     await refreshSummaries();
@@ -701,7 +704,7 @@ async function createSession(settings: ProviderSettings): Promise<string> {
 }
 
 $('workspace-button').addEventListener('click', async () => {
-  try { await createSession(currentSettings()); }
+  try { await createSession(currentSettings(), true); }
   catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
 });
 
@@ -824,17 +827,15 @@ $('delete-session').addEventListener('click', async () => {
 
 $('selected-model').addEventListener('click', () => switchPanel('settings'));
 $('selected-model').style.cursor = 'pointer';
-const sidebar = document.querySelector<HTMLElement>('.sidebar');
-let leaveTimer: ReturnType<typeof setTimeout> | null = null;
-sidebar?.addEventListener('mouseleave', () => { leaveTimer = setTimeout(() => { activePanel = null; document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed'); document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((b) => { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }); document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((s) => s.classList.remove('active')); }, 10000); });
-sidebar?.addEventListener('mouseenter', () => { if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; } });
 document.querySelectorAll<HTMLElement>('.panel-heading').forEach((heading) => {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = '×';
-  btn.className = 'text-button';
+  btn.textContent = '◀';
+  btn.className = 'text-button panel-close';
+  btn.setAttribute('aria-label', 'Close side panel');
+  btn.title = 'Close side panel';
   btn.style.marginLeft = 'auto';
-  btn.addEventListener('click', () => { activePanel = null; document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed'); document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((b) => { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }); document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((s) => s.classList.remove('active')); });
+  btn.addEventListener('click', closePanel);
   heading.append(btn);
 });
 const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {

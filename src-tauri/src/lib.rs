@@ -156,6 +156,23 @@ async fn create_session(
 }
 
 #[tauri::command]
+fn create_default_session(
+    state: tauri::State<'_, AppState>,
+    settings: ProviderSettings,
+) -> Result<SessionRecord, String> {
+    let documents = dirs::document_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
+        .ok_or("Documents folder is unavailable")?;
+    let workspace = sessions::create_default_workspace(&documents)?;
+    let name = workspace
+        .file_name()
+        .ok_or("Session folder has no name")?
+        .to_string_lossy()
+        .into_owned();
+    state.store.create(&workspace, &name, settings)
+}
+
+#[tauri::command]
 fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<SessionSummary>, String> {
     state.store.list()
 }
@@ -1055,6 +1072,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_session,
+            create_default_session,
             list_sessions,
             get_session,
             list_project_entries,

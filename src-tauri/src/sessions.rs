@@ -8,6 +8,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+pub fn create_default_workspace(documents: &Path) -> Result<PathBuf, String> {
+    let root = documents.join("Moderado-Desktop");
+    std::fs::create_dir_all(&root)
+        .map_err(|error| format!("Could not create session folder in Documents: {error}"))?;
+    for number in 0..=u32::MAX {
+        let path = root.join(format!("session{number}"));
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Could not create session folder: {error}")),
+        }
+    }
+    Err("No available session folder name in Documents".into())
+}
+
 pub fn new_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -413,5 +428,27 @@ mod tests {
         assert_eq!(history[2]["tool_call_id"], "two");
         repair_interrupted_tool_calls(&mut history);
         assert_eq!(history.len(), 3);
+    }
+
+    #[test]
+    fn default_workspaces_get_unique_session_folders_in_documents() {
+        let documents = tempfile::tempdir().unwrap();
+        let first = create_default_workspace(documents.path()).unwrap();
+        let second = create_default_workspace(documents.path()).unwrap();
+        assert_eq!(first, documents.path().join("Moderado-Desktop").join("session0"));
+        assert_eq!(second, documents.path().join("Moderado-Desktop").join("session1"));
+        assert!(first.is_dir());
+        assert!(second.is_dir());
+    }
+
+    #[test]
+    fn default_workspace_skips_an_existing_session_folder() {
+        let documents = tempfile::tempdir().unwrap();
+        let existing = documents.path().join("Moderado-Desktop").join("session0");
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(existing.join("keep.txt"), "existing work").unwrap();
+        let next = create_default_workspace(documents.path()).unwrap();
+        assert_eq!(next, documents.path().join("Moderado-Desktop").join("session1"));
+        assert_eq!(std::fs::read_to_string(existing.join("keep.txt")).unwrap(), "existing work");
     }
 }
