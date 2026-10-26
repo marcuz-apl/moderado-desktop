@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod attachments;
 pub mod checkpoints;
 pub mod db;
 pub mod provider;
@@ -15,8 +16,8 @@ use provider::settings::ProviderSettings;
 use provider::ProviderId;
 use schedules::{ApprovalPolicy, Schedule, ScheduleStore};
 use search::{SearchConfig, SearchSettings, SearchStore};
-use serde::Serialize;
-use sessions::{CheckpointRecord, SessionRecord, SessionStore, SessionSummary};
+use serde::{Deserialize, Serialize};
+use sessions::{CheckpointRecord, SessionKind, SessionRecord, SessionStore, SessionSummary};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -133,7 +134,19 @@ async fn create_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     settings: ProviderSettings,
+    kind: SessionKind,
 ) -> Result<SessionRecord, String> {
+    if matches!(kind, SessionKind::Work) {
+        let base = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join("work");
+        let workspace = sessions::create_scratch_workspace(&base)?;
+        return state
+            .store
+            .create_with_kind(&workspace, "Work", settings, SessionKind::Work);
+    }
     let (sender, receiver) = oneshot::channel();
     app.dialog().file().pick_folder(move |selection| {
         let _ = sender.send(selection);
@@ -153,14 +166,29 @@ async fn create_session(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Workspace".into());
-    state.store.create(&path, &name, settings)
+    state
+        .store
+        .create_with_kind(&path, &name, settings, SessionKind::Code)
 }
 
 #[tauri::command]
 fn create_default_session(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     settings: ProviderSettings,
+    kind: SessionKind,
 ) -> Result<SessionRecord, String> {
+    if matches!(kind, SessionKind::Work) {
+        let base = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join("work");
+        let workspace = sessions::create_scratch_workspace(&base)?;
+        return state
+            .store
+            .create_with_kind(&workspace, "Work", settings, SessionKind::Work);
+    }
     let documents = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .ok_or("Documents folder is unavailable")?;
@@ -170,7 +198,9 @@ fn create_default_session(
         .ok_or("Session folder has no name")?
         .to_string_lossy()
         .into_owned();
-    state.store.create(&workspace, &name, settings)
+    state
+        .store
+        .create_with_kind(&workspace, &name, settings, SessionKind::Code)
 }
 
 #[tauri::command]
@@ -225,13 +255,42 @@ fn rename_session(
 }
 
 #[tauri::command]
-fn delete_session(state: tauri::State<'_, AppState>, session_id: String) -> Result<(), String> {
+async fn add_attachments(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    paths: Vec<String>,
+) -> Result<Vec<attachments::AttachmentRecord>, String> {
+    let record = state.store.get(&session_id)?;
+    if !matches!(record.kind, SessionKind::Work) {
+        return Err("Attachments are only available in Work sessions".into());
+    }
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("attachments");
+    let sources: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let records = attachments::store(&root, &session_id, &sources)?;
+    state.store.add_attachments(&records)?;
+    Ok(records)
+}
+
+#[tauri::command]
+fn delete_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), String> {
     let runtime = state.runtime(&session_id)?;
     let _guard = runtime
         .turn_lock
         .try_lock()
         .map_err(|_| "Session is running")?;
     state.store.delete(&session_id)?;
+    if let Ok(root) = app.path().app_data_dir() {
+        let _ = std::fs::remove_dir_all(root.join("attachments").join(&session_id));
+    }
     state
         .runtimes
         .lock()
@@ -753,6 +812,7 @@ async fn start_turn(
     settings: ProviderSettings,
     mode: Mode,
     prompt: String,
+    attachments: Option<Vec<AttachmentRef>>,
 ) -> Result<(), String> {
     execute_turn(
         &app,
@@ -765,9 +825,18 @@ async fn start_turn(
             approval_policy: ApprovalPolicy::Prompt,
             scheduled: false,
             expected_search: None,
+            attachments: attachments.unwrap_or_default(),
         },
     )
     .await
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentRef {
+    id: String,
+    name: String,
+    kind: String,
 }
 
 struct TurnRequest {
@@ -778,6 +847,7 @@ struct TurnRequest {
     approval_policy: ApprovalPolicy,
     scheduled: bool,
     expected_search: Option<SearchSettings>,
+    attachments: Vec<AttachmentRef>,
 }
 
 async fn execute_turn(
@@ -793,6 +863,7 @@ async fn execute_turn(
         approval_policy,
         scheduled,
         expected_search,
+        attachments,
     } = request;
     let runtime = state.runtime(&session_id)?;
     let _guard = if scheduled {
@@ -844,6 +915,22 @@ async fn execute_turn(
     } else {
         None
     };
+    let attachments_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("attachments");
+    let attachment_refs: Vec<serde_json::Value> = attachments
+        .iter()
+        .map(|attachment| {
+            serde_json::json!({
+                "type": "attachment",
+                "id": attachment.id,
+                "name": attachment.name,
+                "kind": attachment.kind,
+            })
+        })
+        .collect();
     let mut messages = if record.settings.provider_id == settings.provider_id
         && record.settings.base_url == base_url
     {
@@ -870,6 +957,10 @@ async fn execute_turn(
             api_key: &api_key,
             mode,
             search: search.as_ref(),
+            kind: record.kind,
+            attachments: &attachment_refs,
+            attachments_root: &attachments_root,
+            session_id: &session_id,
         },
         &mut messages,
         &prompt,
@@ -983,6 +1074,7 @@ async fn run_due_schedule(app: tauri::AppHandle, schedule: Schedule) {
                     approval_policy: schedule.approval_policy,
                     scheduled: true,
                     expected_search: Some(schedule.search_settings.clone()),
+                    attachments: Vec::new(),
                 },
             )
             .await
@@ -1108,6 +1200,7 @@ pub fn run() {
             load_provider_settings,
             save_provider_settings,
             start_turn,
+            add_attachments,
             stop_turn,
             ask_btw
         ])

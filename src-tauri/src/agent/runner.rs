@@ -1,5 +1,7 @@
 use super::{dispatch_tool_with_checkpoint, tool_definitions, Approval, Mode};
+use crate::attachments;
 use crate::provider;
+use crate::sessions::SessionKind;
 use crate::search::{self, SearchConfig};
 use serde_json::{json, Value};
 use std::future::Future;
@@ -12,6 +14,12 @@ pub struct RunConfig<'a> {
     pub api_key: &'a str,
     pub mode: Mode,
     pub search: Option<&'a SearchConfig>,
+    pub kind: SessionKind,
+    /// Attachment references for the message being sent, stored in history.
+    pub attachments: &'a [Value],
+    /// Root of the attachment copies; empty for Code sessions.
+    pub attachments_root: &'a Path,
+    pub session_id: &'a str,
 }
 
 #[derive(Debug)]
@@ -60,18 +68,41 @@ where
     C: FnMut(&Approval) -> Result<(), String>,
     P: FnMut(&[Value]) -> Result<(), String>,
 {
-    history.push(json!({"role":"user","content":prompt}));
+    let content = if config.attachments.is_empty() {
+        json!(prompt)
+    } else {
+        let mut blocks = vec![json!({"type":"text","text":prompt})];
+        blocks.extend(config.attachments.iter().cloned());
+        Value::Array(blocks)
+    };
+    history.push(json!({"role":"user","content":content}));
     persist(history)?;
-    let tools = tool_definitions(config.mode, config.search.is_some());
-    let mode_instruction = match config.mode {
-        Mode::Plan => "Plan mode: inspect the workspace and explain a plan. File mutations are unavailable.",
-        Mode::Act => "Act mode: complete the user's task using the available tools. File writes require user approval.",
+    let tools = tool_definitions(config.kind, config.mode, config.search.is_some());
+    let mode_instruction = match config.kind {
+        SessionKind::Work => {
+            "Answer the user's question directly. You cannot read their disk; work only from the \
+             message and the files they attach."
+        }
+        SessionKind::Code => match config.mode {
+            Mode::Plan => "Plan mode: inspect the workspace and explain a plan. File mutations are unavailable.",
+            Mode::Act => "Act mode: complete the user's task using the available tools. File writes require user approval.",
+        },
+    };
+    let persona = match config.kind {
+        SessionKind::Work => "You are Moderado, a helpful assistant.",
+        SessionKind::Code => "You are Moderado, a coding agent. Use relative workspace paths with tools.",
     };
     for _ in 0..8 {
         let mut messages = vec![
-            json!({"role":"system","content":format!("You are Moderado, a coding agent. Use relative workspace paths with tools. Report tool errors honestly. {mode_instruction}")}),
+            json!({"role":"system","content":format!("{persona} Report tool errors honestly. {mode_instruction}")}),
         ];
-        messages.extend(history.iter().cloned());
+        // Attachment blocks are references; expand them into text or image
+        // parts only here, so history stays small.
+        messages.extend(attachments::expand_history(
+            config.attachments_root,
+            config.session_id,
+            history,
+        ));
         let completion = provider::chat_completion(
             config.base_url,
             config.model,
@@ -112,6 +143,7 @@ where
             } else {
                 dispatch_tool_with_checkpoint(
                     config.workspace,
+                    config.kind,
                     config.mode,
                     &call,
                     &mut approve,
@@ -206,6 +238,10 @@ mod tests {
                 api_key: "",
                 mode: Mode::Act,
                 search: None,
+                kind: SessionKind::Code,
+                attachments: &[],
+                attachments_root: root.path(),
+                session_id: "test-session",
             },
             &mut history,
             "Create hello.txt",
@@ -257,6 +293,10 @@ mod tests {
                 api_key: "",
                 mode: Mode::Act,
                 search: None,
+                kind: SessionKind::Code,
+                attachments: &[],
+                attachments_root: root.path(),
+                session_id: "test-session",
             },
             &mut history,
             "Write a.txt",
@@ -302,6 +342,10 @@ mod tests {
                 api_key: "",
                 mode: Mode::Plan,
                 search: None,
+                kind: SessionKind::Code,
+                attachments: &[],
+                attachments_root: root.path(),
+                session_id: "test-session",
             },
             &mut history,
             "Plan a change",
@@ -370,6 +414,10 @@ mod tests {
                     api_key: "",
                     mode: Mode::Act,
                     search: None,
+                    kind: SessionKind::Code,
+                    attachments: &[],
+                    attachments_root: root.path(),
+                    session_id: "test-session",
                 },
                 &mut history,
                 "Create m2.txt",
@@ -436,6 +484,10 @@ mod tests {
                 api_key: "",
                 mode: Mode::Act,
                 search: None,
+                kind: SessionKind::Code,
+                attachments: &[],
+                attachments_root: &workspace,
+                session_id: "test-session",
             },
             &mut history,
             "Change file.txt",
@@ -543,6 +595,10 @@ mod tests {
                 api_key: "",
                 mode: Mode::Act,
                 search: None,
+                kind: SessionKind::Code,
+                attachments: &[],
+                attachments_root: &workspace,
+                session_id: "test-session",
             },
             &mut history,
             &due[0].prompt,

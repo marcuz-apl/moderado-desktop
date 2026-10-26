@@ -83,3 +83,13 @@
 - `SessionStore`, `ScheduleStore`, and `SearchStore` no longer carry DDL; they open through `db::open`, which migrates once, and `db::connect`, which does not.
 - Provider settings stay in `~/.moderado/config.json`. `$HOME` and `%USERPROFILE%` resolve to the same user folder, so the path is already correct on every platform; the code now documents that the location is deliberate.
 - `cargo test --lib -- --test-threads=1`: 61 tests passed, including a fresh-database migration, a pre-versioning database that gains `kind` while keeping its rows, and an idempotent second open.
+
+## Work and Code Modes with Attachments
+
+- Added the Work/Code switch at the top of the Sessions panel. It filters the list and decides what **New session** creates; selecting a session of the other kind moves the switch.
+- Work sessions get a private scratch folder under app-data instead of a folder picker, so every session still has a jailed root. The Workspace, Checkpoints, and Source Control icons, the Plan/Act selector, and the workspace context line are hidden while a Work session is active.
+- Gated the tool surface by kind: a Work session is offered only `web_search`, and `dispatch_tool` rejects every file tool with `Work sessions have no file access` before it can reach the workspace. The write tools are now added only for Code sessions.
+- Added `attachments.rs`: the composer's Attach button copies the chosen files into `<app-data>/attachments/<session>/`, rejecting anything over 256 KiB of text, 5 MB per image, 10 files, or 20 MB per message, and anything that is neither UTF-8 text nor a supported image. Deleting a session removes its copies.
+- History stores an attachment reference block, expanded into text or an `image_url` data part only when the provider call is built, so `history_json` never carries base64. A missing copy degrades to a note instead of failing the turn.
+- Migration 3 adds the `attachments` table; `cargo test --lib` covers the migration, the store caps, the expansion, the missing-file case, and the dispatch gate.
+- Browser checks: a Work session hides three activity icons, Plan/Act, and the workspace line; chips render for two attached files; selecting a Code session restores every control. `npm test` frontend suites: 11 passed.

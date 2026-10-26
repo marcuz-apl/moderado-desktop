@@ -1,16 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
+import { needsWorkspacePicker, visibleSessions, type SessionKind } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
+type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
 type HistoryMessage = { role: string; content?: string };
-type SessionSummary = { id: string; name: string; workspace: string; settings: ProviderSettings; updatedAt: number };
+type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string };
 type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done' | 'cancelled'; session_id: string; value?: string };
@@ -45,6 +48,8 @@ const endpoint = $<HTMLInputElement>('endpoint');
 const keyField = $<HTMLInputElement>('api-key');
 const keyApplyLink = $<HTMLAnchorElement>('apply-key-link');
 const themeToggle = $<HTMLButtonElement>('theme-toggle');
+const attachButton = $<HTMLButtonElement>('attach-files');
+const attachmentChips = $<HTMLDivElement>('attachment-chips');
 const approvalDialog = $<HTMLDialogElement>('approval-dialog');
 const restoreDialog = $<HTMLDialogElement>('restore-dialog');
 const scheduleDialog = $<HTMLDialogElement>('schedule-dialog');
@@ -52,6 +57,8 @@ const importDialog = $<HTMLDialogElement>('import-dialog');
 const emptyState = $('empty-state').cloneNode(true);
 
 let providers: ProviderPreset[] = [];
+let activeKind: SessionKind = 'code';
+let pendingAttachments: AttachmentRecord[] = [];
 let initialized = false;
 let creatingSession = false;
 let activeProvider: ProviderId = 'moderado';
@@ -252,7 +259,7 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
 
 function renderSessions(): void {
   const list = $('session-list');
-  list.replaceChildren(...summaries.map((session) => {
+  list.replaceChildren(...visibleSessions(summaries, activeKind).map((session) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
@@ -261,6 +268,65 @@ function renderSessions(): void {
     button.addEventListener('click', () => { void selectSession(session.id); });
     return button;
   }));
+}
+
+const HIDDEN_IN_WORK = ['workspace', 'checkpoints', 'source-control'];
+
+function applyKindUi(): void {
+  const work = activeKind === 'work';
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.activity-button'))) {
+    if (HIDDEN_IN_WORK.includes(button.dataset.panel ?? '')) button.hidden = work;
+  }
+  document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
+  attachButton.toggleAttribute('hidden', !work);
+  attachButton.disabled = !work || !activeSessionId;
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-session-kind]'))) {
+    const selected = button.dataset.sessionKind === activeKind;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  }
+  document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
+  prompt.placeholder = work ? 'Ask anything…' : 'What should the agent work on?';
+  const emptyCopy = document.getElementById('empty-state-copy');
+  if (emptyCopy) {
+    emptyCopy.textContent = work
+      ? 'Ask anything. Attach text files or images and the assistant reads only those; it never browses your disk.'
+      : 'Choose a model and send a task. Your first message creates a session folder in Documents automatically. Act mode asks before every write.';
+  }
+  $('workspace-button').textContent = work ? '+ New Work session' : '+ New session';
+  if (work && HIDDEN_IN_WORK.includes(document.querySelector<HTMLElement>('.sidebar-panel.active')?.dataset.panelContent ?? '')) {
+    document.querySelector<HTMLButtonElement>('[data-panel="sessions"]')?.click();
+  }
+  if (!work) {
+    pendingAttachments = [];
+    renderChips();
+  }
+}
+
+function setKind(kind: SessionKind): void {
+  activeKind = kind;
+  applyKindUi();
+  renderSessions();
+}
+
+function renderChips(): void {
+  attachmentChips.replaceChildren(...pendingAttachments.map((attachment) => {
+    const chip = document.createElement('span');
+    chip.className = 'attachment-chip';
+    chip.textContent = attachment.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'chip-remove';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `Remove ${attachment.name}`);
+    remove.addEventListener('click', () => {
+      pendingAttachments = pendingAttachments.filter((item) => item.id !== attachment.id);
+      renderChips();
+    });
+    chip.append(remove);
+    return chip;
+  }));
+  attachmentChips.toggleAttribute('hidden', pendingAttachments.length === 0);
 }
 
 async function refreshSummaries(): Promise<void> {
@@ -280,6 +346,7 @@ async function refreshSession(id: string, replaceView = false): Promise<SessionR
 async function selectSession(id: string): Promise<void> {
   const record = await refreshSession(id);
   activeSessionId = id;
+  if (record.kind !== activeKind) setKind(record.kind);
   applySessionSettings(record.settings);
   mode = modeBySession.get(id) ?? 'act';
   setMode(mode);
@@ -307,6 +374,7 @@ async function selectSession(id: string): Promise<void> {
 }
 
 function updateControls(): void {
+  applyKindUi();
   const busy = activeSessionId ? running.has(activeSessionId) : false;
   send.disabled = !canSend(initialized, busy || creatingSession);
   stop.hidden = !busy;
@@ -659,6 +727,28 @@ async function initialize(): Promise<void> {
 }
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
+
+for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-session-kind]'))) {
+  button.addEventListener('click', () => setKind((button.dataset.sessionKind ?? 'code') as SessionKind));
+}
+
+attachButton.addEventListener('click', async () => {
+  if (!activeSessionId) {
+    setStatus('Send one message first so the Work session exists, then attach files.');
+    return;
+  }
+  try {
+    const picked = await open({ multiple: true, title: 'Attach files' });
+    if (!picked) return;
+    const paths = Array.isArray(picked) ? picked : [picked];
+    const records = await invoke<AttachmentRecord[]>('add_attachments', { sessionId: activeSessionId, paths });
+    pendingAttachments = [...pendingAttachments, ...records];
+    renderChips();
+    setStatus(`${pendingAttachments.length} file(s) attached.`);
+  } catch (error) {
+    setStatus(String(error));
+  }
+});
 keyApplyLink.addEventListener('click', async (event) => {
   event.preventDefault();
   const url = keyApplyLink.href;
@@ -729,13 +819,13 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
 
-async function createSession(settings: ProviderSettings, chooseWorkspace = false): Promise<string> {
+async function createSession(settings: ProviderSettings, chooseWorkspace = needsWorkspacePicker(activeKind), kind: SessionKind = activeKind): Promise<string> {
   if (!initialized) throw new Error('Session setup is still loading.');
   if (creatingSession) throw new Error('Session setup is already in progress.');
   creatingSession = true;
   updateControls();
   try {
-    const record = await invoke<SessionRecord>(chooseWorkspace ? 'create_session' : 'create_default_session', { settings });
+    const record = await invoke<SessionRecord>(chooseWorkspace ? 'create_session' : 'create_default_session', { settings, kind });
     sessions.set(record.id, record);
     views.set(record.id, []);
     await refreshSummaries();
@@ -749,7 +839,7 @@ async function createSession(settings: ProviderSettings, chooseWorkspace = false
 }
 
 $('workspace-button').addEventListener('click', async () => {
-  try { await createSession(currentSettings(), true); }
+  try { await createSession(currentSettings(), needsWorkspacePicker(activeKind)); }
   catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
 });
 
@@ -1009,7 +1099,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     return;
   }
   const settings = currentSettings();
-  const turnMode = mode;
+  const turnMode = activeKind === 'work' ? 'act' : mode;
   const model = turnMode === 'plan' ? settings.planModel : settings.actModel;
   const sideQuestion = btw ? text.replace(/^\/btw\s*/i, '').trim() : '';
   if (!text || !settings.baseUrl || (btw ? !settings.planModel : !model)) { setStatus('Enter an endpoint, choose a model, and enter a task.'); return; }
@@ -1041,10 +1131,21 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
       addDisplay(id, 'System', 'New conversation started for the selected provider and URL.');
     }
     conversationBindings.set(id, binding(settings));
-    addDisplay(id, 'You', text);
+    const sent = pendingAttachments;
+    addDisplay(id, 'You', sent.length ? `${text}\n\n[${sent.map((item) => item.name).join(', ')}]` : text);
     prompt.value = '';
+    if (sent.length) {
+      pendingAttachments = [];
+      renderChips();
+    }
     if (id === activeSessionId) setStatus('Agent is working…');
-    await invoke('start_turn', { sessionId: id, settings, mode: turnMode, prompt: text });
+    await invoke('start_turn', {
+      sessionId: id,
+      settings,
+      mode: turnMode,
+      prompt: text,
+      attachments: sent.map(({ id: attachmentId, name, kind }) => ({ id: attachmentId, name, kind })),
+    });
   } catch (error) {
     const detail = String(error);
     if (!detail.includes('stopped by user')) addDisplay(id, 'Error', detail);

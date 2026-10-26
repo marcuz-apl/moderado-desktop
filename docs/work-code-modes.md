@@ -47,6 +47,7 @@ Limits for the first cut: 256 KiB per text file (the same bound the workspace re
 
 ## Data model
 
+- Migration 3 adds the `attachments` table (`id`, `session_id`, `name`, `kind`, `bytes`, `created_at`), so a session's copies are enumerable and cascade away with it.
 - `SessionRecord` and `SessionSummary` gain `kind: SessionKind` (`work` | `code`), serialized as `kind`.
 - SQLite: schema changes go through `db.rs`, which owns every table and records the applied version in `PRAGMA user_version`. Version 1 is the schema as it shipped before versioning, written with `IF NOT EXISTS` and a column repair for databases older than that; version 2 adds `sessions.kind` with `DEFAULT 'code'`, so every existing session becomes Code, which is exactly today's behaviour. The three stores no longer carry DDL of their own.
 - `workspace` stays `NOT NULL`. A Work session gets an app-data scratch root (`<app-data>/work/<session-id>`) that is never shown and never exposed as a tool root. This keeps one invariant — every session has a jailed root — so checkpoints, the project tree, and source control need no nullable-path branch.
@@ -85,8 +86,10 @@ Limits for the first cut: 256 KiB per text file (the same bound the workspace re
 
 ## Rollout
 
-Status: step 1 is partly done — `db.rs` migrations, `SessionKind`, and the record and summary fields
-have shipped; the scratch root has not. Steps 2 to 5 are not started.
+Status: steps 1 to 4 have shipped — migrations 2 and 3, `SessionKind`, the Work scratch root, the
+dispatch gate, the Work/Code switch with hidden panels, and the composer attachment picker. Step 5
+is partly done: the docs are updated, the schedule dialog still offers a write-approval choice that
+means nothing in a Work session.
 
 1. Schema migration, `SessionKind`, record and summary fields, scratch root. No behaviour change; all tests still pass.
 2. Tool gating and dispatch rejection for Work sessions, with tests. No UI yet.

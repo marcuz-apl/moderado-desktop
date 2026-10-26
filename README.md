@@ -12,6 +12,7 @@ M4 supports multiple persistent sessions, one-time and repeating task schedules,
 
 - **Parallel sessions**: run multiple isolated agent sessions concurrently, each bound to its own workspace folder and provider/model.
 - **Plan/Act dual mode**: Plan mode is strictly read-only; Act mode enables mutating tools. Each mode can use a different model.
+- **Work and Code modes**: Work answers general questions with no project folder — you attach the text files and images it may read, and it never browses the disk. Code is the workspace-bound agent with Plan/Act, approvals, and checkpoints.
 - **Appearance**: a sun/moon button beside the Plan/Act selector switches the theme. Until you click it, the theme follows local time — light from 07:00 to 18:59 — and re-checks while the app is open; after you choose, that choice sticks.
 - **Human-in-the-loop approval**: manual file writes and edits require explicit approval with a diff preview. Scheduled Act tasks can use an explicit auto-write preset.
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.

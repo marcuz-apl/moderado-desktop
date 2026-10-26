@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -119,6 +119,29 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
         // sessions are all Code.
         add_column_if_missing(&tx, "sessions", "kind", "TEXT NOT NULL DEFAULT 'code'")?;
         tx.pragma_update(None, "user_version", 2)
+            .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        version = 2;
+    }
+
+    if version < 3 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        // One row per file the user attached. The bytes live on disk under the
+        // app-data attachments folder; this table is what makes them
+        // discoverable, replayable, and deletable with their session.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT NOT NULL,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('text','image')),
+                bytes INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(session_id, id)
+            );",
+        )
+        .map_err(|error| format!("Could not create attachments: {error}"))?;
+        tx.pragma_update(None, "user_version", 3)
             .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
     }

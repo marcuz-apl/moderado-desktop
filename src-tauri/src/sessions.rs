@@ -8,6 +8,27 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// A Work session keeps a private scratch folder so every session still has a
+/// jailed root, even though the user never sees or chooses it.
+pub fn create_scratch_workspace(base: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(base)
+        .map_err(|error| format!("Could not create the Work folder: {error}"))?;
+    for number in 0..=u32::MAX {
+        let name = if number == 0 {
+            "Work".to_string()
+        } else {
+            format!("Work {number}")
+        };
+        let path = base.join(name);
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Could not create the Work folder: {error}")),
+        }
+    }
+    Err("Could not find a free Work folder name".into())
+}
+
 pub fn create_default_workspace(documents: &Path) -> Result<PathBuf, String> {
     let root = documents.join("Moderado-Desktop");
     std::fs::create_dir_all(&root)
@@ -237,6 +258,24 @@ impl SessionStore {
             return Err("Session not found".into());
         }
         Ok(())
+    }
+
+    /// Records the attachment copies already written to disk. The foreign key
+    /// cascades, so deleting a session forgets its attachments.
+    pub fn add_attachments(&self, records: &[crate::attachments::AttachmentRecord]) -> Result<(), String> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let mut db = self.connect()?;
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        for record in records {
+            tx.execute(
+                "INSERT INTO attachments (id,session_id,name,kind,bytes,created_at) VALUES (?1,?2,?3,?4,?5,?6)",
+                params![record.id, record.session_id, record.name, record.kind.as_str(), record.bytes, now()],
+            )
+            .map_err(|error| format!("Could not record the attachment: {error}"))?;
+        }
+        tx.commit().map_err(|error| error.to_string())
     }
 
     pub fn save_state(

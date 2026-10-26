@@ -1,4 +1,5 @@
 use crate::provider::ToolCall;
+use crate::sessions::SessionKind;
 use crate::workspace;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -21,16 +22,22 @@ pub struct Approval {
     pub after: String,
 }
 
-pub fn tool_definitions(mode: Mode, web_search: bool) -> Vec<Value> {
-    let mut tools = vec![
+pub fn tool_definitions(kind: SessionKind, mode: Mode, web_search: bool) -> Vec<Value> {
+    // A Work session has no workspace tools at all: the user hands it files,
+    // it never browses the disk.
+    let mut tools = if matches!(kind, SessionKind::Work) {
+        Vec::new()
+    } else {
+        vec![
         json!({"type":"function","function":{"name":"list_files","description":"List direct children of a workspace directory","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a UTF-8 file in the workspace","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"search_files","description":"Search UTF-8 workspace files for a literal text query","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
-    ];
+        ]
+    };
     if web_search {
         tools.push(json!({"type":"function","function":{"name":"web_search","description":"Search the configured web search API","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}));
     }
-    if matches!(mode, Mode::Act) {
+    if matches!(kind, SessionKind::Code) && matches!(mode, Mode::Act) {
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
     }
@@ -39,6 +46,7 @@ pub fn tool_definitions(mode: Mode, web_search: bool) -> Vec<Value> {
 
 pub async fn dispatch_tool<F, Fut>(
     root: &Path,
+    kind: SessionKind,
     mode: Mode,
     call: &ToolCall,
     approve: F,
@@ -47,11 +55,12 @@ where
     F: FnOnce(Approval) -> Fut,
     Fut: Future<Output = Option<String>>,
 {
-    dispatch_tool_with_checkpoint(root, mode, call, approve, |_| Ok(())).await
+    dispatch_tool_with_checkpoint(root, kind, mode, call, approve, |_| Ok(())).await
 }
 
 pub async fn dispatch_tool_with_checkpoint<F, Fut, C>(
     root: &Path,
+    kind: SessionKind,
     mode: Mode,
     call: &ToolCall,
     approve: F,
@@ -62,6 +71,11 @@ where
     Fut: Future<Output = Option<String>>,
     C: FnOnce(&Approval) -> Result<(), String>,
 {
+    // Structural, not prompt-based: a Work session that receives a file tool
+    // call fails here even if the model invented the call.
+    if matches!(kind, SessionKind::Work) {
+        return Err("Work sessions have no file access".into());
+    }
     if matches!(call.name.as_str(), "write_file" | "edit_file") && matches!(mode, Mode::Plan) {
         return Err("Plan mode blocks file writes".into());
     }
@@ -158,7 +172,7 @@ mod tests {
     #[test]
     fn web_search_is_advertised_only_when_configured() {
         let has_search = |enabled| {
-            tool_definitions(Mode::Plan, enabled)
+            tool_definitions(SessionKind::Code, Mode::Plan, enabled)
                 .iter()
                 .any(|tool| tool["function"]["name"] == "web_search")
         };
@@ -174,7 +188,7 @@ mod tests {
             name: "write_file".into(),
             arguments: r#"{"path":"a.txt","content":"new"}"#.into(),
         };
-        let result = dispatch_tool(root.path(), Mode::Plan, &call, |_| async {
+        let result = dispatch_tool(root.path(), SessionKind::Code, Mode::Plan, &call, |_| async {
             panic!("approval must not be requested")
         })
         .await;
@@ -190,7 +204,7 @@ mod tests {
             name: "write_file".into(),
             arguments: r#"{"path":"a.txt","content":"new"}"#.into(),
         };
-        let result = dispatch_tool(root.path(), Mode::Act, &call, |preview| async move {
+        let result = dispatch_tool(root.path(), SessionKind::Code, Mode::Act, &call, |preview| async move {
             assert_eq!(preview.before, "old");
             assert_eq!(preview.after, "new");
             None
@@ -211,7 +225,7 @@ mod tests {
             name: "write_file".into(),
             arguments: r#"{"path":"src/a.txt","content":"new"}"#.into(),
         };
-        dispatch_tool(root.path(), Mode::Act, &call, |_| async {
+        dispatch_tool(root.path(), SessionKind::Code, Mode::Act, &call, |_| async {
             Some("new".into())
         })
         .await
@@ -230,7 +244,7 @@ mod tests {
             name: "write_file".into(),
             arguments: r#"{"path":"a.txt","content":"draft"}"#.into(),
         };
-        dispatch_tool(root.path(), Mode::Act, &call, |_| async {
+        dispatch_tool(root.path(), SessionKind::Code, Mode::Act, &call, |_| async {
             Some("reviewed".into())
         })
         .await
@@ -251,7 +265,7 @@ mod tests {
             name: "write_file".into(),
             arguments: r#"{"path":"a.txt","content":"proposal"}"#.into(),
         };
-        let result = dispatch_tool(root.path(), Mode::Act, &call, |_| async {
+        let result = dispatch_tool(root.path(), SessionKind::Code, Mode::Act, &call, |_| async {
             fs::write(&path, "external change").unwrap();
             Some("proposal".into())
         })
@@ -271,7 +285,7 @@ mod tests {
             name: "edit_file".into(),
             arguments: r#"{"path":"a.txt","old_text":"needle","new_text":"thread"}"#.into(),
         };
-        dispatch_tool(root.path(), Mode::Act, &call, |preview| async move {
+        dispatch_tool(root.path(), SessionKind::Code, Mode::Act, &call, |preview| async move {
             assert_eq!(preview.after, "before thread after");
             Some(preview.after)
         })
@@ -291,7 +305,7 @@ mod tests {
             name: "edit_file".into(),
             arguments: "{}".into(),
         };
-        let result = dispatch_tool(root.path(), Mode::Plan, &call, |_| async {
+        let result = dispatch_tool(root.path(), SessionKind::Code, Mode::Plan, &call, |_| async {
             panic!("approval must not be requested")
         })
         .await;
@@ -306,10 +320,45 @@ mod tests {
             name: "run_command".into(),
             arguments: "{}".into(),
         };
-        assert!(dispatch_tool(root.path(), Mode::Act, &call, |_| async {
+        assert!(dispatch_tool(root.path(), SessionKind::Code, Mode::Act, &call, |_| async {
             Some(String::new())
         })
         .await
         .is_err());
+    }
+
+    #[test]
+    fn work_sessions_get_no_file_tools() {
+        let names: Vec<String> = tool_definitions(SessionKind::Work, Mode::Act, true)
+            .iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, vec!["web_search".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn work_sessions_reject_file_calls_at_dispatch() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.txt"), "hello").unwrap();
+        for (name, arguments) in [
+            ("read_file", r#"{"path":"a.txt"}"#),
+            ("list_files", r#"{"path":"."}"#),
+            ("search_files", r#"{"query":"hello"}"#),
+            ("write_file", r#"{"path":"b.txt","content":"x"}"#),
+        ] {
+            let call = ToolCall {
+                id: "1".into(),
+                name: name.into(),
+                arguments: arguments.into(),
+            };
+            let result = dispatch_tool(root.path(), SessionKind::Work, Mode::Act, &call, |_| async {
+                Some(String::new())
+            })
+            .await;
+            assert!(
+                result.unwrap_err().contains("no file access"),
+                "{name} should be blocked"
+            );
+        }
     }
 }
