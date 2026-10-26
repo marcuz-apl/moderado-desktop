@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_SESSION_KIND, needsWorkspacePicker, newSessionLabel, nextSessionKind, profileModeDescription, projectNameFromWorkspace, scheduleWriteApprovalChoiceVisible, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, newSessionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -30,6 +30,26 @@ test('new session action names the selected session kind', () => {
   assert.equal(newSessionLabel('code'), '+ New Code session');
 });
 
+test('sidebar defaults and available panels follow the selected mode', () => {
+  assert.equal(defaultPanelForKind('work'), 'tasks');
+  assert.equal(defaultPanelForKind('code'), 'projects');
+  assert.equal(panelAvailableForKind('tasks', 'work'), true);
+  assert.equal(panelAvailableForKind('projects', 'work'), false);
+  assert.equal(panelAvailableForKind('sessions', 'work'), false);
+  assert.equal(panelAvailableForKind('workspace', 'work'), false);
+  assert.equal(panelAvailableForKind('tasks', 'code'), false);
+  assert.equal(panelAvailableForKind('projects', 'code'), true);
+  assert.equal(panelAvailableForKind('sessions', 'code'), true);
+  assert.equal(panelAvailableForKind('workspace', 'code'), true);
+  assert.equal(panelAvailableForKind('schedules', 'work'), true);
+});
+
+test('new action captions match the selected sidebar panel', () => {
+  assert.equal(newActionLabel('tasks'), 'New Task');
+  assert.equal(newActionLabel('projects'), 'New Project');
+  assert.equal(newActionLabel('sessions'), 'New Session');
+});
+
 test('Work profile does not require a GitHub account', () => {
   assert.match(profileModeDescription('work'), /not required/i);
   assert.match(profileModeDescription('code'), /optional GitHub account/i);
@@ -39,6 +59,32 @@ test('Explorer root uses the project folder name on Windows and Unix paths', () 
   assert.equal(projectNameFromWorkspace('C:\\Users\\me\\Documents\\my-project', 'Session label'), 'my-project');
   assert.equal(projectNameFromWorkspace('/home/me/code/my-project/', 'Session label'), 'my-project');
   assert.equal(projectNameFromWorkspace('', 'Session label'), 'Session label');
+});
+
+test('projects group Code sessions by workspace and exclude Work sessions', () => {
+  const grouped = projectsForSessions([
+    { id: 'w1', name: 'Work task', workspace: '/docs/work-session0', kind: 'work', updatedAt: 9 },
+    { id: 'c1', name: 'First', workspace: 'C:\\code\\alpha', kind: 'code', updatedAt: 10 },
+    { id: 'c2', name: 'Second', workspace: 'C:\\code\\alpha', kind: 'code', updatedAt: 30 },
+    { id: 'c3', name: 'Third', workspace: '/home/me/beta', kind: 'code', updatedAt: 20 },
+  ]);
+
+  assert.deepEqual(grouped, [
+    { workspace: 'C:\\code\\alpha', name: 'alpha', sessionCount: 2, latestSessionId: 'c2', updatedAt: 30 },
+    { workspace: '/home/me/beta', name: 'beta', sessionCount: 1, latestSessionId: 'c3', updatedAt: 20 },
+  ]);
+});
+
+test('sessionsForProject only returns Code sessions in the selected workspace', () => {
+  const sessions = [
+    { id: 'w1', workspace: '/repo', kind: 'work' },
+    { id: 'c1', workspace: '/repo', kind: 'code' },
+    { id: 'c2', workspace: '/other', kind: 'code' },
+  ];
+
+  assert.deepEqual(sessionsForProject(sessions, '/repo').map((session) => session.id), ['c1']);
+  assert.deepEqual(sessionsForProject(sessions, '/unknown'), []);
+  assert.deepEqual(sessionsForProject(sessions, ''), []);
 });
 
 test('write approval choice is only available to Code sessions', () => {

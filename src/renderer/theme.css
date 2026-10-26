@@ -111,3 +111,5 @@
 :root[data-theme="light"] .kind-toggle{background:#dbeaec;border-color:#9db9c0}
 :root[data-theme="light"] .kind-toggle[aria-checked="true"]{background:#bee2dd;border-color:var(--light-accent)}
 :root[data-theme="light"] .kind-toggle-thumb{background:var(--light-accent)}
+
+:root[data-theme="light"] .empty-symbol{background:#14233a;border-color:transparent}

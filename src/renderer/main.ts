@@ -6,7 +6,7 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import { DEFAULT_SESSION_KIND, needsWorkspacePicker, newSessionLabel, nextSessionKind, profileModeDescription, projectNameFromWorkspace, scheduleWriteApprovalChoiceVisible, visibleSessions, type SessionKind } from './sessions-view';
+import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions, type SessionKind, type SidebarPanel } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -29,7 +29,6 @@ type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null
 type ProjectEntry = { name: string; path: string; isDir: boolean };
 type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
 type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
-type SidebarPanel = 'sessions' | 'workspace' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
 type GatewayMode = 'prod' | 'dev';
 
 const GATEWAY_URLS: Record<GatewayMode, string> = {
@@ -71,7 +70,8 @@ let mode: 'plan' | 'act' = 'act';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
-let activePanel: SidebarPanel | null = 'sessions';
+let activePanel: SidebarPanel | null = 'tasks';
+let selectedProjectWorkspace: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
 const expandedFolders = new Set<string>();
 let summaries: SessionSummary[] = [];
@@ -259,8 +259,7 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
 }
 
 function renderSessions(): void {
-  const list = $('session-list');
-  list.replaceChildren(...visibleSessions(summaries, activeKind).map((session) => {
+  const renderItems = (list: HTMLElement, items: SessionSummary[]) => list.replaceChildren(...items.map((session) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
@@ -269,9 +268,28 @@ function renderSessions(): void {
     button.addEventListener('click', () => { void selectSession(session.id); });
     return button;
   }));
+  renderItems($('task-list'), visibleSessions(summaries, 'work'));
+  const projects = projectsForSessions(summaries);
+  const projectList = $('project-list');
+  projectList.replaceChildren(...projects.map((project) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `session-item${project.workspace === selectedProjectWorkspace ? ' selected' : ''}`;
+    button.textContent = project.name;
+    button.title = `${project.workspace}\n${project.sessionCount} session${project.sessionCount === 1 ? '' : 's'}`;
+    const count = document.createElement('span');
+    count.className = 'project-session-count';
+    count.textContent = String(project.sessionCount);
+    button.append(count);
+    button.addEventListener('click', () => { void selectProject(project.workspace); });
+    return button;
+  }));
+  const projectSessions = selectedProjectWorkspace ? sessionsForProject(summaries, selectedProjectWorkspace) : [];
+  renderItems($('code-session-list'), projectSessions);
+  $('sessions-project-name').textContent = selectedProjectWorkspace
+    ? projectNameFromWorkspace(selectedProjectWorkspace, 'Project')
+    : 'Select a project';
 }
-
-const HIDDEN_IN_WORK = ['workspace', 'checkpoints', 'source-control'];
 
 function applyKindUi(): void {
   const work = activeKind === 'work';
@@ -280,7 +298,8 @@ function applyKindUi(): void {
   kindToggle.setAttribute('aria-label', `Session kind: ${work ? 'Work' : 'Code'}`);
   kindToggle.dataset.kind = activeKind;
   for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.activity-button'))) {
-    if (HIDDEN_IN_WORK.includes(button.dataset.panel ?? '')) button.hidden = work;
+    const panel = button.dataset.panel as SidebarPanel;
+    button.hidden = !panelAvailableForKind(panel, activeKind);
   }
   document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
   attachButton.toggleAttribute('hidden', !work);
@@ -293,13 +312,13 @@ function applyKindUi(): void {
       ? 'Ask anything. Attach text files or images and the assistant reads only those; it never browses your disk.'
       : 'Choose a model and send a task. Your first message creates a session folder in Documents automatically. Act mode asks before every write.';
   }
-  $('workspace-button').textContent = newSessionLabel(activeKind);
+  $('workspace-button').textContent = newActionLabel('tasks');
+  $('new-project').textContent = newActionLabel('projects');
+  $('new-code-session').textContent = newActionLabel('sessions');
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-work-content').toggleAttribute('hidden', !work);
   $('profile-code-content').toggleAttribute('hidden', work);
-  if (work && HIDDEN_IN_WORK.includes(document.querySelector<HTMLElement>('.sidebar-panel.active')?.dataset.panelContent ?? '')) {
-    document.querySelector<HTMLButtonElement>('[data-panel="sessions"]')?.click();
-  }
+  if (activePanel && !panelAvailableForKind(activePanel, activeKind)) switchPanel(defaultPanelForKind(activeKind));
   if (!work) {
     pendingAttachments = [];
     renderChips();
@@ -308,7 +327,9 @@ function applyKindUi(): void {
 
 function setKind(kind: SessionKind): void {
   activeKind = kind;
+  if (!panelAvailableForKind(activePanel ?? defaultPanelForKind(kind), kind)) activePanel = defaultPanelForKind(kind);
   applyKindUi();
+  switchPanel(activePanel ?? defaultPanelForKind(kind));
   renderSessions();
 }
 
@@ -349,7 +370,9 @@ async function refreshSession(id: string, replaceView = false): Promise<SessionR
 async function selectSession(id: string): Promise<void> {
   const record = await refreshSession(id);
   activeSessionId = id;
-  if (record.kind !== activeKind) setKind(record.kind);
+  if (record.kind !== activeKind) activeKind = record.kind;
+  if (record.kind === 'code') selectedProjectWorkspace = record.workspace;
+  applyKindUi();
   applySessionSettings(record.settings);
   mode = modeBySession.get(id) ?? 'act';
   setMode(mode);
@@ -493,6 +516,7 @@ function closePanel(): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
 }
 function switchPanel(panel: SidebarPanel): void {
+  if (!panelAvailableForKind(panel, activeKind)) panel = defaultPanelForKind(activeKind);
   activePanel = panel;
   document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
   document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
@@ -505,6 +529,14 @@ function switchPanel(panel: SidebarPanel): void {
   });
   if (activePanel === 'workspace') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
+}
+
+async function selectProject(workspace: string): Promise<void> {
+  selectedProjectWorkspace = workspace;
+  const project = projectsForSessions(summaries).find((item) => item.workspace === workspace);
+  renderSessions();
+  switchPanel('sessions');
+  if (project) await selectSession(project.latestSessionId);
 }
 
 async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
@@ -848,6 +880,34 @@ async function createSession(settings: ProviderSettings, chooseWorkspace = needs
 $('workspace-button').addEventListener('click', async () => {
   try { await createSession(currentSettings(), needsWorkspacePicker(activeKind)); }
   catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
+});
+
+$('new-project').addEventListener('click', async () => {
+  try {
+    if (activeKind !== 'code') setKind('code');
+    await createSession(currentSettings(), true, 'code');
+  } catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
+});
+
+$('new-code-session').addEventListener('click', async () => {
+  const source = selectedProjectWorkspace
+    ? sessionsForProject(summaries, selectedProjectWorkspace)[0]
+    : undefined;
+  if (!source) { setStatus('Choose a project before creating a session.'); return; }
+  try {
+    creatingSession = true;
+    updateControls();
+    const record = await invoke<SessionRecord>('create_session_in_project', {
+      sourceSessionId: source.id,
+      settings: currentSettings(),
+    });
+    sessions.set(record.id, record);
+    views.set(record.id, []);
+    await refreshSummaries();
+    await selectSession(record.id);
+    prompt.focus();
+  } catch (error) { setStatus(String(error)); }
+  finally { creatingSession = false; updateControls(); }
 });
 
 function localDateTime(date: Date): string {

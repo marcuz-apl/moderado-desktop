@@ -154,6 +154,9 @@ async fn create_session(
     if !path.is_dir() {
         return Err("Workspace must be a directory".into());
     }
+    if let Some(existing) = state.store.find_code_project_session(&path)? {
+        return Ok(existing);
+    }
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -161,6 +164,19 @@ async fn create_session(
     state
         .store
         .create_with_kind(&path, &name, settings, SessionKind::Code)
+}
+
+#[tauri::command]
+fn create_session_in_project(
+    state: tauri::State<'_, AppState>,
+    source_session_id: String,
+    settings: ProviderSettings,
+) -> Result<SessionRecord, String> {
+    state.store.create_session_in_project(
+        &source_session_id,
+        "New Session",
+        settings,
+    )
 }
 
 #[tauri::command]
@@ -1170,6 +1186,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_session,
+            create_session_in_project,
             create_default_session,
             list_sessions,
             get_session,

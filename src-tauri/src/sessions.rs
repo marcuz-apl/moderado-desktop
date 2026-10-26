@@ -190,6 +190,34 @@ impl SessionStore {
         Ok(record)
     }
 
+    pub fn create_session_in_project(
+        &self,
+        source_session_id: &str,
+        name: &str,
+        settings: ProviderSettings,
+    ) -> Result<SessionRecord, String> {
+        let source = self.get(source_session_id)?;
+        if source.kind != SessionKind::Code {
+            return Err("A Code session is required to create a session in a project".into());
+        }
+        self.create_with_kind(Path::new(&source.workspace), name, settings, SessionKind::Code)
+    }
+
+    pub fn find_code_project_session(
+        &self,
+        workspace: &Path,
+    ) -> Result<Option<SessionRecord>, String> {
+        let workspace = workspace
+            .canonicalize()
+            .map_err(|error| format!("Workspace unavailable: {error}"))?;
+        let workspace = workspace.to_string_lossy();
+        let existing = self
+            .list()?
+            .into_iter()
+            .find(|session| session.kind == SessionKind::Code && session.workspace == workspace);
+        existing.map(|session| self.get(&session.id)).transpose()
+    }
+
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
         let db = self.connect()?;
         let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind FROM sessions ORDER BY updated_at DESC, id DESC")
@@ -480,6 +508,59 @@ mod tests {
         assert_eq!(reopened.get(&second.id).unwrap().name, "Renamed");
         reopened.delete(&second.id).unwrap();
         assert_eq!(reopened.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn creates_code_session_in_project_from_existing_code_session() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("project");
+        std::fs::create_dir(&workspace).unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+        let source = store.create(&workspace, "Project", settings()).unwrap();
+
+        let created = store
+            .create_session_in_project(&source.id, "New Session", settings())
+            .unwrap();
+
+        assert_eq!(created.kind, SessionKind::Code);
+        assert_eq!(created.workspace, source.workspace);
+        assert_eq!(created.name, "New Session");
+    }
+
+    #[test]
+    fn rejects_work_session_as_project_session_source() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("work");
+        std::fs::create_dir(&workspace).unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+        let source = store
+            .create_with_kind(&workspace, "Task", settings(), SessionKind::Work)
+            .unwrap();
+
+        let error = store
+            .create_session_in_project(&source.id, "New Session", settings())
+            .unwrap_err();
+        assert!(error.contains("Code session"));
+        assert_eq!(store.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn finds_most_recent_code_session_for_project_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("project");
+        std::fs::create_dir(&workspace).unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+        let first = store.create(&workspace, "Project", settings()).unwrap();
+        let second = store
+            .create_session_in_project(&first.id, "New Session", settings())
+            .unwrap();
+
+        let found = store
+            .find_code_project_session(&workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.id, second.id);
+        assert_eq!(found.workspace, second.workspace);
     }
 
     #[test]
