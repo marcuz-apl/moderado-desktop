@@ -48,7 +48,7 @@ Limits for the first cut: 256 KiB per text file (the same bound the workspace re
 ## Data model
 
 - `SessionRecord` and `SessionSummary` gain `kind: SessionKind` (`work` | `code`), serialized as `kind`.
-- SQLite: the table is created with `CREATE TABLE IF NOT EXISTS`, so existing installs need an explicit migration. On open, if `PRAGMA table_info(sessions)` has no `kind` column, run `ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'code'`. Every existing session becomes Code, which is exactly today's behaviour.
+- SQLite: schema changes go through `db.rs`, which owns every table and records the applied version in `PRAGMA user_version`. Version 1 is the schema as it shipped before versioning, written with `IF NOT EXISTS` and a column repair for databases older than that; version 2 adds `sessions.kind` with `DEFAULT 'code'`, so every existing session becomes Code, which is exactly today's behaviour. The three stores no longer carry DDL of their own.
 - `workspace` stays `NOT NULL`. A Work session gets an app-data scratch root (`<app-data>/work/<session-id>`) that is never shown and never exposed as a tool root. This keeps one invariant — every session has a jailed root — so checkpoints, the project tree, and source control need no nullable-path branch.
 - A session's kind never changes after creation. The UI offers "start a Code session" instead of converting one.
 - Attachments are copied on pick into `<app-data>/attachments/<session-id>/<sha256>-<name>`. The copy is what gets read at send time, so a moved or deleted original cannot break a stored conversation, and nothing outside that folder is read later.

@@ -1,6 +1,6 @@
 use crate::provider::settings::ProviderSettings;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,12 +42,39 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionKind {
+    /// Answers general questions and reads only files the user attaches.
+    Work,
+    /// Bound to a project folder with autonomous file tools.
+    #[default]
+    Code,
+}
+
+impl SessionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Work => "work",
+            Self::Code => "code",
+        }
+    }
+
+    fn from_db(value: &str) -> Self {
+        match value {
+            "work" => Self::Work,
+            _ => Self::Code,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
     pub id: String,
     pub name: String,
     pub workspace: String,
+    pub kind: SessionKind,
     pub settings: ProviderSettings,
     pub history: Vec<Value>,
     pub updated_at: i64,
@@ -59,6 +86,7 @@ pub struct SessionSummary {
     pub id: String,
     pub name: String,
     pub workspace: String,
+    pub kind: SessionKind,
     pub settings: ProviderSettings,
     pub updated_at: i64,
 }
@@ -85,36 +113,12 @@ impl SessionStore {
                 .map_err(|error| format!("Could not create app data: {error}"))?;
         }
         let store = Self { path };
-        let db = store.connect()?;
-        db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                workspace TEXT NOT NULL,
-                settings_json TEXT NOT NULL,
-                history_json TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS checkpoints (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                git_ref TEXT NOT NULL,
-                path TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS checkpoints_session ON checkpoints(session_id, created_at DESC);",
-        ).map_err(|error| format!("Could not initialize session database: {error}"))?;
+        crate::db::open(&store.path)?;
         Ok(store)
     }
 
     fn connect(&self) -> Result<Connection, String> {
-        let db = Connection::open(&self.path)
-            .map_err(|error| format!("Could not open session database: {error}"))?;
-        db.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| error.to_string())?;
-        db.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|error| error.to_string())?;
-        Ok(db)
+        crate::db::connect(&self.path)
     }
 
     pub fn create(
@@ -122,6 +126,16 @@ impl SessionStore {
         workspace: &Path,
         name: &str,
         settings: ProviderSettings,
+    ) -> Result<SessionRecord, String> {
+        self.create_with_kind(workspace, name, settings, SessionKind::Code)
+    }
+
+    pub fn create_with_kind(
+        &self,
+        workspace: &Path,
+        name: &str,
+        settings: ProviderSettings,
+        kind: SessionKind,
     ) -> Result<SessionRecord, String> {
         let workspace = workspace
             .canonicalize()
@@ -134,21 +148,22 @@ impl SessionStore {
             id: new_id(),
             name: name.trim().to_owned(),
             workspace: workspace.to_string_lossy().into_owned(),
+            kind,
             settings,
             history: Vec::new(),
             updated_at: now(),
         };
         let db = self.connect()?;
         db.execute(
-            "INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at) VALUES (?1,?2,?3,?4,'[]',?5)",
-            params![record.id, record.name, record.workspace, serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at],
+            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at) VALUES (?1,?2,?3,?4,?5,'[]',?6)",
+            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at],
         ).map_err(|error| format!("Could not create session: {error}"))?;
         Ok(record)
     }
 
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
         let db = self.connect()?;
-        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at FROM sessions ORDER BY updated_at DESC, id DESC")
+        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind FROM sessions ORDER BY updated_at DESC, id DESC")
             .map_err(|error| error.to_string())?;
         let rows = query
             .query_map([], |row| {
@@ -158,11 +173,12 @@ impl SessionStore {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             })
             .map_err(|error| error.to_string())?;
         rows.map(|row| {
-            let (id, name, workspace, settings_json, updated_at) =
+            let (id, name, workspace, settings_json, updated_at, kind) =
                 row.map_err(|error| error.to_string())?;
             let settings = serde_json::from_str(&settings_json)
                 .map_err(|_| "Invalid saved provider settings")?;
@@ -170,6 +186,7 @@ impl SessionStore {
                 id,
                 name,
                 workspace,
+                kind: SessionKind::from_db(&kind),
                 settings,
                 updated_at,
             })
@@ -180,9 +197,9 @@ impl SessionStore {
     pub fn get(&self, id: &str) -> Result<SessionRecord, String> {
         let db = self.connect()?;
         let row = db.query_row(
-            "SELECT id,name,workspace,settings_json,history_json,updated_at FROM sessions WHERE id=?1",
+            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind FROM sessions WHERE id=?1",
             [id],
-            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?)),
+            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?)),
         ).optional().map_err(|error| error.to_string())?.ok_or("Session not found")?;
         Ok(SessionRecord {
             id: row.0,
@@ -192,6 +209,7 @@ impl SessionStore {
                 .map_err(|_| "Invalid saved provider settings")?,
             history: serde_json::from_str(&row.4).map_err(|_| "Invalid saved session history")?,
             updated_at: row.5,
+            kind: SessionKind::from_db(&row.6),
         })
     }
 

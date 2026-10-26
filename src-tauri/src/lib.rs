@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod checkpoints;
+pub mod db;
 pub mod provider;
 pub mod schedules;
 pub mod search;
@@ -597,6 +598,11 @@ async fn probe_local_providers() -> Vec<provider::LocalProviderStatus> {
     provider::probe_local_providers().await
 }
 
+/// Provider defaults live in a dotfile in the user's home folder, which is
+/// `$HOME` on macOS and Linux and `%USERPROFILE%` on Windows — the same folder
+/// in every case. The app handle is unused by design: this file deliberately
+/// sits beside the user rather than inside the platform app-data directory, so
+/// it can be inspected and edited by hand.
 fn settings_path(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     Ok(home.join(".moderado").join("config.json"))

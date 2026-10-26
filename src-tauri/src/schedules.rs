@@ -5,7 +5,7 @@ use crate::sessions::new_id;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -68,68 +68,12 @@ pub fn unix_now() -> i64 {
 impl ScheduleStore {
     pub fn open(path: PathBuf) -> Result<Self, String> {
         let store = Self { path };
-        store
-            .connect()?
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS schedules (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                prompt TEXT NOT NULL,
-                mode TEXT NOT NULL CHECK(mode IN ('plan','act')),
-                approval_policy TEXT NOT NULL CHECK(approval_policy IN ('prompt','auto_write')),
-                settings_json TEXT NOT NULL,
-                search_json TEXT NOT NULL,
-                next_run_at INTEGER NOT NULL,
-                interval_seconds INTEGER,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                in_flight INTEGER NOT NULL DEFAULT 0,
-                last_run_at INTEGER,
-                last_error TEXT
-            );
-            CREATE INDEX IF NOT EXISTS schedules_due ON schedules(enabled,next_run_at);",
-            )
-            .map_err(|error| format!("Could not initialize schedules: {error}"))?;
-        let db = store.connect()?;
-        let columns: Vec<String> = db
-            .prepare("PRAGMA table_info(schedules)")
-            .map_err(|error| error.to_string())?
-            .query_map([], |row| row.get(1))
-            .map_err(|error| error.to_string())?
-            .collect::<Result<_, _>>()
-            .map_err(|error| error.to_string())?;
-        let mut migrated = false;
-        if !columns.iter().any(|column| column == "settings_json") {
-            db.execute_batch("ALTER TABLE schedules ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'; UPDATE schedules SET settings_json=COALESCE((SELECT settings_json FROM sessions WHERE sessions.id=schedules.session_id),'{}');")
-                .map_err(|error| error.to_string())?;
-            migrated = true;
-        }
-        if !columns.iter().any(|column| column == "search_json") {
-            db.execute_batch(r#"ALTER TABLE schedules ADD COLUMN search_json TEXT NOT NULL DEFAULT '{"enabled":true,"endpoint":""}';"#)
-                .map_err(|error| error.to_string())?;
-            migrated = true;
-        }
-        if !columns.iter().any(|column| column == "in_flight") {
-            db.execute_batch(
-                "ALTER TABLE schedules ADD COLUMN in_flight INTEGER NOT NULL DEFAULT 0;",
-            )
-            .map_err(|error| error.to_string())?;
-            migrated = true;
-        }
-        if migrated {
-            db.execute("UPDATE schedules SET enabled=0,in_flight=0,last_error='Schedule settings changed during upgrade. Review and recreate this schedule.'", [])
-                .map_err(|error| error.to_string())?;
-        }
+        crate::db::open(&store.path)?;
         Ok(store)
     }
 
     fn connect(&self) -> Result<Connection, String> {
-        let db = Connection::open(&self.path)
-            .map_err(|error| format!("Could not open schedules: {error}"))?;
-        db.busy_timeout(Duration::from_secs(5))
-            .map_err(|error| error.to_string())?;
-        db.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|error| error.to_string())?;
-        Ok(db)
+        crate::db::connect(&self.path)
     }
 
     pub fn create(
@@ -455,7 +399,9 @@ mod tests {
             .create(root.path(), "Test", settings.clone())
             .unwrap();
         let db = Connection::open(&path).unwrap();
-        db.execute_batch("CREATE TABLE schedules (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,prompt TEXT NOT NULL,mode TEXT NOT NULL,approval_policy TEXT NOT NULL,settings_json TEXT NOT NULL,next_run_at INTEGER NOT NULL,interval_seconds INTEGER,enabled INTEGER NOT NULL,in_flight INTEGER NOT NULL,last_run_at INTEGER,last_error TEXT)").unwrap();
+        // Rewind to the pre-versioning schema: a schedules table without
+        // search_json and no recorded schema version.
+        db.execute_batch("DROP TABLE schedules; CREATE TABLE schedules (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,prompt TEXT NOT NULL,mode TEXT NOT NULL,approval_policy TEXT NOT NULL,settings_json TEXT NOT NULL,next_run_at INTEGER NOT NULL,interval_seconds INTEGER,enabled INTEGER NOT NULL,in_flight INTEGER NOT NULL,last_run_at INTEGER,last_error TEXT); PRAGMA user_version = 0;").unwrap();
         db.execute("INSERT INTO schedules(id,session_id,prompt,mode,approval_policy,settings_json,next_run_at,interval_seconds,enabled,in_flight) VALUES('old',?1,'Task','act','auto_write',?2,100,60,1,0)", params![session.id,serde_json::to_string(&settings).unwrap()]).unwrap();
         drop(db);
         let store = ScheduleStore::open(path).unwrap();

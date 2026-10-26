@@ -74,3 +74,12 @@
 - Added `npm run version:patch|minor|major` (scripts/bump-version.mjs), which moves the semver before a feature commit and mirrors the hook's single-digit rollover rules. The hook keeps the new semver and advances the counter.
 - The message-driven bump is impossible in one pass: git writes the commit message after `pre-commit` runs, and index changes made in `prepare-commit-msg` or `commit-msg` stay staged without reaching the commit. Verified against this git build, so `prepare-commit-msg` now prints a reminder when a feat commit kept the semver instead of failing it.
 - `npm test`: 58 Rust tests and 6 versioning tests passed offline.
+
+## Schema Migrations and Session Kind
+
+- Added `src-tauri/src/db.rs` as the single owner of the SQLite schema. Every table is created there, changes are numbered migrations recorded in `PRAGMA user_version`, and each migration runs in a transaction.
+- Migration 1 is the schema as it shipped before versioning, written with `IF NOT EXISTS` so an older database passes through unchanged. It also carries the former ad-hoc repair for `schedules.settings_json`, `search_json`, and `in_flight`, including the pause-and-review behaviour when a schedule predates those columns.
+- Migration 2 adds `sessions.kind` with `DEFAULT 'code'`, so existing sessions read back as Code. `SessionKind` (`work` | `code`) is now on `SessionRecord` and `SessionSummary`, and `SessionStore::create_with_kind` writes it.
+- `SessionStore`, `ScheduleStore`, and `SearchStore` no longer carry DDL; they open through `db::open`, which migrates once, and `db::connect`, which does not.
+- Provider settings stay in `~/.moderado/config.json`. `$HOME` and `%USERPROFILE%` resolve to the same user folder, so the path is already correct on every platform; the code now documents that the location is deliberate.
+- `cargo test --lib -- --test-threads=1`: 61 tests passed, including a fresh-database migration, a pre-versioning database that gains `kind` while keeping its rows, and an idempotent second open.

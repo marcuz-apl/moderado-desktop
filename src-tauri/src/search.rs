@@ -33,18 +33,12 @@ pub struct SearchStore {
 impl SearchStore {
     pub fn open(path: PathBuf) -> Result<Self, String> {
         let store = Self { path };
-        store.connect()?.execute_batch("CREATE TABLE IF NOT EXISTS search_settings (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, enabled INTEGER NOT NULL, endpoint TEXT NOT NULL)")
-            .map_err(|error| format!("Could not initialize search settings: {error}"))?;
+        crate::db::open(&store.path)?;
         Ok(store)
     }
 
     fn connect(&self) -> Result<Connection, String> {
-        let db = Connection::open(&self.path).map_err(|error| error.to_string())?;
-        db.busy_timeout(Duration::from_secs(5))
-            .map_err(|error| error.to_string())?;
-        db.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|error| error.to_string())?;
-        Ok(db)
+        crate::db::connect(&self.path)
     }
 
     pub fn get(&self, session_id: &str) -> Result<SearchSettings, String> {
