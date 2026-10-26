@@ -137,15 +137,7 @@ async fn create_session(
     kind: SessionKind,
 ) -> Result<SessionRecord, String> {
     if matches!(kind, SessionKind::Work) {
-        let base = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("work");
-        let workspace = sessions::create_scratch_workspace(&base)?;
-        return state
-            .store
-            .create_with_kind(&workspace, "Work", settings, SessionKind::Work);
+        return create_work_session_in_documents(&state.store, settings);
     }
     let (sender, receiver) = oneshot::channel();
     app.dialog().file().pick_folder(move |selection| {
@@ -173,21 +165,12 @@ async fn create_session(
 
 #[tauri::command]
 fn create_default_session(
-    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     settings: ProviderSettings,
     kind: SessionKind,
 ) -> Result<SessionRecord, String> {
     if matches!(kind, SessionKind::Work) {
-        let base = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("work");
-        let workspace = sessions::create_scratch_workspace(&base)?;
-        return state
-            .store
-            .create_with_kind(&workspace, "Work", settings, SessionKind::Work);
+        return create_work_session_in_documents(&state.store, settings);
     }
     let documents = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
@@ -201,6 +184,22 @@ fn create_default_session(
     state
         .store
         .create_with_kind(&workspace, &name, settings, SessionKind::Code)
+}
+
+fn create_work_session_in_documents(
+    store: &SessionStore,
+    settings: ProviderSettings,
+) -> Result<SessionRecord, String> {
+    let documents = dirs::document_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
+        .ok_or("Documents folder is unavailable")?;
+    let workspace = sessions::create_default_work_workspace(&documents)?;
+    let name = workspace
+        .file_name()
+        .ok_or("Work session folder has no name")?
+        .to_string_lossy()
+        .into_owned();
+    store.create_with_kind(&workspace, &name, settings, SessionKind::Work)
 }
 
 #[tauri::command]

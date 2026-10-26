@@ -93,3 +93,7 @@
 - History stores an attachment reference block, expanded into text or an `image_url` data part only when the provider call is built, so `history_json` never carries base64. A missing copy degrades to a note instead of failing the turn.
 - Migration 3 adds the `attachments` table; `cargo test --lib` covers the migration, the store caps, the expansion, the missing-file case, and the dispatch gate.
 - Browser checks: a Work session hides three activity icons, Plan/Act, and the workspace line; chips render for two attached files; selecting a Code session restores every control. `npm test` frontend suites: 11 passed.
+- The schedule dialog uses the selected session's kind: Work runs in Act mode and hides the write-approval choice and its hint; Code keeps both options.
+- Work now opens by default. If no Work session exists, startup creates and selects `Documents/Moderado-Desktop/work-session0`; later Work sessions receive the next available numbered folder.
+- The Sessions panel uses a single accessible Work/Code switch and labels the creation action for the selected mode. Workspace is labeled Projects, Source Control is labeled Git, the Profile panel distinguishes local Work profile from optional Code-mode GitHub identity, and Settings includes an About section with the full `VERSION+BUILD` value.
+- GitHub sign-in remains unconfigured until a GitHub App client ID is registered and supplied to the build.

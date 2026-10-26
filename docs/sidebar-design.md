@@ -33,11 +33,11 @@ For a Git repository whose root equals the selected workspace, show the current 
 
 ### Profile
 
-Show a local profile view with the current session and provider summary. Moderado has no account system, so the icon must not imply that a user is signed in or offer a dead sign-in control.
+Keep the Profile panel available in both modes. In Work mode, show a local profile and make clear that no GitHub account is needed. In Code mode, offer optional GitHub sign-in and show the connected account when available. Keep account credentials in the OS keychain. About information belongs in Settings and must describe the app independently of source-control hosting.
 
 ### Settings
 
-Group the existing Connection and Web Search controls under the bottom gear icon. Both sections retain their current validation, keychain handling, and per-session behavior. Navigating away must not silently discard typed provider drafts; secret input fields remain transient and are cleared after saving or changing sessions.
+Group Connection and Web Search controls under the bottom gear icon, followed by an About section with the app's version and build. Both existing settings sections retain their validation, keychain handling, and per-session behavior. Navigating away must not silently discard typed provider drafts; secret input fields remain transient and are cleared after saving or changing sessions.
 
 ## Backend contracts
 

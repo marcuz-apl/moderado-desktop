@@ -5,7 +5,8 @@ import { listen } from '@tauri-apps/api/event';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
-import { needsWorkspacePicker, visibleSessions, type SessionKind } from './sessions-view';
+import appVersion from '../../VERSION?raw';
+import { DEFAULT_SESSION_KIND, needsWorkspacePicker, newSessionLabel, nextSessionKind, profileModeDescription, projectNameFromWorkspace, scheduleWriteApprovalChoiceVisible, visibleSessions, type SessionKind } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -57,7 +58,7 @@ const importDialog = $<HTMLDialogElement>('import-dialog');
 const emptyState = $('empty-state').cloneNode(true);
 
 let providers: ProviderPreset[] = [];
-let activeKind: SessionKind = 'code';
+let activeKind: SessionKind = DEFAULT_SESSION_KIND;
 let pendingAttachments: AttachmentRecord[] = [];
 let initialized = false;
 let creatingSession = false;
@@ -274,17 +275,16 @@ const HIDDEN_IN_WORK = ['workspace', 'checkpoints', 'source-control'];
 
 function applyKindUi(): void {
   const work = activeKind === 'work';
+  const kindToggle = $<HTMLButtonElement>('kind-toggle');
+  kindToggle.setAttribute('aria-checked', String(!work));
+  kindToggle.setAttribute('aria-label', `Session kind: ${work ? 'Work' : 'Code'}`);
+  kindToggle.dataset.kind = activeKind;
   for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.activity-button'))) {
     if (HIDDEN_IN_WORK.includes(button.dataset.panel ?? '')) button.hidden = work;
   }
   document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
   attachButton.toggleAttribute('hidden', !work);
   attachButton.disabled = !work || !activeSessionId;
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-session-kind]'))) {
-    const selected = button.dataset.sessionKind === activeKind;
-    button.classList.toggle('selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
-  }
   document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
   prompt.placeholder = work ? 'Ask anything…' : 'What should the agent work on?';
   const emptyCopy = document.getElementById('empty-state-copy');
@@ -293,7 +293,10 @@ function applyKindUi(): void {
       ? 'Ask anything. Attach text files or images and the assistant reads only those; it never browses your disk.'
       : 'Choose a model and send a task. Your first message creates a session folder in Documents automatically. Act mode asks before every write.';
   }
-  $('workspace-button').textContent = work ? '+ New Work session' : '+ New session';
+  $('workspace-button').textContent = newSessionLabel(activeKind);
+  $('profile-mode-description').textContent = profileModeDescription(activeKind);
+  $('profile-work-content').toggleAttribute('hidden', !work);
+  $('profile-code-content').toggleAttribute('hidden', work);
   if (work && HIDDEN_IN_WORK.includes(document.querySelector<HTMLElement>('.sidebar-panel.active')?.dataset.panelContent ?? '')) {
     document.querySelector<HTMLButtonElement>('[data-panel="sessions"]')?.click();
   }
@@ -355,7 +358,7 @@ async function selectSession(id: string): Promise<void> {
   $('session-title').textContent = record.name;
   $('profile-session').textContent = record.name;
   $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.planModel || 'No plan model'}`;
-  $('project-root-name').textContent = record.workspace;
+  $('project-root-name').textContent = projectNameFromWorkspace(record.workspace, record.name);
   renderSessions();
   renderTranscript();
   updateControls();
@@ -446,7 +449,10 @@ async function refreshSchedules(): Promise<void> {
       const timing = document.createElement('span');
       timing.textContent = `${schedule.inFlight ? 'Running' : schedule.enabled ? 'Next' : schedule.lastError ? 'Paused' : 'Completed'}: ${new Date(schedule.nextRunAt * 1000).toLocaleString()}${schedule.intervalSeconds ? ` · every ${schedule.intervalSeconds / 60} min` : ''}`;
       const policy = document.createElement('span');
-      policy.textContent = `${schedule.mode === 'act' ? 'Act' : 'Plan'} · ${schedule.approvalPolicy === 'auto_write' ? 'auto-approve writes' : 'ask before writes'}`;
+      const scheduleKind = sessions.get(id)?.kind ?? 'code';
+      policy.textContent = scheduleKind === 'work'
+        ? (schedule.mode === 'act' ? 'Act' : 'Plan')
+        : `${schedule.mode === 'act' ? 'Act' : 'Plan'} · ${schedule.approvalPolicy === 'auto_write' ? 'auto-approve writes' : 'ask before writes'}`;
       item.append(name, timing, policy);
       if (schedule.lastError) {
         const error = document.createElement('span');
@@ -515,9 +521,10 @@ async function refreshProjectTree(): Promise<void> {
   const id = activeSessionId;
   projectEntries.clear();
   expandedFolders.clear();
-  if (!id) { tree.textContent = 'Select a session to browse its workspace.'; return; }
+  if (!id) { tree.textContent = 'Select a Code session to browse its project.'; return; }
   tree.textContent = 'Loading project files…';
-  $('project-root-name').textContent = sessions.get(id)?.workspace ?? '';
+  const session = sessions.get(id);
+  $('project-root-name').textContent = session ? projectNameFromWorkspace(session.workspace, session.name) : '';
   try {
     await loadProjectFolder('.');
     if (id === activeSessionId) renderProjectTree();
@@ -714,9 +721,10 @@ async function initialize(): Promise<void> {
     selectProvider(saved?.providerId ?? 'moderado');
     initialized = true;
     await refreshSummaries();
-    const first = summaries[0];
-    if (first) await selectSession(first.id);
-    else updateControls();
+    setKind(DEFAULT_SESSION_KIND);
+    const firstWorkSession = visibleSessions(summaries, DEFAULT_SESSION_KIND)[0];
+    if (firstWorkSession) await selectSession(firstWorkSession.id);
+    else await createSession(currentSettings(), false, DEFAULT_SESSION_KIND);
     const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
     for (const item of local) {
       const preset = providers.find((provider) => provider.id === item.id);
@@ -728,9 +736,8 @@ async function initialize(): Promise<void> {
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
 
-for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-session-kind]'))) {
-  button.addEventListener('click', () => setKind((button.dataset.sessionKind ?? 'code') as SessionKind));
-}
+$<HTMLButtonElement>('kind-toggle').addEventListener('click', () => setKind(nextSessionKind(activeKind)));
+$<HTMLElement>('about-version').textContent = appVersion.trim();
 
 attachButton.addEventListener('click', async () => {
   if (!activeSessionId) {
@@ -849,13 +856,17 @@ function localDateTime(date: Date): string {
 }
 
 $('new-schedule').addEventListener('click', () => {
-  if (!activeSessionId) return;
-  scheduleSessionId = activeSessionId;
+  const session = activeSession();
+  if (!session) return;
+  const work = !scheduleWriteApprovalChoiceVisible(session.kind);
+  scheduleSessionId = session.id;
   $<HTMLTextAreaElement>('schedule-prompt').value = '';
   $<HTMLInputElement>('schedule-time').value = localDateTime(new Date(Date.now() + 5 * 60_000));
   $<HTMLInputElement>('schedule-repeat').value = '';
-  $<HTMLSelectElement>('schedule-mode').value = mode;
+  $<HTMLSelectElement>('schedule-mode').value = work ? 'act' : mode;
   $<HTMLSelectElement>('schedule-policy').value = 'prompt';
+  $('schedule-policy-field').hidden = work;
+  $('schedule-write-hint').hidden = work;
   scheduleDialog.showModal();
 });
 $('cancel-schedule').addEventListener('click', () => scheduleDialog.close());
@@ -866,8 +877,11 @@ $<HTMLFormElement>('schedule-form').addEventListener('submit', async (event) => 
   const time = new Date($<HTMLInputElement>('schedule-time').value).getTime();
   const repeat = $<HTMLInputElement>('schedule-repeat').value.trim();
   const intervalSeconds = repeat ? Number(repeat) * 60 : null;
-  const selectedMode = $<HTMLSelectElement>('schedule-mode').value as 'plan' | 'act';
-  const approvalPolicy = $<HTMLSelectElement>('schedule-policy').value as 'prompt' | 'auto_write';
+  const scheduledSession = sessions.get(sessionId);
+  if (!scheduledSession) return;
+  const work = !scheduleWriteApprovalChoiceVisible(scheduledSession.kind);
+  const selectedMode = (work ? 'act' : $<HTMLSelectElement>('schedule-mode').value) as 'plan' | 'act';
+  const approvalPolicy = (work ? 'prompt' : $<HTMLSelectElement>('schedule-policy').value) as 'prompt' | 'auto_write';
   if (!Number.isFinite(time) || time <= Date.now()) { setStatus('Choose a future run time.'); return; }
   if (repeat && (!Number.isInteger(intervalSeconds) || intervalSeconds === null || intervalSeconds < 60 || intervalSeconds > 2_592_000)) { setStatus('Repeat interval must be 1 to 43,200 minutes.'); return; }
   if (selectedMode === 'plan' && approvalPolicy === 'auto_write') { setStatus('Auto-approve writes requires Act mode.'); return; }
@@ -948,7 +962,7 @@ $('delete-session').addEventListener('click', async () => {
       $('workspace-path').textContent = 'Agent files stay in this folder.';
       $('profile-session').textContent = 'No session selected';
       $('profile-provider').textContent = 'Not configured';
-      $('project-root-name').textContent = 'No workspace selected';
+      $('project-root-name').textContent = 'No project selected';
       renderTranscript();
       await refreshCheckpoints();
       await refreshSchedules();

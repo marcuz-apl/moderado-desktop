@@ -21,7 +21,7 @@ Work and Code describe *what a session is allowed to touch*. Plan and Act, alrea
 
 | Capability | Work | Code |
 | --- | --- | --- |
-| Project folder | None | Required, picked by the user |
+| Project folder | `%USERPROFILE%/Documents/Moderado-Desktop/work-sessionN`, created silently | Required, picked by the user |
 | Reading the disk on its own | Never | Yes, jailed to the workspace |
 | Reading user-attached files | Yes — text and images | Not in the first cut |
 | `list_files`, `read_file`, `search_files` tools | Not offered | Offered |
@@ -32,6 +32,8 @@ Work and Code describe *what a session is allowed to touch*. Plan and Act, alrea
 | Web search | Offered when configured | Offered when configured |
 | Schedules | Allowed; no write policy to choose | Allowed; policy as today |
 | Transcript import | Allowed | Allowed |
+
+On app startup, Work is the default. If no Work session exists, create `work-session0` under `%USERPROFILE%/Documents/Moderado-Desktop` and select it; reuse an existing Work session on later launches. The Sessions panel uses one Work/Code switch, with the creation action named for the selected kind.
 
 The difference is **who chooses the file**. In Code the agent decides what to open inside a folder the user already trusted. In Work the user decides, message by message, and nothing else on disk is reachable.
 
@@ -50,7 +52,7 @@ Limits for the first cut: 256 KiB per text file (the same bound the workspace re
 - Migration 3 adds the `attachments` table (`id`, `session_id`, `name`, `kind`, `bytes`, `created_at`), so a session's copies are enumerable and cascade away with it.
 - `SessionRecord` and `SessionSummary` gain `kind: SessionKind` (`work` | `code`), serialized as `kind`.
 - SQLite: schema changes go through `db.rs`, which owns every table and records the applied version in `PRAGMA user_version`. Version 1 is the schema as it shipped before versioning, written with `IF NOT EXISTS` and a column repair for databases older than that; version 2 adds `sessions.kind` with `DEFAULT 'code'`, so every existing session becomes Code, which is exactly today's behaviour. The three stores no longer carry DDL of their own.
-- `workspace` stays `NOT NULL`. A Work session gets an app-data scratch root (`<app-data>/work/<session-id>`) that is never shown and never exposed as a tool root. This keeps one invariant — every session has a jailed root — so checkpoints, the project tree, and source control need no nullable-path branch.
+- `workspace` stays `NOT NULL`. A Work session gets a numbered folder under the user's Documents directory (`Moderado-Desktop/work-sessionN`). The folder is never exposed as a tool root; the Work dispatcher still offers no filesystem tools. This keeps one invariant — every session has a root — so checkpoints, the project tree, and source control need no nullable-path branch.
 - A session's kind never changes after creation. The UI offers "start a Code session" instead of converting one.
 - Attachments are copied on pick into `<app-data>/attachments/<session-id>/<sha256>-<name>`. The copy is what gets read at send time, so a moved or deleted original cannot break a stored conversation, and nothing outside that folder is read later.
 
@@ -86,10 +88,9 @@ Limits for the first cut: 256 KiB per text file (the same bound the workspace re
 
 ## Rollout
 
-Status: steps 1 to 4 have shipped — migrations 2 and 3, `SessionKind`, the Work scratch root, the
-dispatch gate, the Work/Code switch with hidden panels, and the composer attachment picker. Step 5
-is partly done: the docs are updated, the schedule dialog still offers a write-approval choice that
-means nothing in a Work session.
+Status: steps 1 to 5 have shipped — migrations 2 and 3, `SessionKind`, the Work scratch root, the
+dispatch gate, the Work/Code switch with hidden panels, the composer attachment picker, and a
+schedule dialog that hides write approval for Work sessions.
 
 1. Schema migration, `SessionKind`, record and summary fields, scratch root. No behaviour change; all tests still pass.
 2. Tool gating and dispatch rejection for Work sessions, with tests. No UI yet.
@@ -100,7 +101,7 @@ means nothing in a Work session.
 ## Verification
 
 - Rust tests: migration adds `kind` and defaults existing rows to `code`; a Work tool list has no file tools; `dispatch_tool` rejects `read_file`, `write_file`, and `edit_file` for Work; attachment copy rejects oversize and unsupported files; a text attachment reaches the provider as text; an image attachment reaches the provider as an `image_url` data part; a replayed history with a deleted attachment degrades to a note.
-- Frontend tests: the segmented control filters sessions, creating in each kind calls the right command, and Work hides the three panels and the Plan/Act selector.
+- Frontend tests: the segmented control filters sessions, creating in each kind calls the right command, Work hides the three panels and the Plan/Act selector, and only Code sessions show schedule write approval.
 - Manual: create a Work session, attach a text file and an image, confirm both are read; create a Code session and confirm today's flow, approvals, and checkpoints.
 
 ## Decided

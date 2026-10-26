@@ -30,18 +30,26 @@ pub fn create_scratch_workspace(base: &Path) -> Result<PathBuf, String> {
 }
 
 pub fn create_default_workspace(documents: &Path) -> Result<PathBuf, String> {
+    create_numbered_workspace(documents, "session")
+}
+
+pub fn create_default_work_workspace(documents: &Path) -> Result<PathBuf, String> {
+    create_numbered_workspace(documents, "work-session")
+}
+
+fn create_numbered_workspace(documents: &Path, prefix: &str) -> Result<PathBuf, String> {
     let root = documents.join("Moderado-Desktop");
     std::fs::create_dir_all(&root)
         .map_err(|error| format!("Could not create session folder in Documents: {error}"))?;
     for number in 0..=u32::MAX {
-        let path = root.join(format!("session{number}"));
+        let path = root.join(format!("{prefix}{number}"));
         match std::fs::create_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(format!("Could not create session folder: {error}")),
         }
     }
-    Err("No available session folder name in Documents".into())
+        Err("No available session folder name in Documents".into())
 }
 
 pub fn new_id() -> String {
@@ -507,5 +515,20 @@ mod tests {
         let next = create_default_workspace(documents.path()).unwrap();
         assert_eq!(next, documents.path().join("Moderado-Desktop").join("session1"));
         assert_eq!(std::fs::read_to_string(existing.join("keep.txt")).unwrap(), "existing work");
+    }
+
+    #[test]
+    fn default_workspaces_get_named_folders_in_documents() {
+        let documents = tempfile::tempdir().unwrap();
+        let first = create_default_work_workspace(documents.path()).unwrap();
+        let second = create_default_work_workspace(documents.path()).unwrap();
+        assert_eq!(
+            first,
+            documents.path().join("Moderado-Desktop").join("work-session0")
+        );
+        assert_eq!(
+            second,
+            documents.path().join("Moderado-Desktop").join("work-session1")
+        );
     }
 }
