@@ -70,7 +70,7 @@ let mode: 'plan' | 'act' = 'act';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
-let activePanel: SidebarPanel | null = 'tasks';
+let activePanel: SidebarPanel | null = 'mode';
 let selectedProjectWorkspace: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
 const expandedFolders = new Set<string>();
@@ -301,6 +301,14 @@ function applyKindUi(): void {
     const panel = button.dataset.panel as SidebarPanel;
     button.hidden = !panelAvailableForKind(panel, activeKind);
   }
+  const modePanel = document.querySelector<HTMLElement>('[data-panel-content="mode"]');
+  modePanel?.classList.toggle('active', activePanel === 'mode');
+  for (const panel of ['tasks', 'projects', 'sessions'] as const) {
+    const button = document.querySelector<HTMLButtonElement>(`[data-panel="${panel}"]`);
+    if (button) button.hidden = !panelAvailableForKind(panel, activeKind);
+  }
+  const explorerButton = document.querySelector<HTMLButtonElement>('[data-panel="workspace"]');
+  if (explorerButton) explorerButton.hidden = !panelAvailableForKind('workspace', activeKind);
   document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
   attachButton.toggleAttribute('hidden', !work);
   attachButton.disabled = !work || !activeSessionId;
@@ -527,6 +535,7 @@ function switchPanel(panel: SidebarPanel): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
+  if (panel === 'mode') document.querySelector<HTMLElement>('[data-panel-content="mode"]')?.classList.add('active');
   if (activePanel === 'workspace') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
 }
@@ -768,7 +777,10 @@ async function initialize(): Promise<void> {
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
 
-$<HTMLButtonElement>('kind-toggle').addEventListener('click', () => setKind(nextSessionKind(activeKind)));
+$<HTMLButtonElement>('kind-toggle').addEventListener('click', () => {
+  setKind(nextSessionKind(activeKind));
+  if (activePanel !== 'mode') switchPanel('mode');
+});
 $<HTMLElement>('about-version').textContent = appVersion.trim();
 
 attachButton.addEventListener('click', async () => {

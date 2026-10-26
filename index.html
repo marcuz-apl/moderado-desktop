@@ -6,13 +6,15 @@
     <title>Moderado Desktop</title>
     <link rel="stylesheet" href="/src/renderer/style.css" />
     <link rel="stylesheet" href="/src/renderer/theme.css" />
-    <link rel="icon" type="image/svg+xml" href="/src/renderer/moderado-mark.svg" />
+    <link rel="icon" type="image/svg+xml" href="/moderado-mark.svg" />
   </head>
   <body>
     <div class="app">
       <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
         <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-2 2v-9.5a7.5 7.5 0 1 1 15 0Z"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></symbol>
         <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 6.5h7l2 2h9v10H3z"/><path d="M3 8.5V5h7l2 2"/></symbol>
+        <symbol id="icon-projects" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/></symbol>
+        <symbol id="icon-mode" viewBox="0 0 24 24"><path d="M7 7h13M7 17h13M4 7l2-2 2 2M8 17l-2 2-2-2"/></symbol>
         <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M20 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10"/></symbol>
         <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
         <symbol id="icon-source" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M18 17v-2a4 4 0 0 0-4-4h-4a4 4 0 0 1-4-4"/></symbol>
@@ -23,9 +25,11 @@
       </svg>
       <nav class="activity-bar" aria-label="Workbench views">
         <div class="activity-group">
-          <button class="activity-button selected" data-panel="tasks" type="button" aria-label="Tasks" title="Tasks" aria-pressed="true"><svg><use href="#icon-chat"/></svg></button>
-          <button class="activity-button" data-panel="projects" type="button" aria-label="Projects" title="Projects" aria-pressed="false" hidden><svg><use href="#icon-folder"/></svg></button>
+          <button class="activity-button selected" data-panel="mode" type="button" aria-label="Mode" title="Mode" aria-pressed="true"><svg><use href="#icon-mode"/></svg></button>
+          <button class="activity-button" data-panel="tasks" type="button" aria-label="Tasks" title="Tasks" aria-pressed="false" hidden><svg><use href="#icon-chat"/></svg></button>
+          <button class="activity-button" data-panel="projects" type="button" aria-label="Projects" title="Projects" aria-pressed="false" hidden><svg><use href="#icon-projects"/></svg></button>
           <button class="activity-button" data-panel="sessions" type="button" aria-label="Sessions" title="Sessions" aria-pressed="false" hidden><svg><use href="#icon-chat"/></svg></button>
+          <button class="activity-button" data-panel="workspace" type="button" aria-label="Explorer" title="Explorer" aria-pressed="false" hidden><svg><use href="#icon-folder"/></svg></button>
           <button class="activity-button" data-panel="checkpoints" type="button" aria-label="Checkpoints" title="Checkpoints" aria-pressed="false"><svg><use href="#icon-check"/></svg></button>
           <button class="activity-button" data-panel="schedules" type="button" aria-label="Schedules" title="Schedules" aria-pressed="false"><svg><use href="#icon-clock"/></svg></button>
           <button class="activity-button" data-panel="source-control" type="button" aria-label="Git" title="Git" aria-pressed="false"><svg><use href="#icon-source"/></svg></button>
@@ -36,8 +40,8 @@
         </div>
       </nav>
       <aside class="sidebar">
-        <div class="kind-switch"><span>Work</span><button id="kind-toggle" class="kind-toggle" type="button" role="switch" aria-label="Session kind: Work" aria-checked="false"><span class="kind-toggle-thumb"></span></button><span>Code</span></div>
-        <section class="sidebar-panel active" data-panel-content="tasks"><header class="panel-heading"><h2>Tasks</h2><button id="workspace-button" class="text-button" type="button">New Task</button></header><div id="task-list" class="panel-body session-list" aria-label="Tasks"></div></section>
+        <section class="sidebar-panel active" data-panel-content="mode"><header class="panel-heading"><h2>Mode</h2></header><div class="panel-body"><div class="kind-switch"><span>Work</span><button id="kind-toggle" class="kind-toggle" type="button" role="switch" aria-label="Session kind: Work" aria-checked="false"><span class="kind-toggle-thumb"></span></button><span>Code</span></div></div></section>
+        <section class="sidebar-panel" data-panel-content="tasks"><header class="panel-heading"><h2>Tasks</h2><button id="workspace-button" class="text-button" type="button">New Task</button></header><div id="task-list" class="panel-body session-list" aria-label="Tasks"></div></section>
         <section class="sidebar-panel" data-panel-content="projects"><header class="panel-heading"><h2>Projects</h2><button id="new-project" class="text-button" type="button">New Project</button></header><div id="project-list" class="panel-body session-list" aria-label="Projects"></div></section>
         <section class="sidebar-panel" data-panel-content="sessions"><header class="panel-heading"><div><h2>Sessions</h2><p id="sessions-project-name" class="path">Select a project</p></div><button id="new-code-session" class="text-button" type="button">New Session</button></header><div id="code-session-list" class="panel-body session-list" aria-label="Project sessions"></div></section>
         <section class="sidebar-panel" data-panel-content="workspace"><header class="panel-heading"><div><h2>Explorer</h2><p id="project-root-name" class="path">No project selected</p></div><button id="refresh-project" class="icon-action" type="button" aria-label="Refresh project files" title="Refresh">Refresh</button></header><div id="project-tree" class="panel-body project-tree" role="tree" aria-label="Project folder contents">Select a Code session to browse its project.</div></section>
@@ -72,7 +76,7 @@
       <main class="main">
         <header class="topbar"><div><p class="eyebrow">AGENT SESSION</p><h1 id="session-title">Workspace conversation</h1><div class="session-actions"><button id="rename-session" type="button">Rename</button><button id="delete-session" type="button">Delete</button></div></div><div class="topbar-controls"><div class="mode-control" role="group" aria-label="Agent mode"><button id="plan-mode" type="button" aria-pressed="false">Plan</button><button id="act-mode" class="selected" type="button" aria-pressed="true">Act</button></div><button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme" title="Light, follows local time — switch to dark"><svg class="theme-sun" aria-hidden="true"><use href="#icon-sun"/></svg><svg class="theme-moon" aria-hidden="true"><use href="#icon-moon"/></svg></button></div></header>
         <section id="transcript" class="transcript" aria-label="Conversation" aria-live="polite">
-          <div id="empty-state" class="empty-state"><div class="empty-symbol" aria-hidden="true"><img src="/src/renderer/moderado-mark.svg" alt="" /></div><p class="eyebrow">READY WHEN YOU ARE</p><h2>Start with a task.</h2><p id="empty-state-copy">Choose a model and send a task. Your first message creates a session folder in Documents automatically. Act mode asks before every write.</p></div>
+          <div id="empty-state" class="empty-state"><div class="empty-symbol" aria-hidden="true"><span>⌘</span><i></i></div><p class="eyebrow">READY WHEN YOU ARE</p><h2>Start with a task.</h2><p id="empty-state-copy">Choose a model and send a task. Your first message creates a session folder in Documents automatically. Act mode asks before every write.</p></div>
         </section>
         <div class="composer-wrap"><p id="status" class="status" role="status">Choose a model, then send a task.</p><form id="composer"><div id="attachment-chips" class="attachment-chips" aria-live="polite" hidden></div><textarea id="prompt" rows="3" placeholder="What should the agent work on?" aria-label="Message" required></textarea><div class="composer-bottom"><div class="composer-meta"><div id="selected-model" aria-live="polite">Act model: None selected</div><span class="composer-shortcuts">Enter to send · Shift+Enter for a new line · /btw for a side question</span></div><div class="composer-actions"><button id="attach-files" class="icon-action" type="button" title="Attach files" aria-label="Attach files" hidden>Attach</button> <button id="stop" class="secondary" type="button" hidden>Stop</button> <button id="send" type="submit">Send <span aria-hidden="true">↗</span></button></div></div></form></div>
       </main>

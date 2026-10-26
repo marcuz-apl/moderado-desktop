@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, newSessionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
 
@@ -31,16 +32,20 @@ test('new session action names the selected session kind', () => {
 });
 
 test('sidebar defaults and available panels follow the selected mode', () => {
-  assert.equal(defaultPanelForKind('work'), 'tasks');
-  assert.equal(defaultPanelForKind('code'), 'projects');
+  assert.equal(defaultPanelForKind('work'), 'mode');
+  assert.equal(defaultPanelForKind('code'), 'mode');
+  assert.equal(panelAvailableForKind('mode', 'work'), true);
+  assert.equal(panelAvailableForKind('mode', 'code'), true);
   assert.equal(panelAvailableForKind('tasks', 'work'), true);
   assert.equal(panelAvailableForKind('projects', 'work'), false);
   assert.equal(panelAvailableForKind('sessions', 'work'), false);
   assert.equal(panelAvailableForKind('workspace', 'work'), false);
+  assert.equal(panelAvailableForKind('mode', 'work'), true);
   assert.equal(panelAvailableForKind('tasks', 'code'), false);
   assert.equal(panelAvailableForKind('projects', 'code'), true);
   assert.equal(panelAvailableForKind('sessions', 'code'), true);
   assert.equal(panelAvailableForKind('workspace', 'code'), true);
+  assert.equal(panelAvailableForKind('mode', 'code'), true);
   assert.equal(panelAvailableForKind('schedules', 'work'), true);
 });
 
@@ -48,6 +53,15 @@ test('new action captions match the selected sidebar panel', () => {
   assert.equal(newActionLabel('tasks'), 'New Task');
   assert.equal(newActionLabel('projects'), 'New Project');
   assert.equal(newActionLabel('sessions'), 'New Session');
+});
+
+test('Mode contains the Work/Code switch and Explorer owns the folder icon', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-panel-content="mode"[\s\S]*?id="kind-toggle"/);
+  assert.match(html, /data-panel="workspace"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
+  assert.match(html, /data-panel="projects"[^>]*>[\s\S]*?#icon-projects/);
+  assert.match(html, /<span>⌘<\/span><i><\/i>/);
+  assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
 });
 
 test('Work profile does not require a GitHub account', () => {
