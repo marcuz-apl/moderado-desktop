@@ -67,8 +67,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "http://localhost:11434/v1",
         editable_url: false,
         local: true,
-        apply_key_url: None,
-        apply_key_label: "",
+        apply_key_url: Some("https://ollama.com/download"),
+        apply_key_label: "Get Ollama",
     },
     ProviderPreset {
         id: ProviderId::LmStudio,
@@ -76,8 +76,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "http://localhost:1234/v1",
         editable_url: false,
         local: true,
-        apply_key_url: None,
-        apply_key_label: "",
+        apply_key_url: Some("https://lmstudio.ai/download"),
+        apply_key_label: "Get LM Studio",
     },
     ProviderPreset {
         id: ProviderId::OpenAiCompatible,
@@ -457,6 +457,33 @@ mod tests {
             .base_url("http://example.test/v1")
             .is_err());
         assert!(ProviderId::Moderado.base_url("").is_err());
+    }
+
+    #[test]
+    fn every_named_provider_links_to_a_key_or_install_page() {
+        for preset in PRESETS {
+            if preset.id == ProviderId::OpenAiCompatible {
+                assert!(preset.apply_key_url.is_none());
+                continue;
+            }
+            let url = preset
+                .apply_key_url
+                .unwrap_or_else(|| panic!("{} is missing an apply link", preset.name));
+            assert!(
+                url.starts_with("https://"),
+                "{} must link over https, got {url}",
+                preset.name
+            );
+            assert!(
+                !preset.apply_key_label.is_empty(),
+                "{} is missing a link label",
+                preset.name
+            );
+        }
+        assert_eq!(
+            ProviderId::Moderado.preset().apply_key_url,
+            Some("https://modr.alfazen.org/account?mode=signin")
+        );
     }
 
     #[test]
