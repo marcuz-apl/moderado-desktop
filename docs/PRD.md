@@ -21,7 +21,7 @@ Moderado Desktop is a cross-platform desktop application that hosts autonomous A
 
 ### Goals
 1. G1 — Run multiple isolated agent sessions in parallel against any configured workspace folder.
-2. G2 — First-class provider support: Moderado Gateway, NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
+2. G2 — First-class provider support: Moderado Gateway, NVIDIA NIM, OpenRouter, Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
 3. G3 — Plan/Act dual mode with independently configurable models per mode.
 4. G4 — Human-in-the-loop approval for every state mutation (file write/edit, command execution), with per-session auto-approval rules.
 5. G5 — Checkpoints: snapshot workspace state before mutating actions; support rollback.
@@ -50,8 +50,6 @@ All providers are normalized to one internal `ChatCompletion` contract (OpenAI-c
 | Moderado Gateway | OpenAI-compatible HTTPS | API key (org-scoped) | Default provider; model list fetched from `/v1/models`. |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key | `integrate.api.nvidia.com` base URL. |
 | OpenRouter | OpenAI-compatible HTTPS | API key | Supports provider routing hints. |
-| Agnes AI | OpenAI-compatible HTTPS | API key | |
-| OrcaRouter | OpenAI-compatible HTTPS | API key | |
 | Ollama (local) | OpenAI-compatible `http://localhost:11434` | none | Auto-detect running instance. |
 | LM Studio (local) | OpenAI-compatible `http://localhost:1234` | none | Auto-detect running server. |
 | Custom OpenAI-compatible | User-supplied base URL | Optional key | Validated against `/v1/models` before save. |
@@ -128,7 +126,7 @@ src/renderer/    # UI: session tabs, chat, approval prompts, diffs, settings
 | Milestone | Scope | Exit criteria |
 | --- | --- | --- |
 | M1 — Core loop | Agent loop, Plan/Act enforcement, 1 provider (Moderado Gateway), file tools, approval gate | Task completes end-to-end with approvals, offline tests green |
-| M2 — Provider matrix | NIM, OpenRouter, Agnes, OrcaRouter, Ollama, LM Studio, custom endpoint; streaming tool calls | Same task runs on each provider; keychain storage |
+| M2 — Provider matrix | NIM, OpenRouter, Ollama, LM Studio, custom endpoint; streaming tool calls | Same task runs on each provider; keychain storage |
 | M3 — Sessions & checkpoints | Parallel sessions, persistence, checkpoints/rollback | Restart-safe sessions; rollback verified |
 | M4 — Scheduling & import | Scheduled tasks, transcript import, settings hardening | Recurring task runs unattended per policy |
 

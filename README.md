@@ -2,11 +2,11 @@
 
 Cross-platform desktop application for running autonomous AI coding agent sessions outside the IDE. Built with Tauri, Rust, and TypeScript.
 
-Moderado Desktop follows the Cline Desktop interaction model — parallel sessions, Plan/Act dual modes, explicit tool approval, and git-backed checkpoints — while remaining **provider-agnostic**: Moderado Gateway (first-party), NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
+Moderado Desktop follows the Cline Desktop interaction model — parallel sessions, Plan/Act dual modes, explicit tool approval, and git-backed checkpoints — while remaining **provider-agnostic**: Moderado Gateway (first-party), NVIDIA NIM, OpenRouter, Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
 
 ## Current build
 
-M4 supports multiple persistent sessions, one-time and repeating task schedules, and text transcript imports from Codex and Claude Code JSONL files. Scheduled runs work while the desktop app is open and use the session's configured provider and models. An explicit per-schedule approval choice controls whether Act-mode file writes wait for review or proceed unattended; scheduled Act runs create a checkpoint before contacting the model, and writes create another checkpoint before changing files. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. The workspace header carries a theme control beside the Plan/Act selector: pick Light or Dark, or leave Auto to follow local time. Command execution remains planned work.
+M4 supports multiple persistent sessions, one-time and repeating task schedules, and text transcript imports from Codex and Claude Code JSONL files. Scheduled runs work while the desktop app is open and use the session's configured provider and models. An explicit per-schedule approval choice controls whether Act-mode file writes wait for review or proceed unattended; scheduled Act runs create a checkpoint before contacting the model, and writes create another checkpoint before changing files. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. The workspace header carries a theme control beside the Plan/Act selector: pick Light or Dark, or leave Auto to follow local time. Command execution remains planned work.
 
 ## Capabilities
 
@@ -25,8 +25,6 @@ M4 supports multiple persistent sessions, one-time and repeating task schedules,
 | Moderado Gateway (default) | OpenAI-compatible HTTPS | API key (org-scoped) |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key |
 | OpenRouter | OpenAI-compatible HTTPS | API key |
-| Agnes AI | OpenAI-compatible HTTPS | API key |
-| OrcaRouter | OpenAI-compatible HTTPS | API key |
 | Ollama (local) | `http://localhost:11434` | none |
 | LM Studio (local) | `http://localhost:1234` | none |
 | Custom | User-supplied base URL | optional key |
@@ -64,7 +62,7 @@ To import an existing conversation, select a session for the workspace, choose *
 
 Changing the provider or its base URL starts a new conversation on the next task, so earlier local context is never sent to a newly selected remote provider. Switching between Plan and Act keeps the current conversation.
 
-The provider profiles use the same OpenAI-compatible streaming transport. Their preset URLs follow the providers' published API documentation: [NVIDIA NIM](https://docs.api.nvidia.com/nim/reference/llm-apis), [OpenRouter](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request), [Agnes AI](https://github.com/AgnesAI-Labs/AgnesAI-Models/blob/main/MODEL_CATALOG.md), [OrcaRouter](https://www.orcarouter.ai/switch/openrouter), and [LM Studio](https://lmstudio.ai/docs/developer/openai-compat). Some models may not support tool calls even if their provider accepts the API format; choose a tool-capable model for agent tasks.
+The provider profiles use the same OpenAI-compatible streaming transport. Their preset URLs follow the providers' published API documentation: [NVIDIA NIM](https://docs.api.nvidia.com/nim/reference/llm-apis), [OpenRouter](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request), and [LM Studio](https://lmstudio.ai/docs/developer/openai-compat). Some models may not support tool calls even if their provider accepts the API format; choose a tool-capable model for agent tasks.
 
 ## Architecture
 

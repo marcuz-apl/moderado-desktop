@@ -32,7 +32,7 @@ Parallel/persistent sessions and checkpoints (M3); provider matrix (M2); schedul
 Support the PRD provider matrix through one OpenAI-compatible transport. A task with a streamed tool call should complete against every provider profile using offline fixtures; remote keys stay in the OS keychain.
 
 ## Scope
-- Provider catalog for Moderado Gateway, NVIDIA NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama, LM Studio, and custom endpoints.
+- Provider catalog for Moderado Gateway, NVIDIA NIM, OpenRouter, Ollama, LM Studio, and custom endpoints.
 - Provider selection UI with editable Gateway/custom URLs, per-provider model choices, and local runtime availability probes.
 - Custom endpoint validation against `/v1/models` before saving settings.
 - Shared SSE/tool-call conformance fixtures and local mock-server agent runs for every profile.

@@ -12,7 +12,7 @@
 - M1 already has one OpenAI-compatible HTTP/SSE transport and keychain entries scoped by base URL.
 - The provider matrix is currently a freeform URL field; only Ollama has a shortcut.
 - The PRD M2 exit criterion requires the same task to run on each provider, streaming tool calls, and keychain storage.
-- Official provider documentation confirms current OpenAI-compatible base URLs for NIM, OpenRouter, Agnes AI, OrcaRouter, Ollama, and LM Studio; Gateway remains configurable.
+- Official provider documentation confirms current OpenAI-compatible base URLs for NIM, OpenRouter, Ollama, and LM Studio; Gateway remains configurable.
 
 ## M3
 
