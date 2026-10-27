@@ -109,6 +109,10 @@ impl AppState {
 enum TurnEvent {
     Text { session_id: String, value: String },
     Tool { session_id: String, value: String },
+    Usage {
+        session_id: String,
+        usage: crate::agent::runner::ModelUsage,
+    },
     Error { session_id: String, value: String },
     Done { session_id: String },
     Cancelled { session_id: String },
@@ -1030,6 +1034,15 @@ async fn execute_turn(
                     TurnEvent::Tool {
                         session_id: session_id.clone(),
                         value,
+                    },
+                );
+            }
+            AgentEvent::Usage(usage) => {
+                let _ = app.emit(
+                    "turn-event",
+                    TurnEvent::Usage {
+                        session_id: session_id.clone(),
+                        usage,
                     },
                 );
             }

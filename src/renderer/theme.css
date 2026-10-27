@@ -113,3 +113,4 @@
 :root[data-theme="light"] .kind-toggle-thumb{background:var(--light-accent)}
 
 :root[data-theme="light"] .empty-symbol{background:#14233a;border-color:transparent}
+:root[data-theme="light"] .model-usage-row #model-usage{color:#5d7480}

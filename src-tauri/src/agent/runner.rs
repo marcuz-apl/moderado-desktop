@@ -4,6 +4,7 @@ use crate::attachments;
 use crate::provider;
 use crate::sessions::SessionKind;
 use crate::search::{self, SearchConfig};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::future::Future;
 use std::path::Path;
@@ -28,6 +29,17 @@ pub struct RunConfig<'a> {
 pub enum AgentEvent {
     Text(String),
     Tool(String),
+    Usage(ModelUsage),
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub rate_tps: Option<f64>,
+    pub context_tokens: Option<u64>,
 }
 
 pub async fn run_turn<A, Fut, E>(
@@ -70,6 +82,11 @@ where
     C: FnMut(&Approval) -> Result<(), String>,
     P: FnMut(&[Value]) -> Result<(), String>,
 {
+    emit(AgentEvent::Usage(ModelUsage::default()));
+    let mut total_input_tokens = 0u64;
+    let mut total_output_tokens = 0u64;
+    let mut total_reported_tokens = 0u64;
+    let mut usage_complete = true;
     let content = if config.attachments.is_empty() {
         json!(prompt)
     } else {
@@ -114,6 +131,26 @@ where
             |text| emit(AgentEvent::Text(text.into())),
         )
         .await?;
+        if let Some(usage) = completion.usage {
+            if usage_complete {
+                total_input_tokens = total_input_tokens.saturating_add(usage.input_tokens);
+                total_output_tokens = total_output_tokens.saturating_add(usage.output_tokens);
+                total_reported_tokens = total_reported_tokens.saturating_add(usage.total_tokens);
+            }
+            emit(AgentEvent::Usage(ModelUsage {
+                input_tokens: usage_complete.then_some(total_input_tokens),
+                output_tokens: usage_complete.then_some(total_output_tokens),
+                total_tokens: usage_complete.then_some(total_reported_tokens),
+                rate_tps: completion.tokens_per_second,
+                context_tokens: Some(usage.input_tokens),
+            }));
+        } else {
+            usage_complete = false;
+            emit(AgentEvent::Usage(ModelUsage {
+                rate_tps: None,
+                ..ModelUsage::default()
+            }));
+        }
         let calls = completion.tool_calls;
         if calls.is_empty() {
             history.push(json!({"role":"assistant","content":completion.content}));

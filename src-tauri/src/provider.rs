@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::time::Instant;
 use std::time::Duration;
 
 pub mod settings;
@@ -121,10 +122,40 @@ pub struct ToolCall {
 pub struct Completion {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
+    pub usage: Option<TokenUsage>,
+    pub tokens_per_second: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
 }
 
 impl Completion {
     pub fn push(&mut self, event: &Value) -> Result<Option<String>, String> {
+        if let Some(usage) = event.get("usage") {
+            let input_tokens = usage
+                .get("prompt_tokens")
+                .or_else(|| usage.get("input_tokens"))
+                .and_then(Value::as_u64);
+            let output_tokens = usage
+                .get("completion_tokens")
+                .or_else(|| usage.get("output_tokens"))
+                .and_then(Value::as_u64);
+            if let (Some(input_tokens), Some(output_tokens)) = (input_tokens, output_tokens) {
+                let total_tokens = usage
+                    .get("total_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
+                self.usage = Some(TokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                });
+            }
+        }
         let Some(delta) = event
             .get("choices")
             .and_then(|value| value.get(0))
@@ -372,7 +403,11 @@ async fn chat_completion_with_timeout(
         .build()
         .map_err(|_| "Could not create provider client")?;
     let mut request = client.post(url).json(&json!({
-        "model": model, "messages": messages, "tools": tools, "stream": true,
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "stream": true,
+        "stream_options": {"include_usage": true},
     }));
     if !key.is_empty() {
         request = request.bearer_auth(key);
@@ -388,6 +423,7 @@ async fn chat_completion_with_timeout(
     let mut parser = SseParser::default();
     let mut result = Completion::default();
     let mut done = false;
+    let mut generation_started = None;
     while let Some(chunk) = tokio::time::timeout(idle_timeout, stream.next())
         .await
         .map_err(|_| "Provider stream stalled")?
@@ -400,6 +436,23 @@ async fn chat_completion_with_timeout(
             }
             let value: Value =
                 serde_json::from_str(&event).map_err(|_| "Invalid provider stream event")?;
+            let delta = value
+                .get("choices")
+                .and_then(|choices| choices.get(0))
+                .and_then(|choice| choice.get("delta"));
+            let has_output = delta.is_some_and(|delta| {
+                delta
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| !content.is_empty())
+                    || delta
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .is_some_and(|calls| !calls.is_empty())
+            });
+            if has_output && generation_started.is_none() {
+                generation_started = Some(Instant::now());
+            }
             if let Some(delta) = result.push(&value)? {
                 on_text(&delta);
             }
@@ -414,6 +467,10 @@ async fn chat_completion_with_timeout(
     if result.content.is_empty() && result.tool_calls.is_empty() {
         return Err("Provider returned an empty response".into());
     }
+    result.tokens_per_second = result.usage.and_then(|usage| {
+        let elapsed = generation_started?.elapsed().as_secs_f64();
+        (elapsed > 0.0).then(|| usage.output_tokens as f64 / elapsed)
+    });
     Ok(result)
 }
 

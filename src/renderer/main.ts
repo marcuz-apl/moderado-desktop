@@ -12,13 +12,14 @@ export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebContent: boolean; executeCommand: boolean; useMcpServers: boolean };
+type ModelUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; rateTps: number | null; contextTokens: number | null };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
 type HistoryMessage = { role: string; content?: string };
 type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string };
-type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done' | 'cancelled'; session_id: string; value?: string };
+type TurnEvent = { kind: 'text' | 'tool' | 'usage' | 'error' | 'done' | 'cancelled'; session_id: string; value?: string; usage?: ModelUsage };
 type ApprovalEvent = { sessionId: string; id: number; category: 'read_files' | 'edit_files' | 'fetch_web_content' | 'execute_command' | 'use_mcp_servers'; title: string; detail: string; hasPreview: boolean; path: string; before: string; after: string };
 type ApprovalExpired = { sessionId: string; id: number };
 type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
@@ -58,6 +59,7 @@ const importDialog = $<HTMLDialogElement>('import-dialog');
 const emptyState = $('empty-state').cloneNode(true);
 
 let providers: ProviderPreset[] = [];
+const usageBySession = new Map<string, ModelUsage>();
 let activeKind: SessionKind = DEFAULT_SESSION_KIND;
 let pendingAttachments: AttachmentRecord[] = [];
 let initialized = false;
@@ -125,8 +127,17 @@ function currentSettings(): ProviderSettings {
 
 function updateSelectedModel(): void {
   const settings = currentSettings();
-  selectedModel.textContent = selectedModelLabel(mode, settings);
+  const providerName = providers.find((provider) => provider.id === settings.providerId)?.name;
+  selectedModel.textContent = selectedModelLabel(mode, settings, providerName);
   selectedModel.title = mode === 'plan' ? settings.planModel : settings.actModel;
+  renderModelUsage();
+}
+
+function renderModelUsage(): void {
+  const usage = activeSessionId ? usageBySession.get(activeSessionId) : undefined;
+  const format = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat().format(value);
+  const rate = usage?.rateTps == null ? '— tps' : `${usage.rateTps < 10 ? usage.rateTps.toFixed(1) : Math.round(usage.rateTps)} tps`;
+  $('model-usage').textContent = `In: ${format(usage?.inputTokens)} | Out: ${format(usage?.outputTokens)} | Total: ${format(usage?.totalTokens)} | Rate: ${rate} | Context: ${format(usage?.contextTokens)}`;
 }
 
 function setModelOptions(models: string[], planValue: string, actValue: string): void {
@@ -1107,6 +1118,11 @@ document.querySelectorAll<HTMLElement>('.panel-heading').forEach((heading) => {
 });
 const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
   const id = payload.session_id;
+  if (payload.kind === 'usage') {
+    if (payload.usage) usageBySession.set(id, payload.usage);
+    if (id === activeSessionId) renderModelUsage();
+    return;
+  }
   if (payload.kind === 'text') addDisplay(id, 'Agent', payload.value ?? '', true);
   else if (payload.kind === 'tool') addDisplay(id, 'Tool', payload.value ?? '');
   else if (payload.kind === 'error') {
