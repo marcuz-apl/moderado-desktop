@@ -12,11 +12,11 @@ async (page) => {
     const state = {
       sessions: [record('c1', 'Code one', 'code', 'C:\\Code\\alpha', 10), record('c2', 'Code two', 'code', 'C:\\Code\\alpha', 9), record('w1', 'Work one', 'work', 'C:\\Documents\\Moderado-Desktop\\work-session0', 8), record('w2', 'Work two', 'work', 'C:\\Documents\\Moderado-Desktop\\work-session1', 7)],
       projects: [{ workspace: 'C:\\Code\\alpha', name: 'Alpha', updatedAt: 10 }, { workspace: 'C:\\Code\\empty', name: 'Empty', updatedAt: 6 }],
-      calls: [], callbacks: {}, listeners: {}, next: 0, slow: false, slowCreate: false, finish: null,
+      calls: [], callbacks: {}, listeners: {}, next: 0, slow: false, slowCreate: false, finish: null, projectName: 'Alpha', promptAnswer: null,
     };
     const emit = (event, payload) => { for (const id of state.listeners[event] ?? []) state.callbacks[id]({ event, id, payload }); };
     window.confirm = () => true;
-    window.prompt = (_label, value) => value;
+    window.prompt = (_label, value) => state.promptAnswer ?? value;
     window.__navigationQA = { state, emit };
     window.__TAURI_INTERNALS__ = {
       transformCallback(callback) { const id = ++state.next; state.callbacks[id] = callback; return id; },
@@ -43,11 +43,11 @@ async (page) => {
         }
         if (cmd === 'delete_session') { state.sessions = state.sessions.filter((s) => s.id !== args.sessionId); return; }
         if (cmd === 'rename_session') { state.sessions.find((s) => s.id === args.sessionId).name = args.name; return; }
-        if (cmd === 'rename_project') { state.projects.find((p) => p.workspace === args.projectWorkspace).name = args.name; return; }
+        if (cmd === 'rename_project') { state.projects.find((p) => p.workspace === args.projectWorkspace).name = args.name; state.projectName = args.name; return; }
         if (cmd === 'remove_project') { state.projects = state.projects.filter((p) => p.workspace !== args.projectWorkspace); return; }
-        if (cmd === 'open_project') { const next = { workspace: 'C:\\Code\\alpha', name: 'Alpha', updatedAt: 30 }; if (!state.projects.some((p) => p.workspace === next.workspace)) state.projects.push(next); return next; }
+        if (cmd === 'open_project') { const next = { workspace: 'C:\\Code\\alpha', name: state.projectName, updatedAt: 30 }; if (!state.projects.some((p) => p.workspace === next.workspace)) state.projects.push(next); return next; }
         if (cmd === 'create_project') { const next = { workspace: `C:\\Code\\${args.name}`, name: args.name, updatedAt: 30 }; state.projects.push(next); return next; }
-        if (cmd === 'start_turn') { emit('turn-event', { kind: 'text', session_id: args.sessionId, value: 'Working on the task' }); return new Promise((resolve) => { state.finish = () => { emit('turn-event', { kind: 'done', session_id: args.sessionId }); resolve(); }; }); }
+        if (cmd === 'start_turn') { emit('turn-event', { kind: 'text', session_id: args.sessionId, value: 'Working on the task' }); return new Promise((resolve) => { state.finish = () => { const active = state.sessions.find((s) => s.id === args.sessionId); active.history = [{ role: 'user', content: args.prompt }, { role: 'assistant', content: null, tool_calls: [{ id: 'qa-read', function: { name: 'read_file' } }] }, { role: 'tool', tool_call_id: 'qa-read', content: '{"path":"report.md"}' }, { role: 'assistant', content: '## Turn summary\n\n- Updated the task notes in `report.md`.\n- Preserved the existing project files.\n- Literal safe text: <img src=x onerror=alert(1)>' }]; emit('turn-event', { kind: 'done', session_id: args.sessionId }); resolve(); }; }); }
         if (cmd === 'get_source_control') return { branch: 'main', changes: [], commits: [] };
         if (cmd === 'plugin:dialog|open') return ['C:\\Source\\notes.md'];
         if (cmd === 'add_attachments') return [{ id: 'a1', sessionId: args.sessionId, name: 'notes.md', kind: 'text', bytes: 12 }];
@@ -105,15 +105,21 @@ async (page) => {
   await page.getByRole('button', { name: 'Empty', exact: true }).click();
   await title('New Session');
   await check(async () => !(await page.locator('#send').isDisabled()), 'Empty registered project must allow sending');
+  await check(async () => !(await page.locator('#rename-project').isDisabled()) && !(await page.locator('#remove-project').isDisabled()), 'Project operations must target the selected project');
   await page.locator('[data-panel="workspace"]').click();
   await page.getByRole('treeitem', { name: 'code.md', exact: true }).waitFor();
   await page.locator('[data-panel="projects"]').click();
-  await page.locator('.project-group').filter({ has: page.getByRole('button', { name: 'Empty', exact: true }) }).getByRole('button', { name: 'New Session', exact: true }).click();
+  await check(async () => await page.getByRole('button', { name: 'New Session', exact: true }).count() === 1, 'Session creation should be available in the main workspace only');
+  await page.locator('#new-session').click();
   await page.locator('#session-title').filter({ hasText: 'Session 5' }).waitFor();
   await page.locator('#delete-session').click();
   await title('New Session');
   await check(async () => await page.getByRole('button', { name: 'Empty', exact: true }).count() === 1, 'Deleting last session removed project');
   await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await page.evaluate(() => { window.__navigationQA.state.promptAnswer = 'Alpha renamed'; });
+  await page.locator('#rename-project').click();
+  await page.getByRole('button', { name: 'Alpha renamed', exact: true }).waitFor();
+  await check(async () => (await page.evaluate(() => window.__navigationQA.state.calls)).some((call) => call.cmd === 'rename_project' && call.args.name === 'Alpha renamed'), 'Project Rename should affect the selected project');
   await page.evaluate(() => { window.__navigationQA.state.slow = true; });
   await page.getByRole('button', { name: 'Code one', exact: true }).click();
   await page.locator('#kind-work').click();
@@ -123,16 +129,32 @@ async (page) => {
   await page.locator('#prompt').fill('Write a report');
   await page.locator('#send').click();
   await page.locator('#stop').waitFor({ state: 'visible' });
+  await page.evaluate(() => window.__navigationQA.emit('turn-event', { kind: 'tool_started', session_id: 'new-4', tool_id: 'qa-read', name: 'read_file' }));
+  await page.locator('.activity-entry').waitFor();
+  await check(async () => await page.locator('.activity-entry .activity-status').textContent() === 'Working', 'Running tools should appear as active timeline steps');
+  await page.evaluate(() => window.__navigationQA.emit('turn-event', { kind: 'tool', session_id: 'new-4', tool_id: 'qa-read', name: 'read_file', value: '{"path":"report.md"}' }));
+  await check(async () => await page.locator('.activity-entry .activity-status').textContent() === 'Completed', 'Completed tools should update their timeline step');
+  await check(async () => await page.locator('.message.turn-summary').count() === 0, 'Turn summary should wait until the turn finishes');
   await page.locator('#kind-code').click();
   await page.locator('#session-title').filter({ hasText: 'Code two' }).waitFor();
   await page.locator('#prompt').fill('Keep this new Code draft');
   await page.evaluate(() => window.__navigationQA.state.finish());
   await check(async () => await page.locator('#prompt').inputValue() === 'Keep this new Code draft', 'Background completion overwrote draft');
-  await page.locator('.project-group').filter({ has: page.getByRole('button', { name: 'Alpha', exact: true }) }).getByRole('button', { name: 'Remove', exact: true }).click();
-  await page.getByRole('button', { name: 'Alpha', exact: true }).waitFor({ state: 'detached' });
+  await page.locator('#kind-work').click();
+  await page.getByRole('button', { name: 'Task 4', exact: true }).click();
+  await page.locator('.message.turn-summary').waitFor();
+  await check(async () => await page.locator('.activity-entry time').count() === 1, 'The completed activity timeline should retain its timestamp');
+  await check(async () => (await page.locator('.message.turn-summary .message-role').textContent()) === 'Turn summary', 'Finished turns should show a distinct summary');
+  await check(async () => (await page.locator('.message.turn-summary li').count()) === 3 && (await page.locator('.message.turn-summary code').textContent()) === 'report.md', 'Turn summary Markdown formatting was not rendered');
+  await check(async () => await page.locator('.message.turn-summary img').count() === 0 && (await page.locator('.message.turn-summary .message-body').textContent()).includes('<img src=x onerror=alert(1)>'), 'Raw HTML in model Markdown must remain inert text');
+  await page.locator('#kind-code').click();
+  await page.getByRole('button', { name: 'Code two', exact: true }).click();
+  await page.locator('#remove-project').click();
+  await page.getByRole('button', { name: 'Alpha renamed', exact: true }).waitFor({ state: 'detached' });
   await page.locator('#open-project').click();
-  await page.getByRole('button', { name: 'Alpha', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Alpha renamed', exact: true }).waitFor();
   await check(async () => (await page.evaluate(() => window.__navigationQA.state.sessions)).some((s) => s.id === 'c1'), 'Project removal deleted sessions');
+  await check(async () => await page.getByRole('button', { name: 'Alpha renamed', exact: true }).count() === 1, 'Reopening a project did not preserve its display name');
   await page.locator('#new-project').click();
   await page.locator('#project-name').fill('NewCodebase');
   await page.getByRole('button', { name: 'Choose parent folder' }).click();
@@ -144,5 +166,5 @@ async (page) => {
   await page.screenshot({ path: '.playwright-cli/redesign-work.png', fullPage: true });
   if (errors.length) throw new Error(errors.join('\n'));
   await check(async () => !(await page.locator('#new-project').isDisabled()) && !(await page.locator('#open-project').isDisabled()), 'Project controls stayed disabled after async creation');
-  return 'Passed mode/draft restoration, delayed session creation without stealing navigation, Work/empty-project Explorer, nested sessions, session deletion, stale async selection, background completion, project removal/reopen, and separate New/Open project flows.';
+  return 'Passed mode/draft restoration, auto-saved approvals, aligned conversation/composer widths, main-workspace session controls, project-only actions with nested sessions, activity timeline, Markdown turn summary, safe rendering, stale async selection, background completion, project removal/reopen, and separate New/Open project flows.';
 }

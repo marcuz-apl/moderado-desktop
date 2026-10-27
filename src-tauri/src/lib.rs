@@ -108,7 +108,8 @@ impl AppState {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum TurnEvent {
     Text { session_id: String, value: String },
-    Tool { session_id: String, value: String },
+    ToolStarted { session_id: String, tool_id: String, name: String },
+    Tool { session_id: String, tool_id: String, name: String, value: String },
     Usage {
         session_id: String,
         usage: crate::agent::runner::ModelUsage,
@@ -1081,11 +1082,23 @@ async fn execute_turn(
                     },
                 );
             }
-            AgentEvent::Tool(value) => {
+            AgentEvent::ToolStarted { id, name } => {
+                let _ = app.emit(
+                    "turn-event",
+                    TurnEvent::ToolStarted {
+                        session_id: session_id.clone(),
+                        tool_id: id,
+                        name,
+                    },
+                );
+            }
+            AgentEvent::ToolCompleted { id, name, value } => {
                 let _ = app.emit(
                     "turn-event",
                     TurnEvent::Tool {
                         session_id: session_id.clone(),
+                        tool_id: id,
+                        name,
                         value,
                     },
                 );

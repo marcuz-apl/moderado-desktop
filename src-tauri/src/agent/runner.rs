@@ -28,7 +28,8 @@ pub struct RunConfig<'a> {
 #[derive(Debug)]
 pub enum AgentEvent {
     Text(String),
-    Tool(String),
+    ToolStarted { id: String, name: String },
+    ToolCompleted { id: String, name: String, value: String },
     Usage(ModelUsage),
 }
 
@@ -117,9 +118,10 @@ where
         SessionKind::Work => "You are Moderado, a helpful assistant.",
         SessionKind::Code => "You are Moderado, a coding agent. Use relative workspace paths with tools.",
     };
+    let summary_instruction = "When the turn is complete, finish your final response with a concise Markdown section headed `## Turn summary`. Summarize the completed work and important results as bullets. If no files were changed, summarize the answer or guidance provided. Do not claim unfinished work as complete.";
     for _ in 0..8 {
         let mut messages = vec![
-            json!({"role":"system","content":format!("{persona} Report tool errors honestly. {mode_instruction}")}),
+            json!({"role":"system","content":format!("{persona} Report tool errors honestly. {mode_instruction} {summary_instruction}")}),
         ];
         // Attachment blocks are references; expand them into text or image
         // parts only here, so history stays small.
@@ -174,6 +176,7 @@ where
             .push(json!({"role":"assistant","content":completion.content,"tool_calls":wire_calls}));
         persist(history)?;
         for call in calls {
+            emit(AgentEvent::ToolStarted { id: call.id.clone(), name: call.name.clone() });
             let result = if call.name == "web_search" {
                 match config.search {
                     Some(search) => match serde_json::from_str::<Value>(&call.arguments) {
@@ -207,7 +210,7 @@ where
                 Ok(value) => value,
                 Err(error) => format!("Error: {error}"),
             };
-            emit(AgentEvent::Tool(format!("{}: {}", call.name, value)));
+            emit(AgentEvent::ToolCompleted { id: call.id.clone(), name: call.name.clone(), value: value.clone() });
             history.push(json!({"role":"tool","tool_call_id":call.id,"content":value}));
             persist(history)?;
         }
@@ -305,6 +308,7 @@ mod tests {
             let (mut first, _) = listener.accept().unwrap();
             let request = read_request(&mut first);
             assert_eq!(request["model"], "test-model");
+            assert!(request["messages"][0]["content"].as_str().unwrap().contains("## Turn summary"));
             respond(&mut first, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\",\\\"content\\\":\\\"hello\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n");
             let (mut second, _) = listener.accept().unwrap();
             let request = read_request(&mut second);
@@ -354,6 +358,8 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event, AgentEvent::Text(text) if text == "Finished")));
+        assert!(events.iter().any(|event| matches!(event, AgentEvent::ToolStarted { id, name } if id == "call_1" && name == "write_file")));
+        assert!(events.iter().any(|event| matches!(event, AgentEvent::ToolCompleted { id, name, value } if id == "call_1" && name == "write_file" && value == "Wrote hello.txt")));
         }
     }
 

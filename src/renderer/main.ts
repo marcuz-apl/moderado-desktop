@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
+import MarkdownIt from 'markdown-it';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
@@ -15,11 +16,11 @@ type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebConte
 type ModelUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; rateTps: number | null; contextTokens: number | null };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
-type HistoryMessage = { role: string; content?: string | Array<{ type?: string; text?: string; name?: string }> };
+type HistoryMessage = { role: string; content?: string | Array<{ type?: string; text?: string; name?: string }>; tool_call_id?: string; tool_calls?: Array<{ id: string; function?: { name?: string } }> };
 type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
-type DisplayMessage = { role: string; content: string };
-type TurnEvent = { kind: 'text' | 'tool' | 'usage' | 'error' | 'done' | 'cancelled'; session_id: string; value?: string; usage?: ModelUsage };
+type DisplayMessage = { role: string; content: string; toolName?: string; toolId?: string; activityState?: 'working' | 'completed' | 'attention'; createdAt?: number };
+type TurnEvent = { kind: 'text' | 'tool_started' | 'tool' | 'usage' | 'error' | 'done' | 'cancelled'; session_id: string; tool_id?: string; name?: string; value?: string; usage?: ModelUsage };
 type ApprovalEvent = { sessionId: string; id: number; category: 'read_files' | 'edit_files' | 'fetch_web_content' | 'execute_command' | 'use_mcp_servers'; title: string; detail: string; hasPreview: boolean; path: string; before: string; after: string };
 type ApprovalExpired = { sessionId: string; id: number };
 type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
@@ -38,6 +39,7 @@ const GATEWAY_URLS: Record<GatewayMode, string> = {
   prod: 'https://modr.alfazen.org/v1',
   dev: 'http://127.0.0.1:4788/v1',
 };
+const markdown = new MarkdownIt({ html: false, linkify: true });
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const transcript = $<HTMLElement>('transcript');
@@ -236,30 +238,105 @@ function historyToView(history: HistoryMessage[]): DisplayMessage[] {
   return history.flatMap((message) => {
     const content = typeof message.content === 'string' ? message.content : message.content?.map((block) => block.type === 'attachment' ? `[${block.name ?? 'Attachment'}]` : block.text ?? '').join('\n') ?? '';
     if (message.role === 'user') return [{ role: 'You', content }];
-    if (message.role === 'tool') return [{ role: 'Tool', content }];
+    if (message.role === 'tool') return [{ role: 'Activity', content, toolId: message.tool_call_id, toolName: history.flatMap((item) => item.tool_calls ?? []).find((call) => call.id === message.tool_call_id)?.function?.name, activityState: content.startsWith('Error:') ? 'attention' : 'completed' }];
     if (message.role === 'system') return [{ role: 'System', content }];
-    if (message.role === 'assistant' && content) return [{ role: 'Agent', content }];
+    if (message.role === 'assistant' && content) {
+      if (message.tool_calls?.length) return [{ role: 'Agent', content }];
+      const summary = splitTurnSummary(content);
+      return [
+        ...(summary.response ? [{ role: 'Agent', content: summary.response }] : []),
+        { role: 'Turn summary', content: summary.summary },
+      ];
+    }
     return [];
   });
 }
 
-function messageElement(role: string, content: string): HTMLElement {
+function splitTurnSummary(content: string): { response: string; summary: string } {
+  const heading = /^ {0,3}#{1,3}\s+turn summary\s*$/im.exec(content);
+  if (!heading || heading.index === undefined) return { response: '', summary: content.trim() };
+  const headingEnd = content.indexOf('\n', heading.index);
+  return { response: content.slice(0, heading.index).trim(), summary: content.slice(headingEnd < 0 ? content.length : headingEnd + 1).trim() };
+}
+
+function activityTitle(name: string | undefined): string {
+  const titles: Record<string, string> = {
+    list_files: 'Browsed files', read_file: 'Read a file', search_files: 'Searched files',
+    write_file: 'Created a file', edit_file: 'Edited a file', execute_command: 'Ran a command', web_search: 'Searched the web',
+  };
+  return name ? titles[name] ?? name.replaceAll('_', ' ') : 'Tool activity';
+}
+
+function messageElement(message: DisplayMessage): HTMLElement {
+  if (message.role === 'Activity') {
+    const entry = document.createElement('article');
+    entry.className = `message activity-entry${message.activityState === 'attention' ? ' needs-attention' : ''}`;
+    const track = document.createElement('div'); track.className = 'activity-track'; track.setAttribute('aria-hidden', 'true');
+    const marker = document.createElement('span'); marker.className = `activity-marker${message.activityState === 'working' ? ' is-working' : ''}`;
+    marker.textContent = message.activityState === 'completed' ? '✓' : message.activityState === 'attention' ? '!' : '';
+    track.append(marker);
+    const card = document.createElement('div'); card.className = 'activity-card';
+    const heading = document.createElement('div'); heading.className = 'activity-heading';
+    const title = document.createElement('strong'); title.className = 'activity-title'; title.textContent = activityTitle(message.toolName);
+    const state = document.createElement('span'); state.className = 'activity-status';
+    state.textContent = message.activityState === 'working' ? 'Working' : message.activityState === 'attention' ? 'Needs attention' : 'Completed';
+    const time = document.createElement('time');
+    if (message.createdAt) { time.dateTime = new Date(message.createdAt).toISOString(); time.textContent = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    heading.append(title, state, time); card.append(heading);
+    if (message.content) {
+      const details = document.createElement('details'); details.className = 'activity-details';
+      const summary = document.createElement('summary'); summary.textContent = 'Details';
+      const output = document.createElement('pre');
+      try { output.textContent = JSON.stringify(JSON.parse(message.content), null, 2); }
+      catch { output.textContent = message.content; }
+      details.append(summary, output); card.append(details);
+    }
+    entry.append(track, card);
+    return entry;
+  }
   const card = document.createElement('article');
-  card.className = `message ${role.toLowerCase()}`;
+  card.className = `message ${message.role.toLowerCase().replaceAll(' ', '-')}`;
   const label = document.createElement('span');
   label.className = 'message-role';
-  label.textContent = role;
+  label.textContent = message.role;
   const body = document.createElement('div');
   body.className = 'message-body';
-  body.textContent = content;
+  if (message.role === 'Agent' || message.role === 'Turn summary') {
+    body.classList.add('markdown-body');
+    body.innerHTML = markdown.render(message.content);
+    body.querySelectorAll<HTMLAnchorElement>('a').forEach((link) => {
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.addEventListener('click', (event) => { event.preventDefault(); void openUrl(link.href).catch((error: unknown) => setStatus(String(error))); });
+    });
+  } else body.textContent = message.content;
   card.append(label, body);
   return card;
 }
 
-function renderTranscript(): void {
+function setToolActivity(sessionId: string, toolId: string, toolName: string, activityState: 'working' | 'completed' | 'attention', content = ''): void {
+  const messages = views.get(sessionId) ?? [];
+  let activity = messages.find((message) => message.role === 'Activity' && message.toolId === toolId);
+  if (!activity) {
+    activity = { role: 'Activity', content, toolId, toolName, activityState, createdAt: Date.now() };
+    messages.push(activity);
+  } else {
+    activity.toolName = toolName;
+    activity.content = content;
+    activity.activityState = activityState;
+  }
+  views.set(sessionId, messages);
+  if (sessionId === activeSessionId) {
+    const stickToBottom = shouldAutoScroll(transcript.scrollTop, transcript.scrollHeight, transcript.clientHeight);
+    renderTranscript(!stickToBottom);
+  }
+}
+
+function renderTranscript(keepReadingPosition = false): void {
+  const previousScrollTop = transcript.scrollTop;
+  const stickToBottom = !keepReadingPosition || shouldAutoScroll(transcript.scrollTop, transcript.scrollHeight, transcript.clientHeight);
   const messages = activeSessionId ? views.get(activeSessionId) ?? [] : [];
-  transcript.replaceChildren(...(messages.length ? messages.map((item) => messageElement(item.role, item.content)) : [emptyState.cloneNode(true)]));
-  transcript.scrollTop = transcript.scrollHeight;
+  transcript.replaceChildren(...(messages.length ? messages.map((item) => messageElement(item)) : [emptyState.cloneNode(true)]));
+  transcript.scrollTop = stickToBottom ? transcript.scrollHeight : previousScrollTop;
 }
 
 function addDisplay(sessionId: string, role: string, content: string, append = false): void {
@@ -276,7 +353,7 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
     else renderTranscript();
   } else {
     $('empty-state')?.remove();
-    transcript.append(messageElement(role, content));
+    transcript.append(messageElement({ role, content }));
   }
   if (stickToBottom) transcript.scrollTop = transcript.scrollHeight;
 }
@@ -323,17 +400,7 @@ ${children.length} sessions`;
       const list = document.createElement('div'); list.className = 'project-sessions'; list.setAttribute('aria-label', `${project.name} sessions`);
       list.append(...children.map((session) => sessionRow(session, 'active-code-session')));
       if (!children.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No sessions yet.'; list.append(empty); }
-      const actions = document.createElement('div'); actions.className = 'project-actions';
-      for (const [label, action] of [
-        ['New Session', () => { void newProjectSession(project.workspace); }],
-        ['Rename', () => { void renameProject(project); }],
-        ['Remove', () => { void removeProject(project); }],
-      ] as const) {
-        const control = document.createElement('button'); control.type = 'button'; control.className = 'text-button'; control.textContent = label;
-        control.disabled = creatingSession || (label === 'Remove' && children.some((session) => running.has(session.id)));
-        control.addEventListener('click', action); actions.append(control);
-      }
-      list.append(actions); section.append(list);
+      section.append(list);
     }
     return section;
   }));
@@ -374,6 +441,7 @@ function applyKindUi(): void {
   }
   $('workspace-button').textContent = newActionLabel('tasks');
   $('new-project').textContent = 'New';
+  $('new-session').toggleAttribute('hidden', work);
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-work-content').toggleAttribute('hidden', !work);
   $('profile-code-content').toggleAttribute('hidden', work);
@@ -464,7 +532,12 @@ async function refreshSummaries(): Promise<void> {
 async function refreshSession(id: string, replaceView = false): Promise<SessionRecord> {
   const record = await invoke<SessionRecord>('get_session', { sessionId: id });
   sessions.set(id, record);
-  if (replaceView || !views.has(id)) views.set(id, historyToView(record.history));
+  if (replaceView || !views.has(id)) {
+    const previousActivityTimes = new Map((views.get(id) ?? []).filter((message) => message.role === 'Activity' && message.toolId && message.createdAt).map((message) => [message.toolId!, message.createdAt!]));
+    const nextView = historyToView(record.history);
+    for (const message of nextView) if (message.role === 'Activity' && message.toolId) message.createdAt = previousActivityTimes.get(message.toolId);
+    views.set(id, nextView);
+  }
   conversationBindings.set(id, binding(record.settings));
   if (id === activeSessionId && replaceView) renderTranscript();
   return record;
@@ -551,6 +624,11 @@ function updateControls(): void {
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
+  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession || activeKind !== 'code' || !selectedProjectWorkspace;
+  const selectedProject = projects.find((project) => project.workspace === selectedProjectWorkspace);
+  const projectSessions = selectedProject ? sessionsForProject(summaries, selectedProject.workspace) : [];
+  $<HTMLButtonElement>('rename-project').disabled = !selectedProject || creatingSession;
+  $<HTMLButtonElement>('remove-project').disabled = !selectedProject || creatingSession || projectSessions.some((session) => running.has(session.id));
   $<HTMLButtonElement>('workspace-button').disabled = !initialized || creatingSession;
   for (const id of ['new-project', 'open-project', 'kind-work', 'kind-code']) $<HTMLButtonElement>(id).disabled = !initialized || creatingSession;
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;
@@ -1042,6 +1120,9 @@ async function newProjectSession(workspace: string): Promise<void> {
   saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); switchPanel('projects');
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
+$('new-session').addEventListener('click', () => {
+  if (selectedProjectWorkspace) void newProjectSession(selectedProjectWorkspace);
+});
 async function renameProject(project: ProjectRecord): Promise<void> {
   const name = window.prompt('Project display name (folder name stays the same)', project.name); if (name === null) return;
   try { await invoke('rename_project', { projectWorkspace: project.workspace, name }); await refreshSummaries(); updateFolderContext(); }
@@ -1058,6 +1139,14 @@ async function removeProject(project: ProjectRecord): Promise<void> {
     }
   } catch (error) { setStatus(String(error)); }
 }
+$('rename-project').addEventListener('click', () => {
+  const project = projects.find((item) => item.workspace === selectedProjectWorkspace);
+  if (project) void renameProject(project);
+});
+$('remove-project').addEventListener('click', () => {
+  const project = projects.find((item) => item.workspace === selectedProjectWorkspace);
+  if (project) void removeProject(project);
+});
 
 function localDateTime(date: Date): string {
   const two = (value: number) => String(value).padStart(2, '0');
@@ -1191,7 +1280,8 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     return;
   }
   if (payload.kind === 'text') addDisplay(id, 'Agent', payload.value ?? '', true);
-  else if (payload.kind === 'tool') addDisplay(id, 'Tool', payload.value ?? '');
+  else if (payload.kind === 'tool_started') setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', 'working');
+  else if (payload.kind === 'tool') setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', payload.value?.startsWith('Error:') ? 'attention' : 'completed', payload.value ?? '');
   else if (payload.kind === 'error') {
     if (!scheduledPending.has(id)) running.delete(id);
     if (id === activeSessionId) setStatus(payload.value ?? 'Turn failed.');

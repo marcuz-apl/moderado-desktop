@@ -16,10 +16,10 @@ A project is a registered canonical directory, persisted separately from session
 
 - New opens a name form, then a native parent-folder picker, and creates a new child directory. Existing directories are never overwritten.
 - Open registers an existing directory and restores its most recently viewed session, or displays a fresh session draft.
-- Projects expand to show their sessions and New Session, Rename, and Remove controls. The separate Sessions activity-bar panel is removed.
+- The Projects panel places New, Open, Rename, and Remove immediately below its heading. Rename and Remove apply to the selected project. Project rows expand to show indented sessions for navigation.
 - New Session starts an independent context without a folder picker. Sending in an empty project's draft also creates a session in that project.
+- New Session, Rename Session, and Delete Session are in the main workspace. Deleting a session removes conversation data and retains project registration and files.
 - Rename Project changes its display name. Folder paths remain stable.
-- Delete Session removes conversation data and retains project registration and files.
 - Remove Project archives its navigation entry and retains files and histories. Open restores the project and its sessions. A running project's removal is blocked.
 - Explorer can browse a project even when it has no sessions. Git inspection remains Code-only; Code keeps structural Plan/Act restrictions and Windows sandboxed commands.
 
@@ -29,7 +29,9 @@ The compact Work/Code selector restores that mode's last task or Code project/se
 
 Async selection results are guarded by a revision counter. A delayed request cannot reactivate another mode or overwrite a newer selection. Completion and attachment events are scoped to their originating conversation. Deleting the active session selects another conversation only in the same task mode or Code project; otherwise it displays a new draft.
 
-The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web approval controls; Code also shows command and the MCP placeholder. Provider/model and usage share a row below the input.
+The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web approval controls; Code also shows command and the MCP placeholder. Checkbox changes save immediately per session. Provider/model and usage share a row below the input.
+
+Assistant replies and final turn summaries render Markdown with embedded HTML disabled. Completed assistant replies are presented as Turn summaries; a requested summary heading is separated from any preceding response text. Tool calls appear in a compact activity timeline with running/completed/error states, timestamps, and expandable results.
 
 ## Persistence and migration
 
@@ -44,4 +46,4 @@ npx --package @playwright/cli playwright-cli open about:blank
 npx --package @playwright/cli playwright-cli run-code --filename scripts/check-navigation-ui.js
 ```
 
-The browser check uses a mocked Tauri bridge and exercises draft restoration, nested sessions, Explorer, background task navigation, last-session deletion, project removal/reopen, and New/Open project flows. Native file dialogs and real model behavior require desktop/manual verification.
+The browser check uses a mocked Tauri bridge and exercises draft restoration, nested sessions, main-workspace session controls, selected-project operations, Explorer, background task navigation, tool activity, Markdown summaries, last-session deletion, project removal/reopen, and New/Open project flows. Native file dialogs and real model behavior require desktop/manual verification.

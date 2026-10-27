@@ -59,12 +59,24 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   assert.match(html, /class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
   assert.match(html, /class="kind-stack"><div class="kind-segment"[\s\S]*<p class="eyebrow">AGENT SESSION<\/p><h1 id="session-title"/);
+  assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
   assert.match(main, /radio\.type = 'radio'/);
   assert.match(html, /data-panel="workspace"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
   assert.match(html, /data-panel="projects"[^>]*>[\s\S]*?#icon-projects/);
   assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
+});
+
+test('project operations stay under Projects and session navigation remains nested without session actions', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const panel = html.match(/data-panel-content="projects">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  assert.match(panel, /<h2>Projects<\/h2>[\s\S]*class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"[\s\S]*id="project-list"/);
+  assert.match(main, /className = 'project-sessions'/);
+  assert.match(style, /\.project-sessions\{padding:[^}]*\}/);
+  assert.doesNotMatch(main, /\['New Session',[\s\S]*renameProject\(project\)/);
 });
 
 test('all five Auto-Approve options default on and MCP is marked as a placeholder', async () => {
