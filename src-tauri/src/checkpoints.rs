@@ -341,7 +341,7 @@ impl CheckpointStore {
         let workspace = workspace
             .canonicalize()
             .map_err(|error| format!("Workspace unavailable: {error}"))?;
-        if let Ok(top) = Command::new("git")
+        if let Ok(top) = git_command()
             .arg("-C")
             .arg(&workspace)
             .args(["rev-parse", "--show-toplevel"])
@@ -352,7 +352,7 @@ impl CheckpointStore {
                     String::from_utf8(top.stdout).map_err(|_| "Invalid Git workspace path")?;
                 if Path::new(top.trim()).canonicalize().ok().as_deref() == Some(workspace.as_path())
                 {
-                    let dir = Command::new("git")
+                    let dir = git_command()
                         .arg("-C")
                         .arg(&workspace)
                         .args(["rev-parse", "--absolute-git-dir"])
@@ -370,7 +370,7 @@ impl CheckpointStore {
         }
         let repo = self.root.join(format!("{session_id}.git"));
         if !repo.exists() {
-            let output = Command::new("git")
+            let output = git_command()
                 .args(["init", "--bare"])
                 .arg(&repo)
                 .output()
@@ -436,6 +436,16 @@ fn git(
     git_input(repo, workspace, index, args, &[])
 }
 
+fn git_command() -> Command {
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    command
+}
+
 fn git_input(
     repo: &Path,
     workspace: &Path,
@@ -443,7 +453,7 @@ fn git_input(
     args: &[&str],
     input: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let mut command = Command::new("git");
+    let mut command = git_command();
     command
         .arg(format!("--git-dir={}", repo.display()))
         .arg(format!("--work-tree={}", workspace.display()))

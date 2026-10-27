@@ -22,7 +22,13 @@ pub struct SourceControlSnapshot {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<Output, String> {
-    Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    command
         .args(["--no-optional-locks", "-c", "core.fsmonitor=false", "-C"])
         .arg(root)
         .args(args)
