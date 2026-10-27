@@ -33,7 +33,8 @@ async (page) => {
         if (cmd === 'get_search_settings') return { enabled: false, endpoint: '' };
         if (cmd === 'list_project_entries') return [{ name: args.projectWorkspace ? 'code.md' : 'report.md', path: args.projectWorkspace ? 'code.md' : 'report.md', isDir: false }];
         if (cmd === 'read_project_file') return 'Readable document';
-        if (cmd === 'save_provider_settings' || cmd === 'save_auto_approve') return;
+        if (cmd === 'save_auto_approve') { state.sessions.find((s) => s.id === args.sessionId).autoApprove = { ...args.policy }; return; }
+        if (cmd === 'save_provider_settings') return;
         if (cmd === 'create_default_session' || cmd === 'create_session_in_project') {
           if (state.slowCreate) await new Promise((resolve) => setTimeout(resolve, 250));
           const index = state.sessions.length;
@@ -60,6 +61,20 @@ async (page) => {
   await page.goto('http://127.0.0.1:1420');
   await page.locator('#session-title').filter({ hasText: 'Work one' }).waitFor();
   await title('Work one');
+  await check(async () => await page.locator('#save-auto-approve').count() === 0, 'Auto-approve should not show a Save button');
+  const alignedWidths = await page.evaluate(() => {
+    const transcript = document.querySelector('#transcript').getBoundingClientRect();
+    const transcriptStyle = getComputedStyle(document.querySelector('#transcript'));
+    const composer = document.querySelector('#composer').getBoundingClientRect();
+    return Math.abs(transcript.left + parseFloat(transcriptStyle.paddingLeft) - composer.left) < 1
+      && Math.abs(transcript.right - parseFloat(transcriptStyle.paddingRight) - composer.right) < 1;
+  });
+  await check(async () => alignedWidths, 'Conversation content and message composer widths should align');
+  await page.locator('#approve-read').uncheck();
+  await page.waitForFunction(() => window.__navigationQA.state.calls.some((call) => call.cmd === 'save_auto_approve' && call.args.sessionId === 'w1' && call.args.policy.readFiles === false));
+  await check(async () => await page.evaluate(() => window.__navigationQA.state.sessions.find((s) => s.id === 'w1').autoApprove.readFiles === false), 'Auto-approve checkbox did not save immediately');
+  await page.locator('#approve-read').check();
+  await page.waitForFunction(() => window.__navigationQA.state.calls.filter((call) => call.cmd === 'save_auto_approve' && call.args.sessionId === 'w1').length >= 2);
   await page.locator('#prompt').fill('Unsent Work draft');
   await page.locator('#kind-code').click();
   await page.locator('#session-title').filter({ hasText: 'Code one' }).waitFor();

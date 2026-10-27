@@ -86,6 +86,8 @@ const lastSessionByProject = new Map<string, string>();
 const composerDrafts = new Map<string, { text: string; attachments: AttachmentRecord[] }>();
 let selectionRevision = 0;
 let selectingContext = false;
+let autoApproveSaveRevision = 0;
+let autoApproveSaveQueue: Promise<void> = Promise.resolve();
 const sessions = new Map<string, SessionRecord>();
 const views = new Map<string, DisplayMessage[]>();
 const running = new Set<string>();
@@ -499,8 +501,9 @@ function applyAutoApprove(policy: AutoApprovePolicy): void {
   for (const [id, key] of fields) $<HTMLInputElement>(id).checked = policy[key];
 }
 
-$<HTMLButtonElement>('save-auto-approve').addEventListener('click', () => {
-  if (!activeSessionId) { setStatus('Select a task or session first.'); return; }
+function saveAutoApprove(): void {
+  const sessionId = activeSessionId;
+  if (!sessionId) return;
   const policy: AutoApprovePolicy = {
     readFiles: $<HTMLInputElement>('approve-read').checked,
     editFiles: $<HTMLInputElement>('approve-edit').checked,
@@ -508,12 +511,28 @@ $<HTMLButtonElement>('save-auto-approve').addEventListener('click', () => {
     executeCommand: $<HTMLInputElement>('approve-command').checked,
     useMcpServers: $<HTMLInputElement>('approve-mcp').checked,
   };
-  void invoke('save_auto_approve', { sessionId: activeSessionId, policy }).then(async () => {
-    setStatus('Auto-Approve settings saved for this session.');
-    await refreshSummaries();
-    await refreshSession(activeSessionId!);
-  }).catch((error: unknown) => setStatus(`Auto-Approve settings could not be saved: ${String(error)}`));
-});
+  const saveRevision = ++autoApproveSaveRevision;
+  setStatus('Saving auto-approve settings…');
+  autoApproveSaveQueue = autoApproveSaveQueue.catch(() => undefined).then(async () => {
+    await invoke('save_auto_approve', { sessionId, policy });
+    const record = sessions.get(sessionId);
+    if (record) record.autoApprove = policy;
+    if (activeSessionId === sessionId && saveRevision === autoApproveSaveRevision) {
+      applyAutoApprove(policy);
+      setStatus('Auto-approve settings saved for this session.');
+    }
+  }).catch((error: unknown) => {
+    if (saveRevision === autoApproveSaveRevision) {
+      const record = sessions.get(sessionId);
+      if (activeSessionId === sessionId && record) applyAutoApprove(record.autoApprove);
+      setStatus(`Auto-approve settings for ${record?.name ?? 'the selected session'} could not be saved: ${String(error)}`);
+    }
+  });
+}
+
+for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command', 'approve-mcp']) {
+  $<HTMLInputElement>(id).addEventListener('change', saveAutoApprove);
+}
 
 function updateControls(): void {
   applyKindUi();
@@ -534,7 +553,6 @@ function updateControls(): void {
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('workspace-button').disabled = !initialized || creatingSession;
   for (const id of ['new-project', 'open-project', 'kind-work', 'kind-code']) $<HTMLButtonElement>(id).disabled = !initialized || creatingSession;
-  $<HTMLButtonElement>('save-auto-approve').disabled = !activeSessionId || selectingContext;
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;
   $<HTMLButtonElement>('new-schedule').disabled = !activeSessionId;
   $<HTMLButtonElement>('import-transcript').disabled = !activeSessionId;

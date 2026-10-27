@@ -58,6 +58,7 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   assert.match(html, /class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
+  assert.match(html, /class="kind-stack"><div class="kind-segment"[\s\S]*<p class="eyebrow">AGENT SESSION<\/p><h1 id="session-title"/);
   assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
   assert.match(main, /radio\.type = 'radio'/);
   assert.match(html, /data-panel="workspace"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
@@ -77,10 +78,14 @@ test('all five Auto-Approve options default on and MCP is marked as a placeholde
 
 test('Auto-Approve controls sit directly above the message composer', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
   const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<\/div>\s*<\/main>/)?.[1] ?? '';
   assert.match(composer, /id="auto-approve-group"/);
   assert.ok(composer.indexOf('id="auto-approve-group"') < composer.indexOf('id="composer"'));
   assert.match(composer, /class="auto-approve-bar"/);
+  assert.doesNotMatch(composer, /id="save-auto-approve"/);
+  assert.match(style, /\.auto-approve-bar\{padding:0;border:0;border-radius:0;background:transparent\}/);
+  assert.match(style, /\.message\{max-width:none\}/);
   assert.doesNotMatch(html.slice(0, html.indexOf('<main class="main">')), /id="auto-approve-group"/);
 });
 
