@@ -7,7 +7,7 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions, type SessionKind, type SidebarPanel } from './sessions-view';
+import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -17,7 +17,7 @@ type ModelUsage = { inputTokens: number | null; outputTokens: number | null; tot
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
 type HistoryMessage = { role: string; content?: string | Array<{ type?: string; text?: string; name?: string }>; tool_call_id?: string; tool_calls?: Array<{ id: string; function?: { name?: string } }> };
-type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
+type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; taskId: string | null; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string; toolName?: string; toolId?: string; activityState?: 'working' | 'completed' | 'attention'; createdAt?: number };
 type TurnEvent = { kind: 'text' | 'tool_started' | 'tool' | 'usage' | 'error' | 'done' | 'cancelled'; session_id: string; tool_id?: string; name?: string; value?: string; usage?: ModelUsage };
@@ -30,6 +30,7 @@ type SearchSettings = { enabled: boolean; endpoint: string };
 type ScheduleStarted = { sessionId: string; scheduleId: string; prompt: string };
 type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null };
 type ProjectRecord = { workspace: string; name: string; updatedAt: number };
+type WorkTaskRecord = { id: string; name: string; workspace: string; updatedAt: number };
 type ProjectEntry = { name: string; path: string; isDir: boolean };
 type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
 type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
@@ -78,13 +79,17 @@ let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = n
 let approvalBefore = '';
 let activePanel: SidebarPanel | null = 'tasks';
 let selectedProjectWorkspace: string | null = null;
+let selectedWorkTaskId: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
 const expandedFolders = new Set<string>();
 let summaries: SessionSummary[] = [];
 let projects: ProjectRecord[] = [];
+let workTasks: WorkTaskRecord[] = [];
 const expandedProjects = new Set<string>();
+const expandedWorkTasks = new Set<string>();
 const lastSessionByKind = new Map<SessionKind, string>();
 const lastSessionByProject = new Map<string, string>();
+const lastSessionByTask = new Map<string, string>();
 const composerDrafts = new Map<string, { text: string; attachments: AttachmentRecord[] }>();
 let selectionRevision = 0;
 let selectingContext = false;
@@ -374,9 +379,32 @@ function sessionRow(session: SessionSummary, group: string): HTMLElement {
 }
 
 function renderSessions(): void {
-  const work = visibleSessions(summaries, 'work');
-  $('task-list').replaceChildren(...work.map((session) => sessionRow(session, 'active-work-task')));
-  if (!work.length) $('task-list').textContent = 'Create a task to begin.';
+  $('task-list').replaceChildren(...workTasks.map((task) => {
+    const section = document.createElement('section'); section.className = 'task-group';
+    const row = document.createElement('div'); row.className = 'selectable-session-row task-heading';
+    const children = summaries.filter((session) => session.kind === 'work' && session.taskId === task.id);
+    const expanded = expandedWorkTasks.has(task.id);
+    const expander = document.createElement('button'); expander.type = 'button'; expander.className = 'project-expander';
+    expander.textContent = expanded ? '▾' : '▸'; expander.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${task.name}`); expander.setAttribute('aria-expanded', String(expanded));
+    expander.addEventListener('click', () => { if (expanded) expandedWorkTasks.delete(task.id); else expandedWorkTasks.add(task.id); renderSessions(); });
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = `session-item${activeKind === 'work' && task.id === selectedWorkTaskId ? ' selected' : ''}`;
+    button.textContent = `${children.some((session) => running.has(session.id)) ? '● ' : ''}${task.name}`;
+    button.title = `${task.workspace}\n${children.length} sessions`;
+    button.addEventListener('click', () => { void selectWorkTask(task.id); });
+    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'active-work-task'; radio.checked = activeKind === 'work' && task.id === selectedWorkTaskId;
+    radio.setAttribute('aria-label', `Select task ${task.name}`);
+    radio.addEventListener('change', () => { void selectWorkTask(task.id); });
+    row.append(expander, button, radio); section.append(row);
+    if (expanded) {
+      const list = document.createElement('div'); list.className = 'task-sessions'; list.setAttribute('aria-label', `${task.name} sessions`);
+      list.append(...children.map((session) => sessionRow(session, 'active-work-session')));
+      if (!children.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No sessions yet.'; list.append(empty); }
+      section.append(list);
+    }
+    return section;
+  }));
+  if (!workTasks.length) $('task-list').textContent = 'Create a task to begin.';
   $('project-list').replaceChildren(...projects.map((project) => {
     const section = document.createElement('section'); section.className = 'project-group';
     const row = document.createElement('div'); row.className = 'selectable-session-row project-heading';
@@ -436,12 +464,12 @@ function applyKindUi(): void {
   const emptyCopy = document.getElementById('empty-state-copy');
   if (emptyCopy) {
     emptyCopy.textContent = work
-      ? 'Ask a question or create a document. Files and editable attachment copies stay in this task’s managed folder.'
+      ? selectedWorkTaskId ? 'Ask a question or create a document. Files and editable attachment copies stay in this task’s managed folder.' : 'Create or select a task in the Tasks panel, then start a session here.'
       : (selectedProjectWorkspace ? 'Start a new session in this project. Existing project files are available in Explorer.' : 'Create a project folder or open an existing codebase to begin.');
   }
   $('workspace-button').textContent = newActionLabel('tasks');
   $('new-project').textContent = 'New';
-  $('new-session').toggleAttribute('hidden', work);
+  $('new-session').toggleAttribute('hidden', false);
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-work-content').toggleAttribute('hidden', !work);
   $('profile-code-content').toggleAttribute('hidden', work);
@@ -450,46 +478,50 @@ function applyKindUi(): void {
 }
 
 function rememberNavigation(): void {
-  try { localStorage.setItem('moderado-navigation', JSON.stringify({ work: lastSessionByKind.get('work'), code: lastSessionByKind.get('code'), project: selectedProjectWorkspace })); }
+  try { localStorage.setItem('moderado-navigation', JSON.stringify({ work: lastSessionByKind.get('work'), workTask: selectedWorkTaskId, code: lastSessionByKind.get('code'), project: selectedProjectWorkspace })); }
   catch (error) { setStatus(`Navigation preference could not be saved: ${String(error)}`); }
 }
 function restoreNavigation(): void {
   try {
-    const saved: { work?: unknown; code?: unknown; project?: unknown } | null = JSON.parse(localStorage.getItem('moderado-navigation') ?? '{}');
+    const saved: { work?: unknown; workTask?: unknown; code?: unknown; project?: unknown } | null = JSON.parse(localStorage.getItem('moderado-navigation') ?? '{}');
     if (!saved || typeof saved !== 'object') return;
     for (const kind of ['work', 'code'] as const) { const id = saved[kind]; if (typeof id === 'string' && summaries.some((session) => session.id === id && session.kind === kind)) lastSessionByKind.set(kind, id); }
     if (typeof saved.project === 'string' && projects.some((project) => project.workspace === saved.project)) selectedProjectWorkspace = saved.project;
+    if (typeof saved.workTask === 'string' && workTasks.some((task) => task.id === saved.workTask)) selectedWorkTaskId = saved.workTask;
+    const work = summaries.find((session) => session.id === lastSessionByKind.get('work'));
+    if (work?.taskId) lastSessionByTask.set(work.taskId, work.id);
     const code = summaries.find((session) => session.id === lastSessionByKind.get('code'));
     if (code) lastSessionByProject.set(code.workspace, code.id);
   } catch (error) { setStatus(`Navigation preference could not be loaded: ${String(error)}`); }
 }
-function draftKey(): string { return activeSessionId ?? `${activeKind}:${activeKind === 'code' ? selectedProjectWorkspace ?? '' : ''}`; }
+function draftKey(): string { return activeSessionId ?? `${activeKind}:${activeKind === 'code' ? selectedProjectWorkspace ?? '' : selectedWorkTaskId ?? ''}`; }
 function saveComposerDraft(): void { composerDrafts.set(draftKey(), { text: prompt.value, attachments: [...pendingAttachments] }); }
 function restoreComposerDraft(): void {
   const draft = composerDrafts.get(draftKey()); prompt.value = draft?.text ?? ''; pendingAttachments = draft?.attachments ?? []; renderChips();
 }
 function currentFolder(): string | null {
-  return activeKind === 'code' ? selectedProjectWorkspace : activeSession()?.workspace ?? null;
+  return activeKind === 'code' ? selectedProjectWorkspace : workTasks.find((task) => task.id === selectedWorkTaskId)?.workspace ?? activeSession()?.workspace ?? null;
 }
 function updateFolderContext(): void {
   const folder = currentFolder();
   const project = projects.find((item) => item.workspace === folder);
-  $('workspace-context').textContent = folder ?? (activeKind === 'work' ? 'A managed folder is created when you start a task.' : 'Create or open a project folder.');
+  const task = workTasks.find((item) => item.id === selectedWorkTaskId);
+  $('workspace-context').textContent = folder ?? (activeKind === 'work' ? 'Select a task to start a session.' : 'Create or open a project folder.');
   $('workspace-context').title = folder ?? '';
-  $('project-root-name').textContent = project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No folder selected');
+  $('project-root-name').textContent = activeKind === 'work' ? task?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No task selected') : project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Project files') : 'No project selected');
 }
 function enterDraft(kind: SessionKind, workspace: string | null = selectedProjectWorkspace): void {
   selectionRevision++; selectingContext = false; activeSessionId = null; activeKind = kind;
   if (kind === 'code') selectedProjectWorkspace = workspace;
   rememberNavigation();
-  $('session-title').textContent = kind === 'work' ? 'New Task' : 'New Session';
+  $('session-title').textContent = kind === 'work' && !selectedWorkTaskId ? 'Select a task' : 'New Session';
   $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
   if (activePanel === 'workspace') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
   void refreshCheckpoints(); void refreshSchedules();
-  setStatus(kind === 'work' ? 'Ready for a new task.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
+  setStatus(kind === 'work' ? selectedWorkTaskId ? 'Start a session in this task.' : 'Create or select a task to begin.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
 }
 async function setKind(kind: SessionKind): Promise<void> {
   if (kind === activeKind && !selectingContext) return;
@@ -501,7 +533,11 @@ async function setKind(kind: SessionKind): Promise<void> {
   const next = sessionForMode(candidates, kind, remembered, kind === 'code' ? workspace : null);
   enterDraft(kind, kind === 'code' ? workspace ?? next?.workspace ?? null : workspace);
   switchPanel(defaultPanelForKind(kind));
-  if (next) await selectSession(next.id, false);
+  if (kind === 'work') {
+    const task = workTasks.find((item) => item.id === selectedWorkTaskId) ?? workTasks[0];
+    if (task) await selectWorkTask(task.id, false);
+    else if (next) await selectSession(next.id, false);
+  } else if (next) await selectSession(next.id, false);
 }
 
 function renderChips(): void {
@@ -525,7 +561,7 @@ function renderChips(): void {
 }
 
 async function refreshSummaries(): Promise<void> {
-  [summaries, projects] = await Promise.all([invoke<SessionSummary[]>('list_sessions'), invoke<ProjectRecord[]>('list_projects')]);
+  [summaries, projects, workTasks] = await Promise.all([invoke<SessionSummary[]>('list_sessions'), invoke<ProjectRecord[]>('list_projects'), invoke<WorkTaskRecord[]>('list_work_tasks')]);
   renderSessions();
 }
 
@@ -551,6 +587,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     if (revision !== selectionRevision) return;
     activeSessionId = id; activeKind = record.kind; lastSessionByKind.set(record.kind, id);
     if (record.kind === 'code') { selectedProjectWorkspace = record.workspace; lastSessionByProject.set(record.workspace, id); expandedProjects.add(record.workspace); }
+    else if (record.taskId) { selectedWorkTaskId = record.taskId; lastSessionByTask.set(record.taskId, id); expandedWorkTasks.add(record.taskId); }
     rememberNavigation();
     applySessionSettings(record.settings); applyAutoApprove(record.autoApprove);
     setMode(record.kind === 'work' ? 'act' : modeBySession.get(id) ?? 'act');
@@ -610,7 +647,7 @@ for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-comman
 function updateControls(): void {
   applyKindUi();
   const busy = activeSessionId ? running.has(activeSessionId) : false;
-  send.disabled = !canSend(initialized, busy || creatingSession || selectingContext) || (activeKind === 'code' && !selectedProjectWorkspace);
+  send.disabled = !canSend(initialized, busy || creatingSession || selectingContext) || (activeKind === 'code' && !selectedProjectWorkspace) || (activeKind === 'work' && !selectedWorkTaskId);
   stop.hidden = !busy;
   stop.disabled = !busy;
   providerSelect.disabled = busy;
@@ -624,9 +661,13 @@ function updateControls(): void {
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
-  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession || activeKind !== 'code' || !selectedProjectWorkspace;
+  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession || (activeKind === 'code' ? !selectedProjectWorkspace : !selectedWorkTaskId);
   const selectedProject = projects.find((project) => project.workspace === selectedProjectWorkspace);
   const projectSessions = selectedProject ? sessionsForProject(summaries, selectedProject.workspace) : [];
+  const selectedTask = activeKind === 'work' ? workTasks.find((task) => task.id === selectedWorkTaskId) : undefined;
+  const taskSessions = selectedTask ? summaries.filter((session) => session.kind === 'work' && session.taskId === selectedTask.id) : [];
+  $<HTMLButtonElement>('rename-task').disabled = !selectedTask || creatingSession;
+  $<HTMLButtonElement>('delete-task').disabled = !selectedTask || creatingSession || taskSessions.some((session) => running.has(session.id));
   $<HTMLButtonElement>('rename-project').disabled = !selectedProject || creatingSession;
   $<HTMLButtonElement>('remove-project').disabled = !selectedProject || creatingSession || projectSessions.some((session) => running.has(session.id));
   $<HTMLButtonElement>('workspace-button').disabled = !initialized || creatingSession;
@@ -753,8 +794,26 @@ async function selectProject(workspace: string): Promise<void> {
   if (next) await selectSession(next.id, false);
   else renderSessions();
 }
-function browserArgs(): { sessionId: string | null; projectWorkspace: string | null } {
-  return { sessionId: activeKind === 'work' ? activeSessionId : null, projectWorkspace: activeKind === 'code' ? selectedProjectWorkspace : null };
+async function selectWorkTask(taskId: string, saveDraft = true): Promise<void> {
+  const task = workTasks.find((item) => item.id === taskId);
+  if (!task) { setStatus('Task is no longer available.'); return; }
+  if (saveDraft) saveComposerDraft();
+  selectedWorkTaskId = taskId;
+  expandedWorkTasks.add(taskId);
+  const children = summaries.filter((session) => session.kind === 'work' && session.taskId === taskId);
+  const remembered = lastSessionByTask.get(taskId) ?? (summaries.find((session) => session.id === lastSessionByKind.get('work') && session.taskId === taskId)?.id);
+  const next = children.find((session) => session.id === remembered) ?? children[0];
+  switchPanel('tasks');
+  if (next) await selectSession(next.id, false);
+  else {
+    enterDraft('work');
+    updateFolderContext();
+    renderSessions();
+    if (activePanel === 'workspace') void refreshProjectTree();
+  }
+}
+function browserArgs(): { sessionId: string | null; projectWorkspace: string | null; workTaskId: string | null } {
+  return { sessionId: activeKind === 'work' ? activeSessionId : null, projectWorkspace: activeKind === 'code' ? selectedProjectWorkspace : null, workTaskId: activeKind === 'work' ? selectedWorkTaskId : null };
 }
 
 async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
@@ -971,9 +1030,14 @@ async function initialize(): Promise<void> {
     await refreshSummaries();
     restoreNavigation();
     await setKind(DEFAULT_SESSION_KIND);
-    const firstWorkSession = sessionForMode(summaries, DEFAULT_SESSION_KIND, lastSessionByKind.get(DEFAULT_SESSION_KIND));
-    if (firstWorkSession) await selectSession(firstWorkSession.id);
-    else await createSession(currentSettings(), DEFAULT_SESSION_KIND);
+    switchPanel(defaultPanelForKind(DEFAULT_SESSION_KIND));
+    const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
+    if (restoredTask) await selectWorkTask(restoredTask.id, false);
+    else {
+      const firstWorkSession = sessionForMode(summaries, DEFAULT_SESSION_KIND, lastSessionByKind.get(DEFAULT_SESSION_KIND));
+      if (firstWorkSession) await selectSession(firstWorkSession.id);
+      else await createSession(currentSettings(), DEFAULT_SESSION_KIND);
+    }
     const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
     for (const item of local) {
       const preset = providers.find((provider) => provider.id === item.id);
@@ -1071,7 +1135,7 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
 
-async function createSession(settings: ProviderSettings, kind: SessionKind = activeKind, workspace: string | null = selectedProjectWorkspace): Promise<string> {
+async function createSession(settings: ProviderSettings, kind: SessionKind = activeKind, workspace: string | null = selectedProjectWorkspace, taskId: string | null = selectedWorkTaskId): Promise<string> {
   if (!initialized || creatingSession) throw new Error('Session setup is already in progress.');
   if (kind === 'code' && !workspace) throw new Error('Create or open a project first.');
   const text = prompt.value;
@@ -1079,9 +1143,10 @@ async function createSession(settings: ProviderSettings, kind: SessionKind = act
   creatingSession = true; updateControls();
   try {
     const record = kind === 'work'
-      ? await invoke<SessionRecord>('create_default_session', { settings, kind })
+      ? taskId ? await invoke<SessionRecord>('create_work_session_for_task', { taskId, settings }) : await invoke<SessionRecord>('create_default_session', { settings, kind })
       : await invoke<SessionRecord>('create_session_in_project', { projectWorkspace: workspace, settings });
     sessions.set(record.id, record); views.set(record.id, []);
+    if (record.taskId) selectedWorkTaskId = record.taskId;
     await refreshSummaries();
     if (revision === selectionRevision) {
       await selectSession(record.id);
@@ -1094,9 +1159,44 @@ async function createSession(settings: ProviderSettings, kind: SessionKind = act
 
 $('workspace-button').addEventListener('click', async () => {
   if (creatingSession) return;
-  saveComposerDraft(); enterDraft('work'); prompt.value = ''; pendingAttachments = []; renderChips();
-  try { await createSession(currentSettings(), 'work'); } catch (error) { setStatus(String(error)); }
+  saveComposerDraft(); creatingSession = true; updateControls();
+  try {
+    const task = await invoke<WorkTaskRecord>('create_work_task');
+    await refreshSummaries(); selectedWorkTaskId = task.id; expandedWorkTasks.add(task.id); lastSessionByTask.delete(task.id); rememberNavigation();
+    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); switchPanel('tasks');
+    setStatus(`Task “${task.name}” created. Create a session in the workspace to begin.`);
+  } catch (error) { setStatus(String(error)); }
+  finally { creatingSession = false; renderSessions(); updateControls(); }
 });
+
+async function renameWorkTask(task: WorkTaskRecord): Promise<void> {
+  const name = window.prompt('Task name', task.name);
+  if (name === null) return;
+  try { await invoke('rename_work_task', { taskId: task.id, name }); await refreshSummaries(); updateFolderContext(); }
+  catch (error) { setStatus(String(error)); }
+}
+
+async function removeWorkTask(task: WorkTaskRecord): Promise<void> {
+  if (!window.confirm(`Delete task “${task.name}” and its sessions from Moderado? Its managed folder and files will remain.`)) return;
+  const wasSelected = selectedWorkTaskId === task.id;
+  try {
+    const removed = await invoke<string[]>('delete_work_task', { taskId: task.id });
+    for (const id of removed) { sessions.delete(id); views.delete(id); conversationBindings.delete(id); composerDrafts.delete(id); usageBySession.delete(id); running.delete(id); }
+    lastSessionByTask.delete(task.id);
+    if (removed.includes(lastSessionByKind.get('work') ?? '')) lastSessionByKind.delete('work');
+    await refreshSummaries();
+    if (!wasSelected) return;
+    selectedWorkTaskId = null; rememberNavigation();
+    if (activeKind === 'work') {
+      const next = workTasks[0];
+      if (next) await selectWorkTask(next.id, false);
+      else { enterDraft('work'); updateFolderContext(); }
+    }
+  } catch (error) { setStatus(String(error)); }
+}
+
+$('rename-task').addEventListener('click', () => { const task = workTasks.find((item) => item.id === selectedWorkTaskId); if (task) void renameWorkTask(task); });
+$('delete-task').addEventListener('click', () => { const task = workTasks.find((item) => item.id === selectedWorkTaskId); if (task) void removeWorkTask(task); });
 
 const projectDialog = $<HTMLDialogElement>('new-project-dialog');
 $('new-project').addEventListener('click', () => { $<HTMLInputElement>('project-name').value = ''; projectDialog.showModal(); $<HTMLInputElement>('project-name').focus(); });
@@ -1121,7 +1221,9 @@ async function newProjectSession(workspace: string): Promise<void> {
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
 $('new-session').addEventListener('click', () => {
-  if (selectedProjectWorkspace) void newProjectSession(selectedProjectWorkspace);
+  if (activeKind === 'work') {
+    if (selectedWorkTaskId) void createSession(currentSettings(), 'work', null, selectedWorkTaskId).catch((error) => setStatus(String(error)));
+  } else if (selectedProjectWorkspace) void newProjectSession(selectedProjectWorkspace);
 });
 async function renameProject(project: ProjectRecord): Promise<void> {
   const name = window.prompt('Project display name (folder name stays the same)', project.name); if (name === null) return;
@@ -1231,7 +1333,7 @@ $<HTMLFormElement>('import-form').addEventListener('submit', async (event) => {
 $('rename-session').addEventListener('click', async () => {
   const session = activeSession();
   if (!session || running.has(session.id)) return;
-  const name = window.prompt(session.kind === 'work' ? 'Task name' : 'Session name', session.name);
+  const name = window.prompt('Session name', session.name);
   if (name === null) return;
   try {
     await invoke('rename_session', { sessionId: session.id, name });
@@ -1243,16 +1345,19 @@ $('rename-session').addEventListener('click', async () => {
 
 $('delete-session').addEventListener('click', async () => {
   const session = activeSession();
-  if (!session || running.has(session.id) || !window.confirm(`Delete ${session.kind === 'work' ? 'task' : 'session'} “${session.name}”? Its folder and files will remain.`)) return;
+  if (!session || running.has(session.id) || !window.confirm(`Delete session “${session.name}”? Its task/project folder and files will remain.`)) return;
   try {
     await invoke('delete_session', { sessionId: session.id });
     sessions.delete(session.id); views.delete(session.id); conversationBindings.delete(session.id); composerDrafts.delete(session.id); usageBySession.delete(session.id);
     lastSessionByKind.delete(session.kind);
     if (session.kind === 'code') lastSessionByProject.delete(session.workspace);
+    if (session.taskId && lastSessionByTask.get(session.taskId) === session.id) lastSessionByTask.delete(session.taskId);
     await refreshSummaries();
     if (activeSessionId !== session.id) return;
     enterDraft(session.kind, session.kind === 'code' ? session.workspace : selectedProjectWorkspace);
-    const next = sessionForMode(summaries, session.kind, undefined, session.kind === 'code' ? session.workspace : null);
+    const next = session.kind === 'work'
+      ? summaries.find((item) => item.kind === 'work' && item.taskId === session.taskId)
+      : sessionForMode(summaries, session.kind, undefined, session.workspace);
     if (next) await selectSession(next.id, false);
   } catch (error) { setStatus(String(error)); }
 });

@@ -19,7 +19,7 @@ use provider::ProviderId;
 use schedules::{ApprovalPolicy, Schedule, ScheduleStore};
 use search::{SearchConfig, SearchSettings, SearchStore};
 use serde::{Deserialize, Serialize};
-use sessions::{CheckpointRecord, ProjectRecord, SessionKind, SessionRecord, SessionStore, SessionSummary};
+use sessions::{CheckpointRecord, ProjectRecord, SessionKind, SessionRecord, SessionStore, SessionSummary, WorkTaskRecord};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -193,6 +193,45 @@ fn create_session_in_project(
     )
 }
 
+#[tauri::command]
+fn create_work_task(state: tauri::State<'_, AppState>) -> Result<WorkTaskRecord, String> {
+    let documents = dirs::document_dir().or_else(|| dirs::home_dir().map(|home| home.join("Documents"))).ok_or("Documents folder is unavailable")?;
+    let workspace = sessions::create_default_work_workspace(&documents)?;
+    let name = workspace.file_name().ok_or("Task folder has no name")?.to_string_lossy().into_owned();
+    state.store.create_work_task(&workspace, &name)
+}
+
+#[tauri::command]
+fn list_work_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<WorkTaskRecord>, String> {
+    state.store.list_work_tasks()
+}
+
+#[tauri::command]
+fn rename_work_task(state: tauri::State<'_, AppState>, task_id: String, name: String) -> Result<(), String> {
+    state.store.rename_work_task(&task_id, &name)
+}
+
+#[tauri::command]
+fn create_work_session_for_task(state: tauri::State<'_, AppState>, task_id: String, settings: ProviderSettings) -> Result<SessionRecord, String> {
+    let existing = state.store.list()?;
+    let mut number = 1;
+    while existing.iter().any(|session| session.task_id.as_deref() == Some(&task_id) && session.name == format!("Session {number}")) { number += 1; }
+    state.store.create_work_session_for_task(&task_id, &format!("Session {number}"), settings)
+}
+
+#[tauri::command]
+fn delete_work_task(app: tauri::AppHandle, state: tauri::State<'_, AppState>, task_id: String) -> Result<(), String> {
+    let children: Vec<_> = state.store.list()?.into_iter().filter(|session| session.task_id.as_deref() == Some(&task_id)).collect();
+    let runtimes: Vec<_> = children.iter().map(|session| state.runtime(&session.id)).collect::<Result<_, _>>()?;
+    let _guards: Vec<_> = runtimes.iter().map(|runtime| runtime.turn_lock.try_lock().map_err(|_| "Stop the running sessions before removing this task")).collect::<Result<_, _>>()?;
+    let removed = state.store.delete_work_task(&task_id)?;
+    if let Ok(root) = app.path().app_data_dir() {
+        for id in &removed { let _ = std::fs::remove_dir_all(root.join("attachments").join(id)); }
+    }
+    state.runtimes.lock().map_err(|_| "Session state unavailable")?.retain(|id, _| !removed.contains(id));
+    Ok(())
+}
+
 async fn pick_project_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let (sender, receiver) = oneshot::channel();
     app.dialog().file().pick_folder(move |selection| { let _ = sender.send(selection); });
@@ -260,12 +299,9 @@ fn create_work_session_in_documents(
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .ok_or("Documents folder is unavailable")?;
     let workspace = sessions::create_default_work_workspace(&documents)?;
-    let name = workspace
-        .file_name()
-        .ok_or("Work session folder has no name")?
-        .to_string_lossy()
-        .into_owned();
-    store.create_with_kind(&workspace, &name, settings, SessionKind::Work)
+    let task_name = workspace.file_name().ok_or("Work session folder has no name")?.to_string_lossy().into_owned();
+    let task = store.create_work_task(&workspace, &task_name)?;
+    store.create_work_session_for_task(&task.id, "Session 1", settings)
 }
 
 #[tauri::command]
@@ -294,9 +330,12 @@ fn save_auto_approve(
     state.store.update_auto_approve(&session_id, policy)
 }
 
-fn browser_workspace(state: &AppState, session_id: Option<String>, project_workspace: Option<String>) -> Result<PathBuf, String> {
+fn browser_workspace(state: &AppState, session_id: Option<String>, project_workspace: Option<String>, work_task_id: Option<String>) -> Result<PathBuf, String> {
     if let Some(workspace) = project_workspace {
         return Ok(PathBuf::from(state.store.get_project(&workspace)?.workspace));
+    }
+    if let Some(task_id) = work_task_id {
+        return Ok(PathBuf::from(state.store.get_work_task(&task_id)?.workspace));
     }
     let id = session_id.ok_or("Select a task or project first")?;
     Ok(PathBuf::from(state.store.get(&id)?.workspace))
@@ -307,9 +346,10 @@ fn list_project_entries(
     state: tauri::State<'_, AppState>,
     session_id: Option<String>,
     project_workspace: Option<String>,
+    work_task_id: Option<String>,
     path: String,
 ) -> Result<Vec<workspace::ProjectEntry>, String> {
-    let root = browser_workspace(&state, session_id, project_workspace)?;
+    let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
     workspace::list_project_entries(&root, &path)
 }
 
@@ -318,9 +358,10 @@ fn read_project_file(
     state: tauri::State<'_, AppState>,
     session_id: Option<String>,
     project_workspace: Option<String>,
+    work_task_id: Option<String>,
     path: String,
 ) -> Result<String, String> {
-    let root = browser_workspace(&state, session_id, project_workspace)?;
+    let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
     workspace::read_text(&root, &path)
 }
 
@@ -329,8 +370,9 @@ fn get_source_control(
     state: tauri::State<'_, AppState>,
     session_id: Option<String>,
     project_workspace: Option<String>,
+    work_task_id: Option<String>,
 ) -> Result<source_control::SourceControlSnapshot, String> {
-    let root = browser_workspace(&state, session_id, project_workspace)?;
+    let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
     source_control::get_source_control(&root)
 }
 
@@ -540,7 +582,9 @@ async fn import_transcript(
     let session = if source.kind == SessionKind::Work {
         let documents = dirs::document_dir().or_else(|| dirs::home_dir().map(|home| home.join("Documents"))).ok_or("Documents folder is unavailable")?;
         let workspace = sessions::create_default_work_workspace(&documents)?;
-        state.store.create_with_kind(&workspace, &name, source.settings, SessionKind::Work)?
+        let task_name = workspace.file_name().ok_or("Task folder has no name")?.to_string_lossy().into_owned();
+        let task = state.store.create_work_task(&workspace, &task_name)?;
+        state.store.create_work_session_for_task(&task.id, &name, source.settings)?
     } else {
         state.store.create_session_for_project(&source.workspace, &name, source.settings)?
     };
@@ -1290,6 +1334,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             create_session,
             create_session_in_project,
+            create_work_task,
+            list_work_tasks,
+            rename_work_task,
+            create_work_session_for_task,
+            delete_work_task,
             create_project,
             open_project,
             list_projects,

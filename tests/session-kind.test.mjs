@@ -79,6 +79,21 @@ test('project operations stay under Projects and session navigation remains nest
   assert.doesNotMatch(main, /\['New Session',[\s\S]*renameProject\(project\)/);
 });
 
+test('Work task actions stay in Tasks while session controls stay in the workspace', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const taskPanel = html.match(/data-panel-content="tasks">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  const workspace = html.match(/class="session-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
+  assert.match(taskPanel, /<h2>Tasks<\/h2>[\s\S]*class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"[\s\S]*id="task-list"/);
+  assert.match(workspace, /id="new-session"[\s\S]*id="rename-session"[\s\S]*id="delete-session"/);
+  assert.match(main, /className = 'task-sessions'/);
+  assert.match(main, /session\.taskId/);
+  assert.match(style, /\.task-sessions\{padding:[^}]*\}/);
+  assert.match(style, /data-panel-content="tasks"\] \.session-item\.selected[^}]*background:transparent/);
+  assert.match(main, /session\.taskId === task\.id/);
+});
+
 test('all five Auto-Approve options default on and MCP is marked as a placeholder', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command', 'approve-mcp']) {

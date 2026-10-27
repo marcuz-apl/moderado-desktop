@@ -32,6 +32,15 @@
 
 .sidebar-panel[data-panel-content="projects"] .project-group{border-bottom:0}
 .sidebar-panel[data-panel-content="projects"] .project-sessions{padding-left:34px}
-.sidebar-panel[data-panel-content="projects"] .session-item,
-.sidebar-panel[data-panel-content="projects"] .session-item:hover,
-.sidebar-panel[data-panel-content="projects"] .session-item.selected{border-color:transparent;border-radius:0;background:transparent}
+.sidebar .sidebar-panel[data-panel-content="projects"] .session-item,
+.sidebar .sidebar-panel[data-panel-content="projects"] .session-item:hover,
+.sidebar .sidebar-panel[data-panel-content="projects"] .session-item.selected{border-color:transparent;border-radius:0;background:transparent}
+
+.task-operations{display:flex;flex-wrap:wrap;gap:10px;padding:8px 14px 0}
+.task-operations .text-button{margin:0}
+.task-group{padding:5px 0;border:0}
+.task-sessions{padding:3px 0 8px 34px}
+.task-sessions .session-item{font-size:11px;padding:7px}
+.sidebar .sidebar-panel[data-panel-content="tasks"] .session-item,
+.sidebar .sidebar-panel[data-panel-content="tasks"] .session-item:hover,
+.sidebar .sidebar-panel[data-panel-content="tasks"] .session-item.selected{border-color:transparent;border-radius:0;background:transparent}

@@ -105,6 +105,7 @@ pub struct SessionRecord {
     pub name: String,
     pub workspace: String,
     pub kind: SessionKind,
+    pub task_id: Option<String>,
     pub auto_approve: AutoApprovePolicy,
     pub settings: ProviderSettings,
     pub history: Vec<Value>,
@@ -118,6 +119,7 @@ pub struct SessionSummary {
     pub name: String,
     pub workspace: String,
     pub kind: SessionKind,
+    pub task_id: Option<String>,
     pub auto_approve: AutoApprovePolicy,
     pub settings: ProviderSettings,
     pub updated_at: i64,
@@ -128,6 +130,15 @@ pub struct SessionSummary {
 pub struct ProjectRecord {
     pub workspace: String,
     pub name: String,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkTaskRecord {
+    pub id: String,
+    pub name: String,
+    pub workspace: String,
     pub updated_at: i64,
 }
 
@@ -179,6 +190,60 @@ impl SessionStore {
         let mut query = db.prepare("SELECT workspace,name,updated_at FROM projects WHERE archived=0 ORDER BY updated_at DESC,workspace").map_err(|error| error.to_string())?;
         let rows = query.query_map([], |row| Ok(ProjectRecord { workspace: row.get(0)?, name: row.get(1)?, updated_at: row.get(2)? })).map_err(|error| error.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    }
+
+    pub fn create_work_task(&self, workspace: &Path, name: &str) -> Result<WorkTaskRecord, String> {
+        validate_name(name)?;
+        let root = workspace.canonicalize().map_err(|error| format!("Task folder unavailable: {error}"))?;
+        if !root.is_dir() { return Err("Task folder must be a directory".into()); }
+        let workspace = root.to_string_lossy().into_owned();
+        let id = workspace.clone();
+        self.connect()?.execute(
+            "INSERT INTO work_tasks (id,name,workspace,updated_at) VALUES (?1,?2,?3,?4)",
+            params![id, name.trim(), workspace, now()],
+        ).map_err(|error| format!("Could not create task: {error}"))?;
+        self.get_work_task(&workspace)
+    }
+
+    pub fn get_work_task(&self, id: &str) -> Result<WorkTaskRecord, String> {
+        self.connect()?.query_row(
+            "SELECT id,name,workspace,updated_at FROM work_tasks WHERE id=?1",
+            [id],
+            |row| Ok(WorkTaskRecord { id: row.get(0)?, name: row.get(1)?, workspace: row.get(2)?, updated_at: row.get(3)? }),
+        ).optional().map_err(|error| error.to_string())?.ok_or_else(|| "Task not found".into())
+    }
+
+    pub fn list_work_tasks(&self) -> Result<Vec<WorkTaskRecord>, String> {
+        let db = self.connect()?;
+        let mut query = db.prepare("SELECT id,name,workspace,updated_at FROM work_tasks ORDER BY updated_at DESC,id").map_err(|error| error.to_string())?;
+        let rows = query.query_map([], |row| Ok(WorkTaskRecord { id: row.get(0)?, name: row.get(1)?, workspace: row.get(2)?, updated_at: row.get(3)? })).map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    }
+
+    pub fn rename_work_task(&self, id: &str, name: &str) -> Result<(), String> {
+        validate_name(name)?;
+        let changed = self.connect()?.execute("UPDATE work_tasks SET name=?2,updated_at=?3 WHERE id=?1", params![id, name.trim(), now()]).map_err(|error| error.to_string())?;
+        if changed == 0 { return Err("Task not found".into()); }
+        Ok(())
+    }
+
+    pub fn delete_work_task(&self, id: &str) -> Result<Vec<String>, String> {
+        let db = self.connect()?;
+        let tx = db.unchecked_transaction().map_err(|error| error.to_string())?;
+        let sessions = {
+            let mut query = tx.prepare("SELECT id FROM sessions WHERE task_id=?1").map_err(|error| error.to_string())?;
+            let rows = query.query_map([id], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?
+        };
+        let changed = tx.execute("DELETE FROM work_tasks WHERE id=?1", [id]).map_err(|error| error.to_string())?;
+        if changed == 0 { return Err("Task not found".into()); }
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(sessions)
+    }
+
+    pub fn create_work_session_for_task(&self, task_id: &str, name: &str, settings: ProviderSettings) -> Result<SessionRecord, String> {
+        let task = self.get_work_task(task_id)?;
+        self.create_with_kind(Path::new(&task.workspace), name, settings, SessionKind::Work)
     }
 
     pub fn create_project_folder(&self, parent: &Path, name: &str) -> Result<ProjectRecord, String> {
@@ -237,11 +302,18 @@ impl SessionStore {
         }
         validate_name(name)?;
         if kind == SessionKind::Code { self.register_project(&workspace)?; }
+        let task_id = if kind == SessionKind::Work {
+            let task_id = workspace.to_string_lossy().into_owned();
+            let task_name = workspace.file_name().map(|value| value.to_string_lossy().into_owned()).unwrap_or_else(|| "Task".into());
+            self.connect()?.execute("INSERT OR IGNORE INTO work_tasks (id,name,workspace,updated_at) VALUES (?1,?2,?1,?3)", params![task_id, task_name, now()]).map_err(|error| format!("Could not register task folder: {error}"))?;
+            Some(task_id)
+        } else { None };
         let record = SessionRecord {
             id: new_id(),
             name: name.trim().to_owned(),
             workspace: workspace.to_string_lossy().into_owned(),
             kind,
+            task_id: task_id.clone(),
             auto_approve: AutoApprovePolicy::for_new_session(kind),
             settings,
             history: Vec::new(),
@@ -249,8 +321,8 @@ impl SessionStore {
         };
         let db = self.connect()?;
         db.execute(
-            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at,auto_approve_json) VALUES (?1,?2,?3,?4,?5,'[]',?6,?7)",
-            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at, serde_json::to_string(&record.auto_approve).map_err(|error| error.to_string())?],
+            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at,auto_approve_json,task_id) VALUES (?1,?2,?3,?4,?5,'[]',?6,?7,?8)",
+            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at, serde_json::to_string(&record.auto_approve).map_err(|error| error.to_string())?, task_id],
         ).map_err(|error| format!("Could not create session: {error}"))?;
         Ok(record)
     }
@@ -285,7 +357,7 @@ impl SessionStore {
 
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
         let db = self.connect()?;
-        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind,auto_approve_json FROM sessions ORDER BY updated_at DESC, id DESC")
+        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind,auto_approve_json,task_id FROM sessions ORDER BY updated_at DESC, id DESC")
             .map_err(|error| error.to_string())?;
         let rows = query
             .query_map([], |row| {
@@ -297,11 +369,12 @@ impl SessionStore {
                     row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             })
             .map_err(|error| error.to_string())?;
         rows.map(|row| {
-            let (id, name, workspace, settings_json, updated_at, kind, auto_approve_json) =
+            let (id, name, workspace, settings_json, updated_at, kind, auto_approve_json, task_id) =
                 row.map_err(|error| error.to_string())?;
             let settings = serde_json::from_str(&settings_json)
                 .map_err(|_| "Invalid saved provider settings")?;
@@ -310,6 +383,7 @@ impl SessionStore {
                 name,
                 workspace,
                 kind: SessionKind::from_db(&kind),
+                task_id,
                 auto_approve: serde_json::from_str(&auto_approve_json).map_err(|_| "Invalid saved approval policy")?,
                 settings,
                 updated_at,
@@ -321,9 +395,9 @@ impl SessionStore {
     pub fn get(&self, id: &str) -> Result<SessionRecord, String> {
         let db = self.connect()?;
         let row = db.query_row(
-            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json FROM sessions WHERE id=?1",
+            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json,task_id FROM sessions WHERE id=?1",
             [id],
-            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?)),
+            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?)),
         ).optional().map_err(|error| error.to_string())?.ok_or("Session not found")?;
         Ok(SessionRecord {
             id: row.0,
@@ -334,6 +408,7 @@ impl SessionStore {
             history: serde_json::from_str(&row.4).map_err(|_| "Invalid saved session history")?,
             updated_at: row.5,
             kind: SessionKind::from_db(&row.6),
+            task_id: row.8,
             auto_approve: serde_json::from_str(&row.7).map_err(|_| "Invalid saved approval policy")?,
         })
     }
@@ -616,6 +691,31 @@ mod tests {
         assert_eq!(created.kind, SessionKind::Code);
         assert_eq!(created.workspace, source.workspace);
         assert_eq!(created.name, "New Session");
+    }
+
+    #[test]
+    fn work_task_owns_a_folder_and_multiple_sessions_and_can_be_removed_without_deleting_files() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("work-session0");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::write(workspace.join("notes.md"), "keep this file").unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+        let task = store.create_work_task(&workspace, "Research").unwrap();
+        let first = store.create_work_session_for_task(&task.id, "Session 1", settings()).unwrap();
+        let second = store.create_work_session_for_task(&task.id, "Session 2", settings()).unwrap();
+
+        assert_eq!(first.task_id.as_deref(), Some(task.id.as_str()));
+        assert_eq!(second.task_id, first.task_id);
+        assert_eq!(first.workspace, second.workspace);
+        assert_eq!(store.list_work_tasks().unwrap().len(), 1);
+
+        store.rename_work_task(&task.id, "Research renamed").unwrap();
+        assert_eq!(store.list_work_tasks().unwrap()[0].name, "Research renamed");
+        store.delete_work_task(&task.id).unwrap();
+        assert!(store.list_work_tasks().unwrap().is_empty());
+        assert!(store.get(&first.id).is_err());
+        assert!(store.get(&second.id).is_err());
+        assert_eq!(std::fs::read_to_string(workspace.join("notes.md")).unwrap(), "keep this file");
     }
 
     #[test]

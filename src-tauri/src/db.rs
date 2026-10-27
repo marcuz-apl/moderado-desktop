@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -190,6 +190,27 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
             .map_err(|error| format!("Could not enable Work document defaults: {error}"))?;
         tx.pragma_update(None, "user_version", 6).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
+        version = 6;
+    }
+
+    if version < 7 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS work_tasks (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            workspace TEXT NOT NULL UNIQUE,
+            updated_at INTEGER NOT NULL
+        );
+        ALTER TABLE sessions ADD COLUMN task_id TEXT REFERENCES work_tasks(id) ON DELETE CASCADE;
+        INSERT OR IGNORE INTO work_tasks (id,name,workspace,updated_at)
+            SELECT workspace,(SELECT name FROM sessions AS old WHERE old.kind='work' AND old.workspace=sessions.workspace ORDER BY old.updated_at,old.id LIMIT 1),workspace,MAX(updated_at) FROM sessions WHERE kind='work' GROUP BY workspace;
+        UPDATE sessions SET task_id=workspace WHERE kind='work';
+        WITH numbered AS (SELECT id,ROW_NUMBER() OVER(PARTITION BY task_id ORDER BY updated_at,id) AS number FROM sessions WHERE kind='work')
+            UPDATE sessions SET name='Session '||(SELECT number FROM numbered WHERE numbered.id=sessions.id) WHERE id IN (SELECT id FROM numbered);
+        CREATE INDEX sessions_task ON sessions(task_id,updated_at DESC);")
+            .map_err(|error| format!("Could not migrate Work Tasks: {error}"))?;
+        tx.pragma_update(None, "user_version", 7).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -231,15 +252,19 @@ mod tests {
     }
 
     #[test]
-    fn version_five_upgrade_registers_projects_and_preserves_custom_work_policy_and_history() {
+    fn version_five_upgrade_registers_projects_and_migrates_work_tasks_without_losing_history() {
         let (_root, path) = temporary();
         {
             let db = open(&path).unwrap();
             db.execute_batch("DELETE FROM projects;
+                DROP INDEX IF EXISTS sessions_task;
+                ALTER TABLE sessions DROP COLUMN task_id;
+                DROP TABLE work_tasks;
                 INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES
                 ('c1','One','/code/alpha','{}','[]',1,'code','{}'),
                 ('c2','Two','/code/alpha','{}','[]',2,'code','{}'),
                 ('w1','Task','/tasks/one','{}','[{\"role\":\"user\",\"content\":\"keep\"}]',3,'work','{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}'),
+                ('w3','Session 2','/tasks/one','{}','[]',5,'work','{\"readFiles\":true,\"editFiles\":true,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}'),
                 ('w2','Custom','/tasks/two','{}','[]',4,'work','{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":false,\"executeCommand\":false,\"useMcpServers\":false}');
                 PRAGMA user_version=5;").unwrap();
         }
@@ -253,7 +278,13 @@ mod tests {
         assert!(history.contains("keep"));
         let custom: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='w2'", [], |row| row.get(0)).unwrap();
         assert_eq!(serde_json::from_str::<serde_json::Value>(&custom).unwrap()["editFiles"], false);
-        assert_eq!(schema_version(&db).unwrap(), 6);
+        let (tasks, shared_task): (i64, bool) = db.query_row("SELECT (SELECT COUNT(*) FROM work_tasks),(SELECT task_id FROM sessions WHERE id='w1')=(SELECT task_id FROM sessions WHERE id='w3')", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(tasks, 2);
+        assert!(shared_task);
+        let (task_name, session_name): (String, String) = db.query_row("SELECT work_tasks.name,sessions.name FROM work_tasks JOIN sessions ON sessions.task_id=work_tasks.id WHERE sessions.id='w1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(task_name, "Task");
+        assert_eq!(session_name, "Session 1");
+        assert_eq!(schema_version(&db).unwrap(), 7);
     }
 
     #[test]
@@ -263,6 +294,7 @@ mod tests {
         assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
         assert!(columns(&db, "sessions").unwrap().iter().any(|c| c == "kind"));
         assert!(columns(&db, "sessions").unwrap().iter().any(|c| c == "auto_approve_json"));
+        assert!(columns(&db, "sessions").unwrap().iter().any(|c| c == "task_id"));
     }
 
     #[test]

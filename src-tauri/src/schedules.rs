@@ -401,7 +401,7 @@ mod tests {
         let db = Connection::open(&path).unwrap();
         // Rewind to the pre-versioning schema: a schedules table without
         // search_json and no recorded schema version.
-        db.execute_batch("DROP TABLE schedules; CREATE TABLE schedules (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,prompt TEXT NOT NULL,mode TEXT NOT NULL,approval_policy TEXT NOT NULL,settings_json TEXT NOT NULL,next_run_at INTEGER NOT NULL,interval_seconds INTEGER,enabled INTEGER NOT NULL,in_flight INTEGER NOT NULL,last_run_at INTEGER,last_error TEXT); PRAGMA user_version = 0;").unwrap();
+        db.execute_batch("DROP TABLE schedules; CREATE TABLE schedules (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,prompt TEXT NOT NULL,mode TEXT NOT NULL,approval_policy TEXT NOT NULL,settings_json TEXT NOT NULL,next_run_at INTEGER NOT NULL,interval_seconds INTEGER,enabled INTEGER NOT NULL,in_flight INTEGER NOT NULL,last_run_at INTEGER,last_error TEXT); DROP INDEX IF EXISTS sessions_task; ALTER TABLE sessions DROP COLUMN task_id; DROP TABLE work_tasks; PRAGMA user_version = 0;").unwrap();
         db.execute("INSERT INTO schedules(id,session_id,prompt,mode,approval_policy,settings_json,next_run_at,interval_seconds,enabled,in_flight) VALUES('old',?1,'Task','act','auto_write',?2,100,60,1,0)", params![session.id,serde_json::to_string(&settings).unwrap()]).unwrap();
         drop(db);
         let store = ScheduleStore::open(path).unwrap();

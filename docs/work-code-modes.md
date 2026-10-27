@@ -4,7 +4,9 @@ Implemented design, approved 2026-10-27. The central conversation canvas is call
 
 ## Work
 
-A task owns one conversation and a managed folder under Documents/Moderado-Desktop/work-sessionN. Startup restores the last Work task or creates the initial one. New Task immediately creates an independent conversation and folder. Renaming a task changes its conversation label; its physical folder path remains stable and visible in the header.
+A Task owns a managed folder under Documents/Moderado-Desktop/work-sessionN and can contain multiple independent sessions. Startup restores the last Work task/session or creates the initial `work-session0` Task with `Session 1`. New Task creates a folder and Task record; New Session creates a conversation inside the selected Task folder. Renaming a Task changes its display name, and renaming a session changes only that conversation name; the physical folder path stays stable.
+
+The Tasks panel places New, Rename, and Delete beneath its heading. Each Task expands to show its indented sessions. Radio controls identify the selected Task and session; list rows remain unboxed. New Session, Rename, and Delete Session stay in the main workspace. Deleting a session keeps its Task and managed files. Deleting a Task removes its child sessions and histories from Moderado while preserving the managed folder and files.
 
 Work can read, search, create, and edit UTF-8 documents inside its folder. Markdown, plain text, CSV, and HTML are supported by the existing file tools. These tools cannot generate native binary Office/PDF documents. Work cannot execute commands. File operations remain jailed, follow the task's approval policy, and create checkpoints before mutation. Explorer and Checkpoints are available in Work mode.
 
@@ -25,7 +27,7 @@ A project is a registered canonical directory, persisted separately from session
 
 ## Navigation and drafts
 
-The compact Work/Code selector restores that mode's last task or Code project/session. Last-viewed IDs and project selection are stored locally and validated against current records on startup. Work remains the startup mode. Unsent text and attachment selections are retained in memory per conversation/draft while switching views. A background task continues when the user navigates away.
+The compact Work/Code selector restores that mode's last task/session or Code project/session. Last-viewed IDs, Work Task selection, and project selection are stored locally and validated against current records on startup. Work remains the startup mode. Unsent text and attachment selections are retained in memory per conversation/draft while switching views. A background task continues when the user navigates away.
 
 Async selection results are guarded by a revision counter. A delayed request cannot reactivate another mode or overwrite a newer selection. Completion and attachment events are scoped to their originating conversation. Deleting the active session selects another conversation only in the same task mode or Code project; otherwise it displays a new draft.
 
@@ -35,7 +37,7 @@ Assistant replies and final turn summaries render Markdown with embedded HTML di
 
 ## Persistence and migration
 
-Migration 6 registers each existing Code folder once, preserves session histories, and enables read/edit for Work tasks still using the previous default policy. Customized policies remain intact. Projects are keyed by canonical folder path; relocating a project requires opening its new location. Removing a project does not delete its underlying data.
+Migration 6 registers each existing Code folder once and enables read/edit for Work tasks still using the previous default policy. Migration 7 creates Work Task records from existing Work folders and links prior Work sessions to those Tasks without changing their history or files. Customized policies remain intact. Projects are keyed by canonical folder path; relocating a project requires opening its new location. Removing a project does not delete its underlying data.
 
 ## Verification
 
@@ -46,4 +48,4 @@ npx --package @playwright/cli playwright-cli open about:blank
 npx --package @playwright/cli playwright-cli run-code --filename scripts/check-navigation-ui.js
 ```
 
-The browser check uses a mocked Tauri bridge and exercises draft restoration, nested sessions, main-workspace session controls, selected-project operations, Explorer, background task navigation, tool activity, Markdown summaries, last-session deletion, project removal/reopen, and New/Open project flows. Native file dialogs and real model behavior require desktop/manual verification.
+The browser check uses a mocked Tauri bridge and exercises draft restoration, separate Work Task/session radio selection, task operations in Tasks, session controls in the workspace, nested sessions, selected-project operations, Explorer, background task navigation, tool activity, Markdown summaries, last-session deletion, project removal/reopen, and New/Open project flows. Native file dialogs and real model behavior require desktop/manual verification.
