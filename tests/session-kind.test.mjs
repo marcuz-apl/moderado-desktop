@@ -74,6 +74,15 @@ test('all five Auto-Approve options default on and MCP is marked as a placeholde
   assert.match(html, /MCP server support is a placeholder/);
 });
 
+test('Auto-Approve controls sit directly above the message composer', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<\/div>\s*<\/main>/)?.[1] ?? '';
+  assert.match(composer, /id="auto-approve-group"/);
+  assert.ok(composer.indexOf('id="auto-approve-group"') < composer.indexOf('id="composer"'));
+  assert.match(composer, /class="auto-approve-bar"/);
+  assert.doesNotMatch(html.slice(0, html.indexOf('<main class="main">')), /id="auto-approve-group"/);
+});
+
 test('Work profile does not require a GitHub account', () => {
   assert.match(profileModeDescription('work'), /not required/i);
   assert.match(profileModeDescription('code'), /optional GitHub account/i);
