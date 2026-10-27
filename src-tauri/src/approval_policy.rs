@@ -22,7 +22,7 @@ impl AutoApprovePolicy {
 
     pub fn for_new_session(kind: SessionKind) -> Self {
         if kind == SessionKind::Code { Self { read_files: true, edit_files: true, fetch_web_content: true, execute_command: true, use_mcp_servers: true } }
-        else { Self { read_files: false, edit_files: false, fetch_web_content: true, execute_command: false, use_mcp_servers: false } }
+        else { Self { read_files: true, edit_files: true, fetch_web_content: true, execute_command: false, use_mcp_servers: false } }
     }
     pub fn legacy_default(kind: SessionKind) -> Self {
         Self::for_new_session(kind)

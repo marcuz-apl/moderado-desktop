@@ -139,3 +139,7 @@ src/renderer/    # UI: session tabs, chat, approval prompts, diffs, settings
 - **Tool-call streaming variance** across OpenAI-compatible vendors — mitigate with a conformance fixture suite per provider (M2).
 - **Unattended scheduled runs** increase blast radius — mitigate by requiring explicit auto-approval presets and checkpoint-before-run.
 - **Local runtime drift** (Ollama/LM Studio versions) — mitigate with startup capability probe and clear error surfacing.
+
+### Work/Code navigation (2026-10-27)
+
+Work tasks own one conversation and a managed folder with jailed UTF-8 document read/create/edit capabilities and checkpoints. Code projects are independently registered codebase folders with nested conversation sessions. New creates a project directory; Open registers an existing one. Deleting a session retains the project and files; removing a project archives its navigation entry. Mode switching restores context and drafts. See [Work and Code modes](./work-code-modes.md) for the implemented contracts and format limitations.

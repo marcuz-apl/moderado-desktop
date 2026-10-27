@@ -24,26 +24,24 @@ pub struct Approval {
 }
 
 pub fn tool_definitions(kind: SessionKind, mode: Mode, web_search: bool) -> Vec<Value> {
-    // A Work session has no workspace tools at all: the user hands it files,
-    // it never browses the disk.
-    let mut tools = if matches!(kind, SessionKind::Work) {
-        Vec::new()
-    } else {
-        vec![
+    let mut tools = vec![
         json!({"type":"function","function":{"name":"list_files","description":"List direct children of a workspace directory","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a UTF-8 file in the workspace","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"search_files","description":"Search UTF-8 workspace files for a literal text query","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
-        ]
-    };
+        ];
     if web_search {
         tools.push(json!({"type":"function","function":{"name":"web_search","description":"Search the configured web search API","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}));
     }
-    if matches!(kind, SessionKind::Code) && matches!(mode, Mode::Act) {
+    if matches!(mode, Mode::Act) {
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
         #[cfg(windows)]
+        if matches!(kind, SessionKind::Code) {
         tools.push(json!({"type":"function","function":{"name":"execute_command","description":"Run one executable with separate arguments in a Windows AppContainer workspace copy. No shell is invoked implicitly.","parameters":{"type":"object","properties":{"program":{"type":"string","description":"Executable name or absolute path"},"args":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string","description":"Workspace-relative directory"},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000}},"required":["program"]}}}));
+        }
     }
+    #[cfg(not(windows))]
+    let _ = kind;
     tools
 }
 
@@ -113,10 +111,8 @@ where
     Fut: Future<Output = Option<String>>,
     C: FnOnce(&Approval) -> Result<(), String>,
 {
-    // Structural, not prompt-based: a Work session that receives a file tool
-    // call fails here even if the model invented the call.
-    if matches!(kind, SessionKind::Work) {
-        return Err("Work sessions have no file access".into());
+    if matches!(kind, SessionKind::Work) && call.name == "execute_command" {
+        return Err("Work tasks cannot execute commands".into());
     }
     if matches!(call.name.as_str(), "write_file" | "edit_file") && matches!(mode, Mode::Plan) {
         return Err("Plan mode blocks file writes".into());
@@ -153,6 +149,7 @@ where
     if path.len() > 4096 {
         return Err("Tool path is too long".into());
     }
+    workspace::resolve_path(root, path)?;
     match call.name.as_str() {
         "list_files" => {
             if !policy.allows(ApprovalCategory::ReadFiles) { approve(ApprovalRequest { category: ApprovalCategory::ReadFiles, title: "List workspace files".into(), detail: format!("List folder: {path}"), preview: None }).await.ok_or("File listing rejected by user")?; }
@@ -434,16 +431,17 @@ mod tests {
     }
 
     #[test]
-    fn work_sessions_get_no_file_tools() {
+    fn work_tasks_get_document_tools_without_command_execution() {
         let names: Vec<String> = tool_definitions(SessionKind::Work, Mode::Act, true)
             .iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
             .collect();
-        assert_eq!(names, vec!["web_search".to_string()]);
+        for name in ["read_file", "list_files", "search_files", "write_file", "edit_file", "web_search"] { assert!(names.iter().any(|item| item == name), "{name}"); }
+        assert!(!names.iter().any(|item| item == "execute_command"));
     }
 
     #[tokio::test]
-    async fn work_sessions_reject_file_calls_at_dispatch() {
+    async fn work_tasks_edit_only_inside_their_folder_and_reject_commands() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("a.txt"), "hello").unwrap();
         for (name, arguments) in [
@@ -451,6 +449,7 @@ mod tests {
             ("list_files", r#"{"path":"."}"#),
             ("search_files", r#"{"query":"hello"}"#),
             ("write_file", r#"{"path":"b.txt","content":"x"}"#),
+            ("edit_file", r#"{"path":"a.txt","old_text":"hello","new_text":"edited"}"#),
         ] {
             let call = ToolCall {
                 id: "1".into(),
@@ -458,13 +457,14 @@ mod tests {
                 arguments: arguments.into(),
             };
             let result = dispatch_tool(root.path(), SessionKind::Work, Mode::Act, &call, |_| async {
-                Some(String::new())
+                Some("reviewed".into())
             })
             .await;
-            assert!(
-                result.unwrap_err().contains("no file access"),
-                "{name} should be blocked"
-            );
+            assert!(result.is_ok(), "{name}: {result:?}");
+        }
+        for (name, arguments) in [("read_file", r#"{"path":"../outside.txt"}"#), ("write_file", r#"{"path":"../outside.txt","content":"bad"}"#), ("execute_command", r#"{"program":"cmd.exe"}"#)] {
+            let call = ToolCall { id: "escape".into(), name: name.into(), arguments: arguments.into() };
+            assert!(dispatch_tool(root.path(), SessionKind::Work, Mode::Act, &call, |_| async { panic!("approval must not bypass the jail") }).await.is_err());
         }
     }
 }

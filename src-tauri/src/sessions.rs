@@ -75,7 +75,7 @@ fn now() -> i64 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
-    /// Answers general questions and reads only files the user attaches.
+    /// Owns a managed task folder for questions, attachments, and editable documents.
     Work,
     /// Bound to a project folder with autonomous file tools.
     #[default]
@@ -125,6 +125,14 @@ pub struct SessionSummary {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectRecord {
+    pub workspace: String,
+    pub name: String,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckpointRecord {
     pub id: String,
     pub session_id: String,
@@ -153,6 +161,58 @@ impl SessionStore {
         crate::db::connect(&self.path)
     }
 
+    pub fn register_project(&self, workspace: &Path) -> Result<ProjectRecord, String> {
+        let root = workspace.canonicalize().map_err(|error| format!("Project folder unavailable: {error}"))?;
+        if !root.is_dir() { return Err("Project folder must be a directory".into()); }
+        let workspace = root.to_string_lossy().into_owned();
+        let name = root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| "Project".into());
+        self.connect()?.execute("INSERT INTO projects (workspace,name,updated_at) VALUES (?1,?2,?3) ON CONFLICT(workspace) DO UPDATE SET archived=0,updated_at=excluded.updated_at", params![workspace,name,now()]).map_err(|error| error.to_string())?;
+        self.get_project(&workspace)
+    }
+
+    pub fn get_project(&self, workspace: &str) -> Result<ProjectRecord, String> {
+        self.connect()?.query_row("SELECT workspace,name,updated_at FROM projects WHERE workspace=?1 AND archived=0", [workspace], |row| Ok(ProjectRecord { workspace: row.get(0)?, name: row.get(1)?, updated_at: row.get(2)? })).optional().map_err(|error| error.to_string())?.ok_or_else(|| "Project is not registered; open the project first".into())
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<ProjectRecord>, String> {
+        let db = self.connect()?;
+        let mut query = db.prepare("SELECT workspace,name,updated_at FROM projects WHERE archived=0 ORDER BY updated_at DESC,workspace").map_err(|error| error.to_string())?;
+        let rows = query.query_map([], |row| Ok(ProjectRecord { workspace: row.get(0)?, name: row.get(1)?, updated_at: row.get(2)? })).map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    }
+
+    pub fn create_project_folder(&self, parent: &Path, name: &str) -> Result<ProjectRecord, String> {
+        validate_name(name)?;
+        let name = name.trim();
+        let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+        if name == "." || name == ".." || name.ends_with(['.', ' ']) || name.chars().any(|c| c.is_control() || "/\\:*?\"<>|".contains(c)) || ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str()) || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9')) {
+            return Err("Choose a valid folder name without path separators or reserved characters".into());
+        }
+        let parent = parent.canonicalize().map_err(|error| format!("Parent folder unavailable: {error}"))?;
+        let folder = parent.join(name);
+        std::fs::create_dir(&folder).map_err(|error| format!("Could not create project folder: {error}"))?;
+        // Keep the new folder if registration fails; report the error rather than removing user data.
+        self.register_project(&folder)
+    }
+
+    pub fn rename_project(&self, workspace: &str, name: &str) -> Result<(), String> {
+        validate_name(name)?;
+        let changed = self.connect()?.execute("UPDATE projects SET name=?2,updated_at=?3 WHERE workspace=?1 AND archived=0", params![workspace,name.trim(),now()]).map_err(|error| error.to_string())?;
+        if changed == 0 { return Err("Project is not registered".into()); }
+        Ok(())
+    }
+
+    pub fn remove_project(&self, workspace: &str) -> Result<(), String> {
+        let changed = self.connect()?.execute("UPDATE projects SET archived=1 WHERE workspace=?1 AND archived=0", [workspace]).map_err(|error| error.to_string())?;
+        if changed == 0 { return Err("Project is not registered".into()); }
+        Ok(())
+    }
+
+    pub fn create_session_for_project(&self, workspace: &str, name: &str, settings: ProviderSettings) -> Result<SessionRecord, String> {
+        let project = self.get_project(workspace)?;
+        self.create_with_kind(Path::new(&project.workspace), name, settings, SessionKind::Code)
+    }
+
     pub fn create(
         &self,
         workspace: &Path,
@@ -176,6 +236,7 @@ impl SessionStore {
             return Err("Workspace must be a directory".into());
         }
         validate_name(name)?;
+        if kind == SessionKind::Code { self.register_project(&workspace)?; }
         let record = SessionRecord {
             id: new_id(),
             name: name.trim().to_owned(),
@@ -641,5 +702,48 @@ mod tests {
             second,
             documents.path().join("Moderado-Desktop").join("work-session1")
         );
+    }
+}
+
+#[cfg(test)]
+mod project_lifecycle_tests {
+    use super::*;
+    use crate::provider::ProviderId;
+
+    fn settings() -> ProviderSettings {
+        ProviderSettings { provider_id: ProviderId::Ollama, base_url: "http://localhost:11434/v1".into(), plan_model: "plan".into(), act_model: "act".into() }
+    }
+
+    #[test]
+    fn project_survives_last_session_and_remove_reopen_preserves_history_and_files() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("project");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("notes.md"), "keep").unwrap();
+        let db = root.path().join("sessions.sqlite");
+        let store = SessionStore::open(db.clone()).unwrap();
+        let project = store.register_project(&folder).unwrap();
+        let first = store.create_session_for_project(&project.workspace, "First", settings()).unwrap();
+        store.delete(&first.id).unwrap();
+        assert_eq!(SessionStore::open(db).unwrap().list_projects().unwrap().len(), 1);
+        let second = store.create_session_for_project(&project.workspace, "Second", settings()).unwrap();
+        store.rename_project(&project.workspace, "Named project").unwrap();
+        store.remove_project(&project.workspace).unwrap();
+        assert!(store.list_projects().unwrap().is_empty());
+        assert!(store.get(&second.id).is_ok());
+        assert_eq!(std::fs::read_to_string(folder.join("notes.md")).unwrap(), "keep");
+        assert_eq!(store.register_project(&folder).unwrap().name, "Named project");
+    }
+
+    #[test]
+    fn new_project_requires_a_new_child_folder_and_rejects_path_escape() {
+        let root = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+        for name in ["../escape", "nested/project", "C:\\escape", ".", "CON", "trailing."] {
+            assert!(store.create_project_folder(root.path(), name).is_err(), "{name}");
+        }
+        let project = store.create_project_folder(root.path(), "my-project").unwrap();
+        assert!(Path::new(&project.workspace).is_dir());
+        assert!(store.create_project_folder(root.path(), "my-project").is_err());
     }
 }

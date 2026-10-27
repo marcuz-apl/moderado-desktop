@@ -95,12 +95,18 @@ where
         Value::Array(blocks)
     };
     history.push(json!({"role":"user","content":content}));
+    if config.kind == SessionKind::Work {
+        attachments::restore_workspace_copies(config.attachments_root, config.workspace, config.session_id, history)?;
+    }
     persist(history)?;
     let tools = tool_definitions(config.kind, config.mode, config.search.is_some());
     let mode_instruction = match config.kind {
         SessionKind::Work => {
-            "Answer the user's question directly. You cannot read their disk; work only from the \
-             message and the files they attach."
+            "Help the user complete their task. You may read, create, and edit UTF-8 documents \
+             inside this task's managed folder using relative paths. Use Markdown, plain text, \
+             CSV, or HTML for deliverables; do not claim to create native Office or PDF files \
+             with text tools. Attached files have editable copies under attachments/. \
+             You cannot execute commands or access files outside the task folder."
         }
         SessionKind::Code => match config.mode {
             Mode::Plan => "Plan mode: inspect the workspace and explain a plan. File mutations are unavailable.",
@@ -290,7 +296,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn approved_write_completes_end_to_end() {
+    async fn work_and_code_approved_writes_complete_end_to_end() {
+        for kind in [SessionKind::Work, SessionKind::Code] {
         let root = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -320,7 +327,7 @@ mod tests {
                 api_key: "",
                 mode: Mode::Act,
                 search: None,
-                kind: SessionKind::Code,
+                kind,
                 auto_approve: AutoApprovePolicy::prompt_all(),
                 attachments: &[],
                 attachments_root: root.path(),
@@ -347,6 +354,7 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event, AgentEvent::Text(text) if text == "Finished")));
+        }
     }
 
     #[tokio::test]

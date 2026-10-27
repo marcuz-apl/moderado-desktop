@@ -37,11 +37,12 @@ test('sidebar defaults and available panels follow the selected mode', () => {
   assert.equal(panelAvailableForKind('tasks', 'work'), true);
   assert.equal(panelAvailableForKind('projects', 'work'), false);
   assert.equal(panelAvailableForKind('sessions', 'work'), false);
-  assert.equal(panelAvailableForKind('workspace', 'work'), false);
+  assert.equal(panelAvailableForKind('workspace', 'work'), true);
+  assert.equal(panelAvailableForKind('checkpoints', 'work'), true);
   assert.equal(panelAvailableForKind('tasks', 'work'), true);
   assert.equal(panelAvailableForKind('tasks', 'code'), false);
   assert.equal(panelAvailableForKind('projects', 'code'), true);
-  assert.equal(panelAvailableForKind('sessions', 'code'), true);
+  assert.equal(panelAvailableForKind('sessions', 'code'), false);
   assert.equal(panelAvailableForKind('workspace', 'code'), true);
   assert.equal(panelAvailableForKind('projects', 'code'), true);
   assert.equal(panelAvailableForKind('schedules', 'work'), true);

@@ -24,8 +24,17 @@ export function defaultPanelForKind(kind: SessionKind): SidebarPanel {
 }
 
 export function panelAvailableForKind(panel: SidebarPanel, kind: SessionKind): boolean {
-  if (kind === 'work') return !['projects', 'sessions', 'workspace', 'checkpoints', 'source-control'].includes(panel);
+  if (panel === 'sessions') return false;
+  if (kind === 'work') return !['projects', 'source-control'].includes(panel);
   return panel !== 'tasks';
+}
+
+export function sessionForMode<T extends { id: string; kind: SessionKind; workspace: string }>(
+  sessions: T[], kind: SessionKind, rememberedId?: string, projectWorkspace?: string | null,
+): T | undefined {
+  const candidates = sessions.filter((session) => session.kind === kind
+    && (kind !== 'code' || !projectWorkspace || session.workspace === projectWorkspace));
+  return candidates.find((session) => session.id === rememberedId) ?? candidates[0];
 }
 
 export function newActionLabel(panel: 'tasks' | 'projects' | 'sessions'): string {

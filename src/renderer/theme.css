@@ -114,3 +114,8 @@
 
 :root[data-theme="light"] .empty-symbol{background:#14233a;border-color:transparent}
 :root[data-theme="light"] .model-usage-row #model-usage{color:#5d7480}
+:root[data-theme="light"] .project-group{border-color:var(--light-border)}
+:root[data-theme="light"] .project-expander{color:#45616c}
+:root[data-theme="light"] .auto-approve-bar{background:#e7eff1;border-color:var(--light-border)}
+:root[data-theme="light"] .auto-approve-title,:root[data-theme="light"] .auto-approve-option{color:#385461}
+:root[data-theme="light"] #project-name{background:var(--light-surface);border-color:#a9bec5;color:#203744}

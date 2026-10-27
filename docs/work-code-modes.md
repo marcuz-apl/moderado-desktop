@@ -1,117 +1,47 @@
-# Work and Code Modes Design
+# Work tasks and Code projects
 
-## Intent
+Implemented design, approved 2026-10-27. The central conversation canvas is called the workspace; Explorer displays its files.
 
-Split the product into two top-level modes.
+## Work
 
-**Work** answers general questions for people who are not working in a codebase. It has no project folder and never browses the disk. It reads the files the user hands it — text and images — the way WorkBuddy Desktop does: attach a file to the message, the assistant reads that file.
+A task owns one conversation and a managed folder under Documents/Moderado-Desktop/work-sessionN. Startup restores the last Work task or creates the initial one. New Task immediately creates an independent conversation and folder. Renaming a task changes its conversation label; its physical folder path remains stable and visible in the header.
 
-**Code** is the current product: an agent bound to a project folder the user must define, with autonomous file tools, approvals, checkpoints, and source control.
+Work can read, search, create, and edit UTF-8 documents inside its folder. Markdown, plain text, CSV, and HTML are supported by the existing file tools. These tools cannot generate native binary Office/PDF documents. Work cannot execute commands. File operations remain jailed, follow the task's approval policy, and create checkpoints before mutation. Explorer and Checkpoints are available in Work mode.
 
-Work and Code describe *what a session is allowed to touch*. Plan and Act, already shipped, describe *what the agent may change inside that boundary*. Plan/Act is meaningful only in Code; a Work session has no mutation path at all.
+Text/image attachments keep an immutable copy for conversation replay and an editable copy at attachments/<id>-<name> inside the task folder. Old attachment references are copied when the task next runs, and existing edited copies are preserved. Original source files remain untouched.
 
-## The two axes
+## Code
 
-| Axis | Values | Chosen | Meaning | Enforced in |
-| --- | --- | --- | --- | --- |
-| Session kind | `work`, `code` | Once, when the session is created | Whether the session has a project folder and autonomous file tools | Session record, tool list, dispatch gate |
-| Agent mode | `plan`, `act` | Per turn, Code sessions only | Whether mutating tools are offered | `agent::dispatch_tool`, unchanged |
+A project is a registered canonical directory, persisted separately from sessions in the projects table. A session is an independent conversation using that directory. Many sessions can share one project's files, and a project can exist with zero sessions.
 
-## What differs
+- New opens a name form, then a native parent-folder picker, and creates a new child directory. Existing directories are never overwritten.
+- Open registers an existing directory and restores its most recently viewed session, or displays a fresh session draft.
+- Projects expand to show their sessions and New Session, Rename, and Remove controls. The separate Sessions activity-bar panel is removed.
+- New Session starts an independent context without a folder picker. Sending in an empty project's draft also creates a session in that project.
+- Rename Project changes its display name. Folder paths remain stable.
+- Delete Session removes conversation data and retains project registration and files.
+- Remove Project archives its navigation entry and retains files and histories. Open restores the project and its sessions. A running project's removal is blocked.
+- Explorer can browse a project even when it has no sessions. Git inspection remains Code-only; Code keeps structural Plan/Act restrictions and Windows sandboxed commands.
 
-| Capability | Work | Code |
-| --- | --- | --- |
-| Project folder | `%USERPROFILE%/Documents/Moderado-Desktop/work-sessionN`, created silently | Required, picked by the user |
-| Reading the disk on its own | Never | Yes, jailed to the workspace |
-| Reading user-attached files | Yes — text and images | Not in the first cut |
-| `list_files`, `read_file`, `search_files` tools | Not offered | Offered |
-| `write_file`, `edit_file` | Never | Act only, with approval |
-| Checkpoints | Never created | Before each mutating step |
-| Workspace and Source Control panels | Hidden | Shown |
-| Plan/Act selector | Hidden; always read-only | Shown |
-| Web search | Offered when configured | Offered when configured |
-| Schedules | Allowed; no write policy to choose | Allowed; policy as today |
-| Transcript import | Allowed | Allowed |
+## Navigation and drafts
 
-On app startup, Work is the default. If no Work session exists, create `work-session0` under `%USERPROFILE%/Documents/Moderado-Desktop` and select it; reuse an existing Work session on later launches. The Sessions panel uses one Work/Code switch, with the creation action named for the selected kind.
+The compact Work/Code selector restores that mode's last task or Code project/session. Last-viewed IDs and project selection are stored locally and validated against current records on startup. Work remains the startup mode. Unsent text and attachment selections are retained in memory per conversation/draft while switching views. A background task continues when the user navigates away.
 
-The difference is **who chooses the file**. In Code the agent decides what to open inside a folder the user already trusted. In Work the user decides, message by message, and nothing else on disk is reachable.
+Async selection results are guarded by a revision counter. A delayed request cannot reactivate another mode or overwrite a newer selection. Completion and attachment events are scoped to their originating conversation. Deleting the active session selects another conversation only in the same task mode or Code project; otherwise it displays a new draft.
 
-## Attachments in Work
+The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web approval controls; Code also shows command and the MCP placeholder. Provider/model and usage share a row below the input.
 
-Modelled on WorkBuddy Desktop: a paperclip button, drag and drop, and paste all add files to the current message. Each one appears as a chip with its name, kind, and size, and can be removed before sending. Sending moves the chips into the transcript next to the message they belong to.
+## Persistence and migration
 
-- **Text-like files** (`.txt`, `.md`, `.json`, `.csv`, `.log`, source files, and anything that decodes as UTF-8) are read and placed in the message as text, fenced with the file name so the model can cite it. A file over the limit is rejected with a message naming the limit; it is never silently cut.
-- **Images** (`.png`, `.jpg`/`.jpeg`, `.webp`, `.gif`) are sent as image parts, not OCR'd, so a vision-capable model can look at them. The model must support images; when it does not, the provider's error is surfaced as-is with a hint to pick a vision model, because model capability cannot be inferred reliably from `/v1/models`.
-- **Anything else** is rejected with a clear message rather than sent as garbage bytes.
-
-Limits for the first cut: 256 KiB per text file (the same bound the workspace reader already uses), 5 MB per image, at most 10 attachments per message, 20 MB per message in total. Exceeding any of them is an explicit error.
-
-## Data model
-
-- Migration 3 adds the `attachments` table (`id`, `session_id`, `name`, `kind`, `bytes`, `created_at`), so a session's copies are enumerable and cascade away with it.
-- `SessionRecord` and `SessionSummary` gain `kind: SessionKind` (`work` | `code`), serialized as `kind`.
-- SQLite: schema changes go through `db.rs`, which owns every table and records the applied version in `PRAGMA user_version`. Version 1 is the schema as it shipped before versioning, written with `IF NOT EXISTS` and a column repair for databases older than that; version 2 adds `sessions.kind` with `DEFAULT 'code'`, so every existing session becomes Code, which is exactly today's behaviour. The three stores no longer carry DDL of their own.
-- `workspace` stays `NOT NULL`. A Work session gets a numbered folder under the user's Documents directory (`Moderado-Desktop/work-sessionN`). The folder is never exposed as a tool root; the Work dispatcher still offers no filesystem tools. This keeps one invariant — every session has a root — so checkpoints, the project tree, and source control need no nullable-path branch.
-- A session's kind never changes after creation. The UI offers "start a Code session" instead of converting one.
-- Attachments are copied on pick into `<app-data>/attachments/<session-id>/<sha256>-<name>`. The copy is what gets read at send time, so a moved or deleted original cannot break a stored conversation, and nothing outside that folder is read later.
-
-## Message and provider contract
-
-- `provider.rs` already forwards `messages` as a `Vec<Value>` straight into the OpenAI-compatible request, so image parts need no transport change. The streaming parser reads only `delta.content` and `delta.tool_calls`, which is unaffected.
-- History stores an attachment as a lightweight block — `{"type":"attachment","id":"<sha256>","name":"report.png","kind":"image"}` — not as base64. Before each provider call the runner expands those blocks into real parts: text files become text, images become `{"type":"image_url","image_url":{"url":"data:image/png;base64,…"}}`.
-  Storing base64 in `history_json` was rejected: the column is rewritten on every turn, so one 3 MB image would cost 4 MB per write and grow without bound.
-- A message with attachments therefore has array content, while plain messages keep string content. Existing Code-session history and tests are unaffected because they keep the string form.
-- If an attachment file has gone missing when the history is replayed, the block is replaced with a short text note naming the missing file instead of failing the turn.
-
-## Tool surface and enforcement
-
-- `agent::tool_definitions` takes the session kind. For `work` it returns only `web_search` when that is configured — no file tools, because attachments are context rather than tools.
-- `agent::dispatch_tool` rejects every file tool when the kind is `work`, with an explicit error such as `Work sessions have no file access`. A model that hallucinates `read_file` must fail at dispatch rather than be trusted to respect a prompt; this mirrors the existing Plan-mode gate.
-- The runner looks up the kind from the session record when it builds the tool list, so the renderer cannot widen the toolset by sending a mode.
-
-## UI
-
-- The Sessions panel gains a two-item segmented control at its top: **Work** and **Code**. It filters the session list and decides what **New session** creates. Selecting a session of the other kind moves the control to that kind.
-- **New session** in Work creates a scratch-backed session immediately. In Code it keeps today's behaviour: pick a folder, or fall back to a Documents session folder on the first message.
-- While a Work session is active the activity bar hides Workspace, Checkpoints, and Source Control, and the top bar hides Plan/Act. The theme toggle and the composer stay.
-- The composer gains an attachment control in Work sessions only. Chips sit above the text field; paste and drop use the same path as the picker.
-- The schedule dialog hides the write-approval choice for Work sessions, since there is nothing to approve.
-- Existing labels stay: Work/Code names the session, Plan/Act names the agent's posture. The UI never shows both selectors at once.
-
-## Backend contracts
-
-- `create_session(settings, kind)` and `create_default_session(settings, kind)` create the right root for the kind and record it.
-- `list_sessions` and `get_session` include `kind`. No new filter command is needed; the renderer filters the list it already has.
-- `add_attachments(session_id, paths)` copies, validates, and returns `{id, name, kind, bytes}` per file, rejecting anything over the limits with a message naming the file. `send_turn` accepts the attachment ids for the message being sent.
-- Nothing is read from the renderer's original path after the copy, and no command accepts an arbitrary path to read.
-
-## Rollout
-
-Status: steps 1 to 5 have shipped — migrations 2 and 3, `SessionKind`, the Work scratch root, the
-dispatch gate, the Work/Code switch with hidden panels, the composer attachment picker, and a
-schedule dialog that hides write approval for Work sessions.
-
-1. Schema migration, `SessionKind`, record and summary fields, scratch root. No behaviour change; all tests still pass.
-2. Tool gating and dispatch rejection for Work sessions, with tests. No UI yet.
-3. Attachment store: copy, validate, expand on send, replay after restart. Rust tests with a local mock provider, including one that asserts the image part arrives as a data URL.
-4. Sessions segmented control, hidden panels and Plan/Act, composer attachment control.
-5. Schedule dialog adjustment and docs (README, PRD, progress).
+Migration 6 registers each existing Code folder once, preserves session histories, and enables read/edit for Work tasks still using the previous default policy. Customized policies remain intact. Projects are keyed by canonical folder path; relocating a project requires opening its new location. Removing a project does not delete its underlying data.
 
 ## Verification
 
-- Rust tests: migration adds `kind` and defaults existing rows to `code`; a Work tool list has no file tools; `dispatch_tool` rejects `read_file`, `write_file`, and `edit_file` for Work; attachment copy rejects oversize and unsupported files; a text attachment reaches the provider as text; an image attachment reaches the provider as an `image_url` data part; a replayed history with a deleted attachment degrades to a note.
-- Frontend tests: the segmented control filters sessions, creating in each kind calls the right command, Work hides the three panels and the Plan/Act selector, and only Code sessions show schedule write approval.
-- Manual: create a Work session, attach a text file and an image, confirm both are read; create a Code session and confirm today's flow, approvals, and checkpoints.
+Offline Rust checks cover migration, project lifecycle, document tool gates, workspace escapes, attachment copies, and Work/Code mock-provider write flows. Node checks cover mode restoration and empty project selection. For rendered UI regression checks, run Vite on port 1420 and use:
 
-## Decided
+```powershell
+npx --package @playwright/cli playwright-cli open about:blank
+npx --package @playwright/cli playwright-cli run-code --filename scripts/check-navigation-ui.js
+```
 
-- Switcher placement: a segmented **Work / Code** control at the top of the Sessions panel.
-- Model per kind: one provider and model pair per session, as today. A separate Work model can come later as `settings.workModel` without changing the record shape.
-- Attachments: Work reads user-supplied text and images; it never browses the disk. Code keeps autonomous workspace tools and gains attachments later if wanted, since the pipeline is session-agnostic.
-
-## Open decisions
-
-1. **Attachment scope in Code.** Turning the same composer control on for Code sessions is nearly free once the store exists; the question is only whether two ways to read a file confuses the model.
-2. **Persistence of attachments in the transcript.** Chips are shown per message; keeping the copy forever means app-data grows. A retention policy (for example, drop copies for sessions deleted) is needed before long use.
-3. **PDF and office documents.** Out of scope; they need text extraction, which is a separate dependency decision.
+The browser check uses a mocked Tauri bridge and exercises draft restoration, nested sessions, Explorer, background task navigation, last-session deletion, project removal/reopen, and New/Open project flows. Native file dialogs and real model behavior require desktop/manual verification.

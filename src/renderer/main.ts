@@ -6,7 +6,7 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions, type SessionKind, type SidebarPanel } from './sessions-view';
+import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions, type SessionKind, type SidebarPanel } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -15,7 +15,7 @@ type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebConte
 type ModelUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; rateTps: number | null; contextTokens: number | null };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
-type HistoryMessage = { role: string; content?: string };
+type HistoryMessage = { role: string; content?: string | Array<{ type?: string; text?: string; name?: string }> };
 type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string };
@@ -28,6 +28,7 @@ type Schedule = { id: string; sessionId: string; prompt: string; mode: 'plan' | 
 type SearchSettings = { enabled: boolean; endpoint: string };
 type ScheduleStarted = { sessionId: string; scheduleId: string; prompt: string };
 type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null };
+type ProjectRecord = { workspace: string; name: string; updatedAt: number };
 type ProjectEntry = { name: string; path: string; isDir: boolean };
 type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
 type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
@@ -78,6 +79,13 @@ let selectedProjectWorkspace: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
 const expandedFolders = new Set<string>();
 let summaries: SessionSummary[] = [];
+let projects: ProjectRecord[] = [];
+const expandedProjects = new Set<string>();
+const lastSessionByKind = new Map<SessionKind, string>();
+const lastSessionByProject = new Map<string, string>();
+const composerDrafts = new Map<string, { text: string; attachments: AttachmentRecord[] }>();
+let selectionRevision = 0;
+let selectingContext = false;
 const sessions = new Map<string, SessionRecord>();
 const views = new Map<string, DisplayMessage[]>();
 const running = new Set<string>();
@@ -224,10 +232,11 @@ async function saveEnteredKey(settings: ProviderSettings): Promise<void> {
 
 function historyToView(history: HistoryMessage[]): DisplayMessage[] {
   return history.flatMap((message) => {
-    if (message.role === 'user') return [{ role: 'You', content: message.content ?? '' }];
-    if (message.role === 'tool') return [{ role: 'Tool', content: message.content ?? '' }];
-    if (message.role === 'system') return [{ role: 'System', content: message.content ?? '' }];
-    if (message.role === 'assistant' && message.content) return [{ role: 'Agent', content: message.content }];
+    const content = typeof message.content === 'string' ? message.content : message.content?.map((block) => block.type === 'attachment' ? `[${block.name ?? 'Attachment'}]` : block.text ?? '').join('\n') ?? '';
+    if (message.role === 'user') return [{ role: 'You', content }];
+    if (message.role === 'tool') return [{ role: 'Tool', content }];
+    if (message.role === 'system') return [{ role: 'System', content }];
+    if (message.role === 'assistant' && content) return [{ role: 'Agent', content }];
     return [];
   });
 }
@@ -270,55 +279,63 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
   if (stickToBottom) transcript.scrollTop = transcript.scrollHeight;
 }
 
+function sessionRow(session: SessionSummary, group: string): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'selectable-session-row';
+  const radio = document.createElement('input');
+  radio.type = 'radio'; radio.name = group; radio.checked = session.id === activeSessionId;
+  radio.setAttribute('aria-label', `Select ${session.name}`);
+  radio.addEventListener('change', () => { void selectSession(session.id); });
+  const button = document.createElement('button'); button.type = 'button';
+  button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
+  button.textContent = `${running.has(session.id) ? '● ' : ''}${session.name}`;
+  button.title = session.workspace;
+  button.addEventListener('click', () => { void selectSession(session.id); });
+  row.append(button, radio); return row;
+}
+
 function renderSessions(): void {
-  const renderItems = (list: HTMLElement, items: SessionSummary[]) => list.replaceChildren(...items.map((session) => {
-    const row = document.createElement('div');
-    row.className = 'selectable-session-row';
-    const radio = document.createElement('input');
-    radio.type = 'radio';
-    radio.name = list.id === 'task-list' ? 'active-work-task' : 'active-code-session';
-    radio.checked = session.id === activeSessionId;
-    radio.setAttribute('aria-label', `Select ${session.name}`);
-    radio.addEventListener('change', () => { void selectSession(session.id); });
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
-    button.textContent = `${running.has(session.id) ? '● ' : ''}${session.name}`;
-    button.title = session.workspace;
-    button.addEventListener('click', () => { void selectSession(session.id); });
-    row.append(button, radio);
-    return row;
-  }));
-  renderItems($('task-list'), visibleSessions(summaries, 'work'));
-  const projects = projectsForSessions(summaries);
-  const projectList = $('project-list');
-  projectList.replaceChildren(...projects.map((project) => {
-    const row = document.createElement('div');
-    row.className = 'selectable-session-row';
-    const radio = document.createElement('input');
-    radio.type = 'radio';
-    radio.name = 'active-code-project';
-    radio.checked = project.workspace === selectedProjectWorkspace;
+  const work = visibleSessions(summaries, 'work');
+  $('task-list').replaceChildren(...work.map((session) => sessionRow(session, 'active-work-task')));
+  if (!work.length) $('task-list').textContent = 'Create a task to begin.';
+  $('project-list').replaceChildren(...projects.map((project) => {
+    const section = document.createElement('section'); section.className = 'project-group';
+    const row = document.createElement('div'); row.className = 'selectable-session-row project-heading';
+    const children = sessionsForProject(summaries, project.workspace);
+    const expanded = expandedProjects.has(project.workspace);
+    const expander = document.createElement('button'); expander.type = 'button'; expander.className = 'project-expander';
+    expander.textContent = expanded ? '▾' : '▸'; expander.setAttribute('aria-label', `Expand ${project.name}`); expander.setAttribute('aria-expanded', String(expanded));
+    expander.addEventListener('click', () => { if (expanded) expandedProjects.delete(project.workspace); else expandedProjects.add(project.workspace); renderSessions(); });
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = `session-item${activeKind === 'code' && project.workspace === selectedProjectWorkspace ? ' selected' : ''}`;
+    button.textContent = `${children.some((session) => running.has(session.id)) ? '● ' : ''}${project.name}`;
+    button.title = `${project.workspace}
+${children.length} sessions`;
+    button.addEventListener('click', () => { void selectProject(project.workspace); });
+    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'active-code-project';
+    radio.checked = activeKind === 'code' && project.workspace === selectedProjectWorkspace;
     radio.setAttribute('aria-label', `Select project ${project.name}`);
     radio.addEventListener('change', () => { void selectProject(project.workspace); });
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `session-item${project.workspace === selectedProjectWorkspace ? ' selected' : ''}`;
-    button.textContent = project.name;
-    button.title = `${project.workspace}\n${project.sessionCount} session${project.sessionCount === 1 ? '' : 's'}`;
-    const count = document.createElement('span');
-    count.className = 'project-session-count';
-    count.textContent = String(project.sessionCount);
-    button.append(count);
-    button.addEventListener('click', () => { void selectProject(project.workspace); });
-    row.append(button, radio);
-    return row;
+    row.append(expander, button, radio); section.append(row);
+    if (expanded) {
+      const list = document.createElement('div'); list.className = 'project-sessions'; list.setAttribute('aria-label', `${project.name} sessions`);
+      list.append(...children.map((session) => sessionRow(session, 'active-code-session')));
+      if (!children.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No sessions yet.'; list.append(empty); }
+      const actions = document.createElement('div'); actions.className = 'project-actions';
+      for (const [label, action] of [
+        ['New Session', () => { void newProjectSession(project.workspace); }],
+        ['Rename', () => { void renameProject(project); }],
+        ['Remove', () => { void removeProject(project); }],
+      ] as const) {
+        const control = document.createElement('button'); control.type = 'button'; control.className = 'text-button'; control.textContent = label;
+        control.disabled = creatingSession || (label === 'Remove' && children.some((session) => running.has(session.id)));
+        control.addEventListener('click', action); actions.append(control);
+      }
+      list.append(actions); section.append(list);
+    }
+    return section;
   }));
-  const projectSessions = selectedProjectWorkspace ? sessionsForProject(summaries, selectedProjectWorkspace) : [];
-  renderItems($('code-session-list'), projectSessions);
-  $('sessions-project-name').textContent = selectedProjectWorkspace
-    ? projectNameFromWorkspace(selectedProjectWorkspace, 'Project')
-    : 'Select a project';
+  if (!projects.length) $('project-list').textContent = 'Create a project or open an existing folder.';
 }
 
 function applyKindUi(): void {
@@ -333,43 +350,88 @@ function applyKindUi(): void {
     const panel = button.dataset.panel as SidebarPanel;
     button.hidden = !panelAvailableForKind(panel, activeKind);
   }
-  for (const panel of ['tasks', 'projects', 'sessions'] as const) {
+  for (const panel of ['tasks', 'projects'] as const) {
     const button = document.querySelector<HTMLButtonElement>(`[data-panel="${panel}"]`);
     if (button) button.hidden = !panelAvailableForKind(panel, activeKind);
   }
   const explorerButton = document.querySelector<HTMLButtonElement>('[data-panel="workspace"]');
   if (explorerButton) explorerButton.hidden = !panelAvailableForKind('workspace', activeKind);
   document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
-  $('auto-approve-group').toggleAttribute('hidden', work);
+  $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
+  $('approve-command-option').toggleAttribute('hidden', work);
+  $('approve-mcp-option').toggleAttribute('hidden', work);
   attachButton.toggleAttribute('hidden', !work);
-  attachButton.disabled = !work || !activeSessionId;
+  attachButton.disabled = !work || !activeSessionId || selectingContext;
   document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
-  prompt.placeholder = work ? 'Ask anything…' : 'What should the agent work on?';
+  prompt.placeholder = work ? 'Describe the task or document you need…' : 'What should the agent work on in this project?';
   const emptyCopy = document.getElementById('empty-state-copy');
   if (emptyCopy) {
     emptyCopy.textContent = work
-      ? 'Ask anything. Attach text files or images and the assistant reads only those; it never browses your disk.'
-      : 'Choose a model and send a task. Your first message creates a session folder in Documents automatically. Act mode asks before every write.';
+      ? 'Ask a question or create a document. Files and editable attachment copies stay in this task’s managed folder.'
+      : (selectedProjectWorkspace ? 'Start a new session in this project. Existing project files are available in Explorer.' : 'Create a project folder or open an existing codebase to begin.');
   }
   $('workspace-button').textContent = newActionLabel('tasks');
-  $('new-project').textContent = newActionLabel('projects');
-  $('new-code-session').textContent = newActionLabel('sessions');
+  $('new-project').textContent = 'New';
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-work-content').toggleAttribute('hidden', !work);
   $('profile-code-content').toggleAttribute('hidden', work);
   if (activePanel && !panelAvailableForKind(activePanel, activeKind)) switchPanel(defaultPanelForKind(activeKind));
-  if (!work) {
-    pendingAttachments = [];
-    renderChips();
-  }
+
 }
 
-function setKind(kind: SessionKind): void {
-  activeKind = kind;
-  if (!panelAvailableForKind(activePanel ?? defaultPanelForKind(kind), kind)) activePanel = defaultPanelForKind(kind);
-  applyKindUi();
-  switchPanel(activePanel ?? defaultPanelForKind(kind));
-  renderSessions();
+function rememberNavigation(): void {
+  try { localStorage.setItem('moderado-navigation', JSON.stringify({ work: lastSessionByKind.get('work'), code: lastSessionByKind.get('code'), project: selectedProjectWorkspace })); }
+  catch (error) { setStatus(`Navigation preference could not be saved: ${String(error)}`); }
+}
+function restoreNavigation(): void {
+  try {
+    const saved: { work?: unknown; code?: unknown; project?: unknown } | null = JSON.parse(localStorage.getItem('moderado-navigation') ?? '{}');
+    if (!saved || typeof saved !== 'object') return;
+    for (const kind of ['work', 'code'] as const) { const id = saved[kind]; if (typeof id === 'string' && summaries.some((session) => session.id === id && session.kind === kind)) lastSessionByKind.set(kind, id); }
+    if (typeof saved.project === 'string' && projects.some((project) => project.workspace === saved.project)) selectedProjectWorkspace = saved.project;
+    const code = summaries.find((session) => session.id === lastSessionByKind.get('code'));
+    if (code) lastSessionByProject.set(code.workspace, code.id);
+  } catch (error) { setStatus(`Navigation preference could not be loaded: ${String(error)}`); }
+}
+function draftKey(): string { return activeSessionId ?? `${activeKind}:${activeKind === 'code' ? selectedProjectWorkspace ?? '' : ''}`; }
+function saveComposerDraft(): void { composerDrafts.set(draftKey(), { text: prompt.value, attachments: [...pendingAttachments] }); }
+function restoreComposerDraft(): void {
+  const draft = composerDrafts.get(draftKey()); prompt.value = draft?.text ?? ''; pendingAttachments = draft?.attachments ?? []; renderChips();
+}
+function currentFolder(): string | null {
+  return activeKind === 'code' ? selectedProjectWorkspace : activeSession()?.workspace ?? null;
+}
+function updateFolderContext(): void {
+  const folder = currentFolder();
+  const project = projects.find((item) => item.workspace === folder);
+  $('workspace-context').textContent = folder ?? (activeKind === 'work' ? 'A managed folder is created when you start a task.' : 'Create or open a project folder.');
+  $('workspace-context').title = folder ?? '';
+  $('project-root-name').textContent = project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No folder selected');
+}
+function enterDraft(kind: SessionKind, workspace: string | null = selectedProjectWorkspace): void {
+  selectionRevision++; selectingContext = false; activeSessionId = null; activeKind = kind;
+  if (kind === 'code') selectedProjectWorkspace = workspace;
+  rememberNavigation();
+  $('session-title').textContent = kind === 'work' ? 'New Task' : 'New Session';
+  $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
+  renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
+  projectEntries.clear(); expandedFolders.clear();
+  if (activePanel === 'workspace') void refreshProjectTree();
+  if (activePanel === 'source-control') void refreshSourceControl();
+  void refreshCheckpoints(); void refreshSchedules();
+  setStatus(kind === 'work' ? 'Ready for a new task.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
+}
+async function setKind(kind: SessionKind): Promise<void> {
+  if (kind === activeKind && !selectingContext) return;
+  saveComposerDraft();
+  const validProjects = new Set(projects.map((project) => project.workspace));
+  const candidates = summaries.filter((session) => session.kind === 'work' || validProjects.has(session.workspace));
+  const workspace = selectedProjectWorkspace && validProjects.has(selectedProjectWorkspace) ? selectedProjectWorkspace : null;
+  const remembered = kind === 'code' && workspace ? lastSessionByProject.get(workspace) : lastSessionByKind.get(kind);
+  const next = sessionForMode(candidates, kind, remembered, kind === 'code' ? workspace : null);
+  enterDraft(kind, kind === 'code' ? workspace ?? next?.workspace ?? null : workspace);
+  switchPanel(defaultPanelForKind(kind));
+  if (next) await selectSession(next.id, false);
 }
 
 function renderChips(): void {
@@ -393,7 +455,7 @@ function renderChips(): void {
 }
 
 async function refreshSummaries(): Promise<void> {
-  summaries = await invoke<SessionSummary[]>('list_sessions');
+  [summaries, projects] = await Promise.all([invoke<SessionSummary[]>('list_sessions'), invoke<ProjectRecord[]>('list_projects')]);
   renderSessions();
 }
 
@@ -406,37 +468,30 @@ async function refreshSession(id: string, replaceView = false): Promise<SessionR
   return record;
 }
 
-async function selectSession(id: string): Promise<void> {
-  const record = await refreshSession(id);
-  activeSessionId = id;
-  if (record.kind !== activeKind) activeKind = record.kind;
-  if (record.kind === 'code') selectedProjectWorkspace = record.workspace;
-  applyKindUi();
-  applySessionSettings(record.settings);
-  applyAutoApprove(record.autoApprove);
-  mode = modeBySession.get(id) ?? 'act';
-  setMode(mode);
-  $('workspace-name').textContent = record.name;
-  $('workspace-path').textContent = record.workspace;
-  $('session-title').textContent = record.name;
-  $('profile-session').textContent = record.name;
-  $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.planModel || 'No plan model'}`;
-  $('project-root-name').textContent = projectNameFromWorkspace(record.workspace, record.name);
-  renderSessions();
-  renderTranscript();
-  updateControls();
-  await refreshCheckpoints();
-  await refreshSchedules();
-  projectEntries.clear();
-  expandedFolders.clear();
-  if (activePanel === 'workspace') await refreshProjectTree();
-  if (activePanel === 'source-control') await refreshSourceControl();
-  const searchSettings = await invoke<SearchSettings>('get_search_settings', { sessionId: id });
-  if (id !== activeSessionId) return;
-  $<HTMLInputElement>('search-enabled').checked = searchSettings.enabled;
-  $<HTMLInputElement>('search-endpoint').value = searchSettings.endpoint;
-  $<HTMLInputElement>('search-key').value = '';
-  setStatus(running.has(id) ? 'Agent is working…' : 'Session ready.');
+async function selectSession(id: string, saveDraft = true): Promise<void> {
+  if (saveDraft) saveComposerDraft();
+  const revision = ++selectionRevision; selectingContext = true; updateControls();
+  try {
+    const record = await refreshSession(id);
+    if (revision !== selectionRevision) return;
+    activeSessionId = id; activeKind = record.kind; lastSessionByKind.set(record.kind, id);
+    if (record.kind === 'code') { selectedProjectWorkspace = record.workspace; lastSessionByProject.set(record.workspace, id); expandedProjects.add(record.workspace); }
+    rememberNavigation();
+    applySessionSettings(record.settings); applyAutoApprove(record.autoApprove);
+    setMode(record.kind === 'work' ? 'act' : modeBySession.get(id) ?? 'act');
+    $('session-title').textContent = record.name; $('profile-session').textContent = record.name;
+    $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
+    renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
+    projectEntries.clear(); expandedFolders.clear();
+    await Promise.all([refreshCheckpoints(), refreshSchedules(), activePanel === 'workspace' ? refreshProjectTree() : Promise.resolve(), activePanel === 'source-control' ? refreshSourceControl() : Promise.resolve()]);
+    if (revision !== selectionRevision) return;
+    const searchSettings = await invoke<SearchSettings>('get_search_settings', { sessionId: id });
+    if (revision !== selectionRevision) return;
+    $<HTMLInputElement>('search-enabled').checked = searchSettings.enabled;
+    $<HTMLInputElement>('search-endpoint').value = searchSettings.endpoint; $<HTMLInputElement>('search-key').value = '';
+    setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
+  } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
+  finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
 }
 
 function applyAutoApprove(policy: AutoApprovePolicy): void {
@@ -445,7 +500,7 @@ function applyAutoApprove(policy: AutoApprovePolicy): void {
 }
 
 $<HTMLButtonElement>('save-auto-approve').addEventListener('click', () => {
-  if (!activeSessionId || activeKind !== 'code') { setStatus('Select a Code session first.'); return; }
+  if (!activeSessionId) { setStatus('Select a task or session first.'); return; }
   const policy: AutoApprovePolicy = {
     readFiles: $<HTMLInputElement>('approve-read').checked,
     editFiles: $<HTMLInputElement>('approve-edit').checked,
@@ -463,7 +518,7 @@ $<HTMLButtonElement>('save-auto-approve').addEventListener('click', () => {
 function updateControls(): void {
   applyKindUi();
   const busy = activeSessionId ? running.has(activeSessionId) : false;
-  send.disabled = !canSend(initialized, busy || creatingSession);
+  send.disabled = !canSend(initialized, busy || creatingSession || selectingContext) || (activeKind === 'code' && !selectedProjectWorkspace);
   stop.hidden = !busy;
   stop.disabled = !busy;
   providerSelect.disabled = busy;
@@ -478,6 +533,9 @@ function updateControls(): void {
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('workspace-button').disabled = !initialized || creatingSession;
+  for (const id of ['new-project', 'open-project', 'kind-work', 'kind-code']) $<HTMLButtonElement>(id).disabled = !initialized || creatingSession;
+  $<HTMLButtonElement>('save-auto-approve').disabled = !activeSessionId || selectingContext;
+  for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;
   $<HTMLButtonElement>('new-schedule').disabled = !activeSessionId;
   $<HTMLButtonElement>('import-transcript').disabled = !activeSessionId;
   $<HTMLButtonElement>('save-search').disabled = !activeSessionId || busy;
@@ -593,35 +651,29 @@ function switchPanel(panel: SidebarPanel): void {
 }
 
 async function selectProject(workspace: string): Promise<void> {
-  selectedProjectWorkspace = workspace;
-  const project = projectsForSessions(summaries).find((item) => item.workspace === workspace);
-  renderSessions();
-  switchPanel('sessions');
-  if (project) await selectSession(project.latestSessionId);
+  if (!projects.some((project) => project.workspace === workspace)) { setStatus('Open this project first.'); return; }
+  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); switchPanel('projects');
+  const next = sessionForMode(summaries, 'code', lastSessionByProject.get(workspace), workspace);
+  if (next) await selectSession(next.id, false);
+  else renderSessions();
+}
+function browserArgs(): { sessionId: string | null; projectWorkspace: string | null } {
+  return { sessionId: activeKind === 'work' ? activeSessionId : null, projectWorkspace: activeKind === 'code' ? selectedProjectWorkspace : null };
 }
 
 async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
-  const id = activeSessionId;
-  if (!id) return [];
-  const entries = await invoke<ProjectEntry[]>('list_project_entries', { sessionId: id, path });
-  if (id !== activeSessionId) return [];
-  projectEntries.set(path, entries);
-  return entries;
+  const folder = currentFolder(); if (!folder) return [];
+  const entries = await invoke<ProjectEntry[]>('list_project_entries', { ...browserArgs(), path });
+  if (folder !== currentFolder()) return [];
+  projectEntries.set(path, entries); return entries;
 }
-
 async function refreshProjectTree(): Promise<void> {
-  const tree = $('project-tree');
-  const id = activeSessionId;
-  projectEntries.clear();
-  expandedFolders.clear();
-  if (!id) { tree.textContent = 'Select a Code session to browse its project.'; return; }
-  tree.textContent = 'Loading project files…';
-  const session = sessions.get(id);
-  $('project-root-name').textContent = session ? projectNameFromWorkspace(session.workspace, session.name) : '';
-  try {
-    await loadProjectFolder('.');
-    if (id === activeSessionId) renderProjectTree();
-  } catch (error) { if (id === activeSessionId) tree.textContent = `Could not load project files: ${String(error)}`; }
+  const tree = $('project-tree'); const folder = currentFolder(); const revision = selectionRevision;
+  projectEntries.clear(); expandedFolders.clear(); updateFolderContext();
+  if (!folder) { tree.textContent = 'Select a task or project to browse its files.'; return; }
+  tree.textContent = 'Loading files…';
+  try { await loadProjectFolder('.'); if (revision === selectionRevision && folder === currentFolder()) renderProjectTree(); }
+  catch (error) { if (revision === selectionRevision) tree.textContent = `Could not load files: ${String(error)}`; }
 }
 
 function renderProjectTree(): void {
@@ -664,33 +716,33 @@ function renderProjectTree(): void {
 }
 
 async function previewProjectFile(entry: ProjectEntry): Promise<void> {
-  const id = activeSessionId;
-  if (!id) return;
+  const folder = currentFolder();
+  if (!folder) return;
   const dialog = $<HTMLDialogElement>('file-preview-dialog');
   $('file-preview-title').textContent = entry.name;
   $('file-preview-path').textContent = entry.path;
   $('file-preview-content').textContent = 'Loading…';
   dialog.showModal();
   try {
-    const contents = await invoke<string>('read_project_file', { sessionId: id, path: entry.path });
-    if (id === activeSessionId) $('file-preview-content').textContent = contents;
+    const contents = await invoke<string>('read_project_file', { ...browserArgs(), path: entry.path });
+    if (folder === currentFolder()) $('file-preview-content').textContent = contents;
   } catch (error) { $('file-preview-content').textContent = `Could not preview file: ${String(error)}`; }
 }
 
 async function refreshSourceControl(): Promise<void> {
-  const id = activeSessionId;
+  const folder = currentFolder();
   const branch = $('source-branch');
   const message = $('source-control-message');
   const changes = $('source-changes');
   const history = $('commit-history');
   changes.replaceChildren();
   history.replaceChildren();
-  if (!id) { branch.textContent = 'Select a session'; message.textContent = 'Open a workspace to inspect Git.'; return; }
+  if (!folder) { branch.textContent = 'Select a project'; message.textContent = 'Open a workspace to inspect Git.'; return; }
   branch.textContent = 'Loading…';
   message.textContent = 'Reading local Git status…';
   try {
-    const snapshot = await invoke<SourceControlSnapshot>('get_source_control', { sessionId: id });
-    if (id !== activeSessionId) return;
+    const snapshot = await invoke<SourceControlSnapshot>('get_source_control', browserArgs());
+    if (folder !== currentFolder()) return;
     branch.textContent = snapshot.branch;
     message.textContent = snapshot.changes.length ? `${snapshot.changes.length} changed file${snapshot.changes.length === 1 ? '' : 's'}` : 'Working tree clean';
     changes.replaceChildren(...snapshot.changes.map((path) => {
@@ -712,7 +764,7 @@ async function refreshSourceControl(): Promise<void> {
       return row;
     }));
   } catch (error) {
-    if (id !== activeSessionId) return;
+    if (folder !== currentFolder()) return;
     branch.textContent = 'Unavailable';
     message.textContent = String(error);
   }
@@ -821,10 +873,11 @@ async function initialize(): Promise<void> {
     selectProvider(saved?.providerId ?? 'moderado');
     initialized = true;
     await refreshSummaries();
-    setKind(DEFAULT_SESSION_KIND);
-    const firstWorkSession = visibleSessions(summaries, DEFAULT_SESSION_KIND)[0];
+    restoreNavigation();
+    await setKind(DEFAULT_SESSION_KIND);
+    const firstWorkSession = sessionForMode(summaries, DEFAULT_SESSION_KIND, lastSessionByKind.get(DEFAULT_SESSION_KIND));
     if (firstWorkSession) await selectSession(firstWorkSession.id);
-    else await createSession(currentSettings(), false, DEFAULT_SESSION_KIND);
+    else await createSession(currentSettings(), DEFAULT_SESSION_KIND);
     const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
     for (const item of local) {
       const preset = providers.find((provider) => provider.id === item.id);
@@ -836,26 +889,21 @@ async function initialize(): Promise<void> {
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
 
-$<HTMLButtonElement>('kind-work').addEventListener('click', () => setKind('work'));
-$<HTMLButtonElement>('kind-code').addEventListener('click', () => setKind('code'));
+$<HTMLButtonElement>('kind-work').addEventListener('click', () => { void setKind('work'); });
+$<HTMLButtonElement>('kind-code').addEventListener('click', () => { void setKind('code'); });
 $<HTMLElement>('about-version').textContent = appVersion.trim();
 
 attachButton.addEventListener('click', async () => {
-  if (!activeSessionId) {
-    setStatus('Send one message first so the Work session exists, then attach files.');
-    return;
-  }
+  const sessionId = activeSessionId;
+  if (!sessionId) { setStatus('Create a task before attaching files.'); return; }
   try {
-    const picked = await open({ multiple: true, title: 'Attach files' });
+    const picked = await open({ multiple: true, title: 'Attach files (editable copies go into the task folder)' });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
-    const records = await invoke<AttachmentRecord[]>('add_attachments', { sessionId: activeSessionId, paths });
-    pendingAttachments = [...pendingAttachments, ...records];
-    renderChips();
-    setStatus(`${pendingAttachments.length} file(s) attached.`);
-  } catch (error) {
-    setStatus(String(error));
-  }
+    const records = await invoke<AttachmentRecord[]>('add_attachments', { sessionId, paths });
+    if (activeSessionId === sessionId) { pendingAttachments = [...pendingAttachments, ...records]; renderChips(); setStatus(`${pendingAttachments.length} file(s) attached. Copies are in Explorer.`); if (activePanel === 'workspace') await refreshProjectTree(); }
+    else { const draft = composerDrafts.get(sessionId) ?? { text: '', attachments: [] }; composerDrafts.set(sessionId, { ...draft, attachments: [...draft.attachments, ...records] }); }
+  } catch (error) { if (activeSessionId === sessionId) setStatus(String(error)); }
 });
 keyApplyLink.addEventListener('click', async (event) => {
   event.preventDefault();
@@ -927,57 +975,71 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
 
-async function createSession(settings: ProviderSettings, chooseWorkspace = needsWorkspacePicker(activeKind), kind: SessionKind = activeKind): Promise<string> {
-  if (!initialized) throw new Error('Session setup is still loading.');
-  if (creatingSession) throw new Error('Session setup is already in progress.');
-  creatingSession = true;
-  updateControls();
+async function createSession(settings: ProviderSettings, kind: SessionKind = activeKind, workspace: string | null = selectedProjectWorkspace): Promise<string> {
+  if (!initialized || creatingSession) throw new Error('Session setup is already in progress.');
+  if (kind === 'code' && !workspace) throw new Error('Create or open a project first.');
+  const text = prompt.value;
+  const revision = selectionRevision;
+  creatingSession = true; updateControls();
   try {
-    const record = await invoke<SessionRecord>(chooseWorkspace ? 'create_session' : 'create_default_session', { settings, kind });
-    sessions.set(record.id, record);
-    views.set(record.id, []);
+    const record = kind === 'work'
+      ? await invoke<SessionRecord>('create_default_session', { settings, kind })
+      : await invoke<SessionRecord>('create_session_in_project', { projectWorkspace: workspace, settings });
+    sessions.set(record.id, record); views.set(record.id, []);
     await refreshSummaries();
-    await selectSession(record.id);
-    prompt.focus();
+    if (revision === selectionRevision) {
+      await selectSession(record.id);
+      if (activeSessionId === record.id) { prompt.value = text; saveComposerDraft(); prompt.focus(); }
+      else composerDrafts.set(record.id, { text, attachments: [] });
+    } else composerDrafts.set(record.id, { text, attachments: [] });
     return record.id;
-  } finally {
-    creatingSession = false;
-    updateControls();
-  }
+  } finally { creatingSession = false; renderSessions(); updateControls(); }
 }
 
 $('workspace-button').addEventListener('click', async () => {
-  try { await createSession(currentSettings(), needsWorkspacePicker(activeKind)); }
-  catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
+  if (creatingSession) return;
+  saveComposerDraft(); enterDraft('work'); prompt.value = ''; pendingAttachments = []; renderChips();
+  try { await createSession(currentSettings(), 'work'); } catch (error) { setStatus(String(error)); }
 });
 
-$('new-project').addEventListener('click', async () => {
-  try {
-    if (activeKind !== 'code') setKind('code');
-    await createSession(currentSettings(), true, 'code');
-  } catch (error) { if (String(error) !== 'No workspace selected') setStatus(String(error)); }
+const projectDialog = $<HTMLDialogElement>('new-project-dialog');
+$('new-project').addEventListener('click', () => { $<HTMLInputElement>('project-name').value = ''; projectDialog.showModal(); $<HTMLInputElement>('project-name').focus(); });
+$('cancel-project').addEventListener('click', () => projectDialog.close());
+$<HTMLFormElement>('new-project-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const name = $<HTMLInputElement>('project-name').value.trim(); if (!name || creatingSession) return;
+  const revision = selectionRevision;
+  projectDialog.close(); creatingSession = true; updateControls();
+  try { const project = await invoke<ProjectRecord>('create_project', { name }); await refreshSummaries(); if (revision === selectionRevision) await selectProject(project.workspace); }
+  catch (error) { if (String(error) !== 'No folder selected') setStatus(String(error)); }
+  finally { creatingSession = false; renderSessions(); updateControls(); }
 });
-
-$('new-code-session').addEventListener('click', async () => {
-  const source = selectedProjectWorkspace
-    ? sessionsForProject(summaries, selectedProjectWorkspace)[0]
-    : undefined;
-  if (!source) { setStatus('Choose a project before creating a session.'); return; }
+$('open-project').addEventListener('click', async () => {
+  if (creatingSession) return; const revision = selectionRevision; creatingSession = true; updateControls();
+  try { const project = await invoke<ProjectRecord>('open_project'); await refreshSummaries(); if (revision === selectionRevision) await selectProject(project.workspace); }
+  catch (error) { if (String(error) !== 'No folder selected') setStatus(String(error)); }
+  finally { creatingSession = false; renderSessions(); updateControls(); }
+});
+async function newProjectSession(workspace: string): Promise<void> {
+  if (creatingSession) return;
+  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); switchPanel('projects');
+  try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
+}
+async function renameProject(project: ProjectRecord): Promise<void> {
+  const name = window.prompt('Project display name (folder name stays the same)', project.name); if (name === null) return;
+  try { await invoke('rename_project', { projectWorkspace: project.workspace, name }); await refreshSummaries(); updateFolderContext(); }
+  catch (error) { setStatus(String(error)); }
+}
+async function removeProject(project: ProjectRecord): Promise<void> {
+  if (!window.confirm(`Remove “${project.name}” from Moderado? Its files and session history are kept. Open the folder again to restore it.`)) return;
+  const revision = selectionRevision;
   try {
-    creatingSession = true;
-    updateControls();
-    const record = await invoke<SessionRecord>('create_session_in_project', {
-      sourceSessionId: source.id,
-      settings: currentSettings(),
-    });
-    sessions.set(record.id, record);
-    views.set(record.id, []);
-    await refreshSummaries();
-    await selectSession(record.id);
-    prompt.focus();
+    await invoke('remove_project', { projectWorkspace: project.workspace }); await refreshSummaries();
+    if (selectedProjectWorkspace === project.workspace) {
+      selectedProjectWorkspace = null; rememberNavigation();
+      if (revision === selectionRevision && activeKind === 'code') { saveComposerDraft(); enterDraft('code', null); if (projects[0]) await selectProject(projects[0].workspace); }
+    }
   } catch (error) { setStatus(String(error)); }
-  finally { creatingSession = false; updateControls(); }
-});
+}
 
 function localDateTime(date: Date): string {
   const two = (value: number) => String(value).padStart(2, '0');
@@ -1062,46 +1124,33 @@ $<HTMLFormElement>('import-form').addEventListener('submit', async (event) => {
 $('rename-session').addEventListener('click', async () => {
   const session = activeSession();
   if (!session || running.has(session.id)) return;
-  const name = window.prompt('Session name', session.name);
+  const name = window.prompt(session.kind === 'work' ? 'Task name' : 'Session name', session.name);
   if (name === null) return;
   try {
     await invoke('rename_session', { sessionId: session.id, name });
     session.name = name.trim();
-    $('session-title').textContent = session.name;
-    $('workspace-name').textContent = session.name;
+    if (activeSessionId === session.id) { $('session-title').textContent = session.name; updateFolderContext(); }
     await refreshSummaries();
   } catch (error) { setStatus(String(error)); }
 });
 
 $('delete-session').addEventListener('click', async () => {
   const session = activeSession();
-  if (!session || running.has(session.id) || !window.confirm(`Delete session “${session.name}”? Workspace files will remain.`)) return;
+  if (!session || running.has(session.id) || !window.confirm(`Delete ${session.kind === 'work' ? 'task' : 'session'} “${session.name}”? Its folder and files will remain.`)) return;
   try {
     await invoke('delete_session', { sessionId: session.id });
-    sessions.delete(session.id);
-    views.delete(session.id);
-    conversationBindings.delete(session.id);
-    activeSessionId = null;
+    sessions.delete(session.id); views.delete(session.id); conversationBindings.delete(session.id); composerDrafts.delete(session.id); usageBySession.delete(session.id);
+    lastSessionByKind.delete(session.kind);
+    if (session.kind === 'code') lastSessionByProject.delete(session.workspace);
     await refreshSummaries();
-    const first = summaries[0];
-    if (first) await selectSession(first.id);
-    else {
-      $('session-title').textContent = 'Workspace conversation';
-      $('workspace-name').textContent = 'No session selected';
-      $('workspace-path').textContent = 'Agent files stay in this folder.';
-      $('profile-session').textContent = 'No session selected';
-      $('profile-provider').textContent = 'Not configured';
-      $('project-root-name').textContent = 'No project selected';
-      renderTranscript();
-      await refreshCheckpoints();
-      await refreshSchedules();
-      if (activePanel === 'workspace') await refreshProjectTree();
-      if (activePanel === 'source-control') await refreshSourceControl();
-      updateControls();
-      setStatus('Create a session to begin.');
-    }
+    if (activeSessionId !== session.id) return;
+    enterDraft(session.kind, session.kind === 'code' ? session.workspace : selectedProjectWorkspace);
+    const next = sessionForMode(summaries, session.kind, undefined, session.kind === 'code' ? session.workspace : null);
+    if (next) await selectSession(next.id, false);
   } catch (error) { setStatus(String(error)); }
 });
+
+
 
 $('selected-model').addEventListener('click', () => switchPanel('settings'));
 $('selected-model').style.cursor = 'pointer';
@@ -1232,8 +1281,10 @@ prompt.addEventListener('keydown', (event) => {
 
 $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!initialized || creatingSession || (activeSessionId && running.has(activeSessionId))) return;
+  if (!initialized || creatingSession || selectingContext || (activeSessionId && running.has(activeSessionId))) return;
   const text = prompt.value.trim();
+  const sent = [...pendingAttachments];
+  const submittedDraftKey = draftKey();
   const btw = /^\/btw(?:\s|$)/i.test(text);
   if (!text) return;
   if (btw && text.replace(/^\/btw\s*/i, '').trim() === '') {
@@ -1279,13 +1330,10 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
       addDisplay(id, 'System', 'New conversation started for the selected provider and URL.');
     }
     conversationBindings.set(id, binding(settings));
-    const sent = pendingAttachments;
     addDisplay(id, 'You', sent.length ? `${text}\n\n[${sent.map((item) => item.name).join(', ')}]` : text);
-    prompt.value = '';
-    if (sent.length) {
-      pendingAttachments = [];
-      renderChips();
-    }
+    composerDrafts.delete(submittedDraftKey);
+    composerDrafts.set(id, { text: '', attachments: [] });
+    if (id === activeSessionId) { prompt.value = ''; pendingAttachments = []; renderChips(); }
     if (id === activeSessionId) setStatus('Agent is working…');
     await invoke('start_turn', {
       sessionId: id,

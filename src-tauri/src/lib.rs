@@ -19,7 +19,7 @@ use provider::ProviderId;
 use schedules::{ApprovalPolicy, Schedule, ScheduleStore};
 use search::{SearchConfig, SearchSettings, SearchStore};
 use serde::{Deserialize, Serialize};
-use sessions::{CheckpointRecord, SessionKind, SessionRecord, SessionStore, SessionSummary};
+use sessions::{CheckpointRecord, ProjectRecord, SessionKind, SessionRecord, SessionStore, SessionSummary};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -179,14 +179,53 @@ async fn create_session(
 #[tauri::command]
 fn create_session_in_project(
     state: tauri::State<'_, AppState>,
-    source_session_id: String,
+    project_workspace: String,
     settings: ProviderSettings,
 ) -> Result<SessionRecord, String> {
-    state.store.create_session_in_project(
-        &source_session_id,
-        "New Session",
+    let existing = state.store.list()?;
+    let mut number = 1;
+    while existing.iter().any(|session| session.workspace == project_workspace && session.name == format!("Session {number}")) { number += 1; }
+    state.store.create_session_for_project(
+        &project_workspace,
+        &format!("Session {number}"),
         settings,
     )
+}
+
+async fn pick_project_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let (sender, receiver) = oneshot::channel();
+    app.dialog().file().pick_folder(move |selection| { let _ = sender.send(selection); });
+    let selected = receiver.await.map_err(|_| "Folder picker closed unexpectedly")?.ok_or("No folder selected")?;
+    Ok(PathBuf::from(selected.to_string()))
+}
+
+#[tauri::command]
+async fn create_project(app: tauri::AppHandle, state: tauri::State<'_, AppState>, name: String) -> Result<ProjectRecord, String> {
+    let parent = pick_project_folder(&app).await?;
+    state.store.create_project_folder(&parent, &name)
+}
+
+#[tauri::command]
+async fn open_project(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<ProjectRecord, String> {
+    let folder = pick_project_folder(&app).await?;
+    state.store.register_project(&folder)
+}
+
+#[tauri::command]
+fn list_projects(state: tauri::State<'_, AppState>) -> Result<Vec<ProjectRecord>, String> { state.store.list_projects() }
+
+#[tauri::command]
+fn rename_project(state: tauri::State<'_, AppState>, project_workspace: String, name: String) -> Result<(), String> {
+    state.store.rename_project(&project_workspace, &name)
+}
+
+#[tauri::command]
+fn remove_project(state: tauri::State<'_, AppState>, project_workspace: String) -> Result<(), String> {
+    for session in state.store.list()?.iter().filter(|session| session.kind == SessionKind::Code && session.workspace == project_workspace) {
+        let runtime = state.runtime(&session.id)?;
+        let _guard = runtime.turn_lock.try_lock().map_err(|_| "Stop the running sessions before removing this project")?;
+    }
+    state.store.remove_project(&project_workspace)
 }
 
 #[tauri::command]
@@ -245,42 +284,53 @@ fn get_session(
 fn save_auto_approve(
     state: tauri::State<'_, AppState>,
     session_id: String,
-    policy: crate::approval_policy::AutoApprovePolicy,
+    mut policy: crate::approval_policy::AutoApprovePolicy,
 ) -> Result<(), String> {
-    let record = state.store.get(&session_id)?;
-    if record.kind != SessionKind::Code {
-        return Err("Auto-Approve settings are available for Code sessions".into());
+    if state.store.get(&session_id)?.kind == SessionKind::Work {
+        policy.execute_command = false;
+        policy.use_mcp_servers = false;
     }
     state.store.update_auto_approve(&session_id, policy)
+}
+
+fn browser_workspace(state: &AppState, session_id: Option<String>, project_workspace: Option<String>) -> Result<PathBuf, String> {
+    if let Some(workspace) = project_workspace {
+        return Ok(PathBuf::from(state.store.get_project(&workspace)?.workspace));
+    }
+    let id = session_id.ok_or("Select a task or project first")?;
+    Ok(PathBuf::from(state.store.get(&id)?.workspace))
 }
 
 #[tauri::command]
 fn list_project_entries(
     state: tauri::State<'_, AppState>,
-    session_id: String,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
     path: String,
 ) -> Result<Vec<workspace::ProjectEntry>, String> {
-    let session = state.store.get(&session_id)?;
-    workspace::list_project_entries(PathBuf::from(session.workspace).as_path(), &path)
+    let root = browser_workspace(&state, session_id, project_workspace)?;
+    workspace::list_project_entries(&root, &path)
 }
 
 #[tauri::command]
 fn read_project_file(
     state: tauri::State<'_, AppState>,
-    session_id: String,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
     path: String,
 ) -> Result<String, String> {
-    let session = state.store.get(&session_id)?;
-    workspace::read_text(PathBuf::from(session.workspace).as_path(), &path)
+    let root = browser_workspace(&state, session_id, project_workspace)?;
+    workspace::read_text(&root, &path)
 }
 
 #[tauri::command]
 fn get_source_control(
     state: tauri::State<'_, AppState>,
-    session_id: String,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
 ) -> Result<source_control::SourceControlSnapshot, String> {
-    let session = state.store.get(&session_id)?;
-    source_control::get_source_control(PathBuf::from(session.workspace).as_path())
+    let root = browser_workspace(&state, session_id, project_workspace)?;
+    source_control::get_source_control(&root)
 }
 
 #[tauri::command]
@@ -310,6 +360,7 @@ async fn add_attachments(
         .join("attachments");
     let sources: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     let records = attachments::store(&root, &session_id, &sources)?;
+    attachments::copy_into_workspace(&root, PathBuf::from(record.workspace).as_path(), &records)?;
     state.store.add_attachments(&records)?;
     Ok(records)
 }
@@ -485,11 +536,13 @@ async fn import_transcript(
     let text = std::fs::read_to_string(&path)
         .map_err(|error| format!("Could not read transcript: {error}"))?;
     let history = transcript::parse_jsonl(&text, format)?;
-    let session = state.store.create(
-        PathBuf::from(&source.workspace).as_path(),
-        &name,
-        source.settings,
-    )?;
+    let session = if source.kind == SessionKind::Work {
+        let documents = dirs::document_dir().or_else(|| dirs::home_dir().map(|home| home.join("Documents"))).ok_or("Documents folder is unavailable")?;
+        let workspace = sessions::create_default_work_workspace(&documents)?;
+        state.store.create_with_kind(&workspace, &name, source.settings, SessionKind::Work)?
+    } else {
+        state.store.create_session_for_project(&source.workspace, &name, source.settings)?
+    };
     if let Err(error) = state
         .store
         .save_state(&session.id, &session.settings, &history)
@@ -1224,6 +1277,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             create_session,
             create_session_in_project,
+            create_project,
+            open_project,
+            list_projects,
+            rename_project,
+            remove_project,
             create_default_session,
             list_sessions,
             get_session,

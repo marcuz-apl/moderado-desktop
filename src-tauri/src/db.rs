@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -163,6 +163,33 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
             .map_err(|error| format!("Could not apply default Code session permissions: {error}"))?;
         tx.pragma_update(None, "user_version", 5).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
+        version = 5;
+    }
+
+    if version < 6 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS projects (
+            workspace TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))
+        );
+        INSERT OR IGNORE INTO projects (workspace,name,updated_at)
+            SELECT workspace,workspace,MAX(updated_at) FROM sessions WHERE kind='code' GROUP BY workspace;")
+            .map_err(|error| format!("Could not migrate projects: {error}"))?;
+        let roots = {
+            let mut query = tx.prepare("SELECT workspace FROM projects").map_err(|error| error.to_string())?;
+            let rows = query.query_map([], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?
+        };
+        for workspace in roots {
+            let name = workspace.split(['/', '\\']).rfind(|part| !part.is_empty()).unwrap_or("Project");
+            tx.execute("UPDATE projects SET name=?2 WHERE workspace=?1 AND name=workspace", rusqlite::params![workspace, name]).map_err(|error| error.to_string())?;
+        }
+        tx.execute("UPDATE sessions SET auto_approve_json='{\"readFiles\":true,\"editFiles\":true,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}' WHERE kind='work' AND auto_approve_json='{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}'", [])
+            .map_err(|error| format!("Could not enable Work document defaults: {error}"))?;
+        tx.pragma_update(None, "user_version", 6).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -201,6 +228,32 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("sessions.sqlite");
         (root, path)
+    }
+
+    #[test]
+    fn version_five_upgrade_registers_projects_and_preserves_custom_work_policy_and_history() {
+        let (_root, path) = temporary();
+        {
+            let db = open(&path).unwrap();
+            db.execute_batch("DELETE FROM projects;
+                INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES
+                ('c1','One','/code/alpha','{}','[]',1,'code','{}'),
+                ('c2','Two','/code/alpha','{}','[]',2,'code','{}'),
+                ('w1','Task','/tasks/one','{}','[{\"role\":\"user\",\"content\":\"keep\"}]',3,'work','{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}'),
+                ('w2','Custom','/tasks/two','{}','[]',4,'work','{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":false,\"executeCommand\":false,\"useMcpServers\":false}');
+                PRAGMA user_version=5;").unwrap();
+        }
+        let db = open(&path).unwrap();
+        let count: i64 = db.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 1);
+        let name: String = db.query_row("SELECT name FROM projects", [], |row| row.get(0)).unwrap();
+        assert_eq!(name, "alpha");
+        let (policy, history): (String, String) = db.query_row("SELECT auto_approve_json,history_json FROM sessions WHERE id='w1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&policy).unwrap()["editFiles"], true);
+        assert!(history.contains("keep"));
+        let custom: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='w2'", [], |row| row.get(0)).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&custom).unwrap()["editFiles"], false);
+        assert_eq!(schema_version(&db).unwrap(), 6);
     }
 
     #[test]

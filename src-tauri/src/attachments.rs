@@ -95,6 +95,40 @@ pub fn file_path(root: &Path, session_id: &str, id: &str, name: &str) -> PathBuf
     root.join(session_id).join(format!("{id}-{}", safe_name(name)))
 }
 
+pub fn copy_into_workspace(root: &Path, workspace: &Path, records: &[AttachmentRecord]) -> Result<(), String> {
+    for record in records {
+        let relative = format!("attachments/{}-{}", record.id, safe_name(&record.name));
+        let target = crate::workspace::resolve_path(workspace, &relative)?;
+        match fs::symlink_metadata(target) {
+            Ok(_) => continue, // An existing editable copy may contain the user's changes.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(format!("Could not inspect attachment copy: {error}")),
+        }
+        let source = file_path(root, &record.session_id, &record.id, &record.name);
+        if fs::metadata(&source).map_err(|error| error.to_string())?.len() > MAX_IMAGE_BYTES {
+            return Err("Attachment copy exceeds the size limit".into());
+        }
+        let bytes = fs::read(source).map_err(|error| format!("Could not read attachment copy: {error}"))?;
+        crate::workspace::write_bytes(workspace, &relative, &bytes)?;
+    }
+    Ok(())
+}
+
+pub fn restore_workspace_copies(root: &Path, workspace: &Path, session_id: &str, history: &[Value]) -> Result<(), String> {
+    let mut records = Vec::new();
+    for blocks in history.iter().filter_map(|message| message.get("content").and_then(Value::as_array)) {
+        for block in blocks.iter().filter(|block| block["type"] == "attachment") {
+            let id = block["id"].as_str().ok_or("Invalid saved attachment ID")?;
+            if id.is_empty() || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') { return Err("Invalid saved attachment ID".into()); }
+            let name = block["name"].as_str().ok_or("Invalid saved attachment name")?;
+            if file_path(root, session_id, id, name).is_file() {
+                records.push(AttachmentRecord { id: id.into(), session_id: session_id.into(), name: name.into(), kind: AttachmentKind::Text, bytes: 0 });
+            }
+        }
+    }
+    copy_into_workspace(root, workspace, &records)
+}
+
 /// Copies the chosen files and describes them. Nothing outside the returned
 /// paths is read later, so a moved or deleted original cannot break the
 /// conversation.
@@ -230,7 +264,7 @@ fn expand_block(root: &Path, session_id: &str, block: &Value) -> Value {
     } else {
         json!({
             "type": "text",
-            "text": format!("File: {name}\n{}", String::from_utf8_lossy(&bytes)),
+            "text": format!("File: {name}\nEditable task copy: attachments/{id}-{}\n{}", safe_name(name), String::from_utf8_lossy(&bytes)),
         })
     }
 }
@@ -295,6 +329,24 @@ mod tests {
         assert!(store(&attachments_root, "s1", &[binary])
             .unwrap_err()
             .contains("neither a text file"));
+    }
+
+    #[test]
+    fn editable_copies_preserve_sources_and_survive_history_restore_without_overwriting_edits() {
+        let root = workspace();
+        let source = root.path().join("source.md");
+        fs::write(&source, "original").unwrap();
+        let attachment_root = root.path().join("app-attachments");
+        let task = root.path().join("managed-task");
+        fs::create_dir(&task).unwrap();
+        let records = store(&attachment_root, "s1", std::slice::from_ref(&source)).unwrap();
+        let history = vec![json!({"role":"user","content":[reference(&records[0])]})];
+        restore_workspace_copies(&attachment_root, &task, "s1", &history).unwrap();
+        let relative = format!("attachments/{}-{}", records[0].id, records[0].name);
+        crate::workspace::write_text(&task, &relative, "edited").unwrap();
+        restore_workspace_copies(&attachment_root, &task, "s1", &history).unwrap();
+        assert_eq!(crate::workspace::read_text(&task, &relative).unwrap(), "edited");
+        assert_eq!(fs::read_to_string(source).unwrap(), "original");
     }
 
     #[test]
