@@ -97,3 +97,11 @@
 - Work now opens by default. If no Work session exists, startup creates and selects `Documents/Moderado-Desktop/work-session0`; later Work sessions receive the next available numbered folder.
 - The Sessions panel uses a single accessible Work/Code switch and labels the creation action for the selected mode. Workspace is labeled Projects, Source Control is labeled Git, the Profile panel distinguishes local Work profile from optional Code-mode GitHub identity, and Settings includes an About section with the full `VERSION+BUILD` value.
 - GitHub sign-in remains unconfigured until a GitHub App client ID is registered and supplied to the build.
+
+## M5 — Code Explorer panel (0.4.0)
+
+- Revealed the Code Explorer activity panel in the sidebar by removing the `hidden` attribute from the workspace/folder activity button; the panel renders a nested project file tree with indentation, folder expanders, row selection, and a read-only file-preview dialog.
+- Right-click context menu on any tree entry provides **New File**, **New Folder**, **Open**, **Rename**, and **Delete**, each confirmed server-side by the existing workspace-jail Rust commands (`list_project_entries`, `read_project_file`, `create_project_file`, `create_project_folder`, `rename_project_entry`, `delete_project_entry`).
+- Path-escape and symlink guards reject any attempt to write outside the workspace root; invalid names (`.git`, `..`, etc.) are rejected before reaching the backend.
+- Delete shows a confirmation dialog and clears selection/preview state for removed items; rename updates expanded-folder tracking and preserves selection on the renamed path.
+- Verification: 95 Rust tests and 35 Node tests pass offline; `tsc --noEmit`, `eslint`, and `cargo clippy -D warnings` are clean; `npm run build` passes.
