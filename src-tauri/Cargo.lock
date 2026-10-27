@@ -2283,7 +2283,7 @@ dependencies = [
 
 [[package]]
 name = "moderado-desktop"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "cap-std",
  "dirs 5.0.1",
@@ -2299,6 +2299,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -6,19 +6,20 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions, type SessionKind, type SidebarPanel } from './sessions-view';
+import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions, type SessionKind, type SidebarPanel } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
+type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebContent: boolean; executeCommand: boolean; useMcpServers: boolean };
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
 type HistoryMessage = { role: string; content?: string };
-type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; updatedAt: number };
+type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string };
 type TurnEvent = { kind: 'text' | 'tool' | 'error' | 'done' | 'cancelled'; session_id: string; value?: string };
-type ApprovalEvent = { sessionId: string; id: number; path: string; before: string; after: string };
+type ApprovalEvent = { sessionId: string; id: number; category: 'read_files' | 'edit_files' | 'fetch_web_content' | 'execute_command' | 'use_mcp_servers'; title: string; detail: string; hasPreview: boolean; path: string; before: string; after: string };
 type ApprovalExpired = { sessionId: string; id: number };
 type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
 type CheckpointPreview = { checkpointId: string; currentTree: string; changes: { path: string; before: string; after: string }[] };
@@ -70,7 +71,7 @@ let mode: 'plan' | 'act' = 'act';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
-let activePanel: SidebarPanel | null = 'mode';
+let activePanel: SidebarPanel | null = 'tasks';
 let selectedProjectWorkspace: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
 const expandedFolders = new Set<string>();
@@ -260,18 +261,35 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
 
 function renderSessions(): void {
   const renderItems = (list: HTMLElement, items: SessionSummary[]) => list.replaceChildren(...items.map((session) => {
+    const row = document.createElement('div');
+    row.className = 'selectable-session-row';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = list.id === 'task-list' ? 'active-work-task' : 'active-code-session';
+    radio.checked = session.id === activeSessionId;
+    radio.setAttribute('aria-label', `Select ${session.name}`);
+    radio.addEventListener('change', () => { void selectSession(session.id); });
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
     button.textContent = `${running.has(session.id) ? '● ' : ''}${session.name}`;
     button.title = session.workspace;
     button.addEventListener('click', () => { void selectSession(session.id); });
-    return button;
+    row.append(button, radio);
+    return row;
   }));
   renderItems($('task-list'), visibleSessions(summaries, 'work'));
   const projects = projectsForSessions(summaries);
   const projectList = $('project-list');
   projectList.replaceChildren(...projects.map((project) => {
+    const row = document.createElement('div');
+    row.className = 'selectable-session-row';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'active-code-project';
+    radio.checked = project.workspace === selectedProjectWorkspace;
+    radio.setAttribute('aria-label', `Select project ${project.name}`);
+    radio.addEventListener('change', () => { void selectProject(project.workspace); });
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `session-item${project.workspace === selectedProjectWorkspace ? ' selected' : ''}`;
@@ -282,7 +300,8 @@ function renderSessions(): void {
     count.textContent = String(project.sessionCount);
     button.append(count);
     button.addEventListener('click', () => { void selectProject(project.workspace); });
-    return button;
+    row.append(button, radio);
+    return row;
   }));
   const projectSessions = selectedProjectWorkspace ? sessionsForProject(summaries, selectedProjectWorkspace) : [];
   renderItems($('code-session-list'), projectSessions);
@@ -293,16 +312,16 @@ function renderSessions(): void {
 
 function applyKindUi(): void {
   const work = activeKind === 'work';
-  const kindToggle = $<HTMLButtonElement>('kind-toggle');
-  kindToggle.setAttribute('aria-checked', String(!work));
-  kindToggle.setAttribute('aria-label', `Session kind: ${work ? 'Work' : 'Code'}`);
-  kindToggle.dataset.kind = activeKind;
+  for (const kind of ['work', 'code'] as const) {
+    const button = $<HTMLButtonElement>(`kind-${kind}`);
+    const selected = kind === activeKind;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  }
   for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.activity-button'))) {
     const panel = button.dataset.panel as SidebarPanel;
     button.hidden = !panelAvailableForKind(panel, activeKind);
   }
-  const modePanel = document.querySelector<HTMLElement>('[data-panel-content="mode"]');
-  modePanel?.classList.toggle('active', activePanel === 'mode');
   for (const panel of ['tasks', 'projects', 'sessions'] as const) {
     const button = document.querySelector<HTMLButtonElement>(`[data-panel="${panel}"]`);
     if (button) button.hidden = !panelAvailableForKind(panel, activeKind);
@@ -310,6 +329,7 @@ function applyKindUi(): void {
   const explorerButton = document.querySelector<HTMLButtonElement>('[data-panel="workspace"]');
   if (explorerButton) explorerButton.hidden = !panelAvailableForKind('workspace', activeKind);
   document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
+  $('auto-approve-group').toggleAttribute('hidden', work);
   attachButton.toggleAttribute('hidden', !work);
   attachButton.disabled = !work || !activeSessionId;
   document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
@@ -382,6 +402,7 @@ async function selectSession(id: string): Promise<void> {
   if (record.kind === 'code') selectedProjectWorkspace = record.workspace;
   applyKindUi();
   applySessionSettings(record.settings);
+  applyAutoApprove(record.autoApprove);
   mode = modeBySession.get(id) ?? 'act';
   setMode(mode);
   $('workspace-name').textContent = record.name;
@@ -406,6 +427,27 @@ async function selectSession(id: string): Promise<void> {
   $<HTMLInputElement>('search-key').value = '';
   setStatus(running.has(id) ? 'Agent is working…' : 'Session ready.');
 }
+
+function applyAutoApprove(policy: AutoApprovePolicy): void {
+  const fields: Array<[string, keyof AutoApprovePolicy]> = [['approve-read', 'readFiles'], ['approve-edit', 'editFiles'], ['approve-web', 'fetchWebContent'], ['approve-command', 'executeCommand'], ['approve-mcp', 'useMcpServers']];
+  for (const [id, key] of fields) $<HTMLInputElement>(id).checked = policy[key];
+}
+
+$<HTMLButtonElement>('save-auto-approve').addEventListener('click', () => {
+  if (!activeSessionId || activeKind !== 'code') { setStatus('Select a Code session first.'); return; }
+  const policy: AutoApprovePolicy = {
+    readFiles: $<HTMLInputElement>('approve-read').checked,
+    editFiles: $<HTMLInputElement>('approve-edit').checked,
+    fetchWebContent: $<HTMLInputElement>('approve-web').checked,
+    executeCommand: $<HTMLInputElement>('approve-command').checked,
+    useMcpServers: $<HTMLInputElement>('approve-mcp').checked,
+  };
+  void invoke('save_auto_approve', { sessionId: activeSessionId, policy }).then(async () => {
+    setStatus('Auto-Approve settings saved for this session.');
+    await refreshSummaries();
+    await refreshSession(activeSessionId!);
+  }).catch((error: unknown) => setStatus(`Auto-Approve settings could not be saved: ${String(error)}`));
+});
 
 function updateControls(): void {
   applyKindUi();
@@ -535,7 +577,6 @@ function switchPanel(panel: SidebarPanel): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
-  if (panel === 'mode') document.querySelector<HTMLElement>('[data-panel-content="mode"]')?.classList.add('active');
   if (activePanel === 'workspace') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
 }
@@ -714,12 +755,19 @@ function showNextApproval(): void {
   currentApproval = next;
   approvalBefore = next.before;
   $('approval-session').textContent = sessions.get(next.sessionId)?.name ?? next.sessionId;
+  $('approval-title').textContent = next.title;
+  $('approval-detail').textContent = next.detail;
   $('approval-path').textContent = next.path;
+  $('approval-path').toggleAttribute('hidden', !next.hasPreview);
+  $('approval-dialog').querySelector('.diff')?.toggleAttribute('hidden', !next.hasPreview);
+  $('change-summary').toggleAttribute('hidden', !next.hasPreview);
+  $<HTMLButtonElement>('edit-approval').hidden = !next.hasPreview;
+  $<HTMLButtonElement>('approve').textContent = next.hasPreview ? 'Approve write' : 'Approve';
   $('before').textContent = next.before || '(new file)';
   const editor = $<HTMLTextAreaElement>('after');
-  editor.value = next.after;
+  editor.value = next.hasPreview ? next.after : 'approved';
   editor.readOnly = true;
-  showChanges(next.before, next.after);
+  if (next.hasPreview) showChanges(next.before, next.after);
   approvalDialog.showModal();
   void invoke('activate_approval', { sessionId: next.sessionId, id: next.id }).catch((error) => {
     if (currentApproval?.sessionId === next.sessionId && currentApproval.id === next.id) {
@@ -739,7 +787,7 @@ async function answerApproval(accepted: boolean): Promise<void> {
   approvalDialog.close();
   try {
     await invoke('respond_approval', { sessionId: current.sessionId, id: current.id, content: accepted ? $<HTMLTextAreaElement>('after').value : null });
-    setStatus(accepted ? 'Write approved.' : 'Write rejected.');
+    setStatus(accepted ? (current.hasPreview ? 'Write approved.' : 'Access approved.') : 'Request rejected.');
   } catch (error) { setStatus(String(error)); }
   showNextApproval();
 }
@@ -777,10 +825,8 @@ async function initialize(): Promise<void> {
 
 providerSelect.addEventListener('change', () => selectProvider(providerSelect.value as ProviderId));
 
-$<HTMLButtonElement>('kind-toggle').addEventListener('click', () => {
-  setKind(nextSessionKind(activeKind));
-  if (activePanel !== 'mode') switchPanel('mode');
-});
+$<HTMLButtonElement>('kind-work').addEventListener('click', () => setKind('work'));
+$<HTMLButtonElement>('kind-code').addEventListener('click', () => setKind('code'));
 $<HTMLElement>('about-version').textContent = appVersion.trim();
 
 attachButton.addEventListener('click', async () => {
@@ -1098,7 +1144,7 @@ const approvalExpiryReady = listen<ApprovalExpired>('approval-expired', ({ paylo
   if (currentApproval?.sessionId === payload.sessionId && currentApproval.id === payload.id) {
     currentApproval = null;
     approvalDialog.close();
-    setStatus('Approval expired. The file was not changed.');
+    setStatus('Approval expired. The requested operation was not run.');
     showNextApproval();
   }
 });

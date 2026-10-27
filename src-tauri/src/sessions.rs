@@ -1,4 +1,5 @@
 use crate::provider::settings::ProviderSettings;
+use crate::approval_policy::AutoApprovePolicy;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -104,6 +105,7 @@ pub struct SessionRecord {
     pub name: String,
     pub workspace: String,
     pub kind: SessionKind,
+    pub auto_approve: AutoApprovePolicy,
     pub settings: ProviderSettings,
     pub history: Vec<Value>,
     pub updated_at: i64,
@@ -116,6 +118,7 @@ pub struct SessionSummary {
     pub name: String,
     pub workspace: String,
     pub kind: SessionKind,
+    pub auto_approve: AutoApprovePolicy,
     pub settings: ProviderSettings,
     pub updated_at: i64,
 }
@@ -178,14 +181,15 @@ impl SessionStore {
             name: name.trim().to_owned(),
             workspace: workspace.to_string_lossy().into_owned(),
             kind,
+            auto_approve: AutoApprovePolicy::for_new_session(kind),
             settings,
             history: Vec::new(),
             updated_at: now(),
         };
         let db = self.connect()?;
         db.execute(
-            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at) VALUES (?1,?2,?3,?4,?5,'[]',?6)",
-            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at],
+            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at,auto_approve_json) VALUES (?1,?2,?3,?4,?5,'[]',?6,?7)",
+            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at, serde_json::to_string(&record.auto_approve).map_err(|error| error.to_string())?],
         ).map_err(|error| format!("Could not create session: {error}"))?;
         Ok(record)
     }
@@ -220,7 +224,7 @@ impl SessionStore {
 
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
         let db = self.connect()?;
-        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind FROM sessions ORDER BY updated_at DESC, id DESC")
+        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind,auto_approve_json FROM sessions ORDER BY updated_at DESC, id DESC")
             .map_err(|error| error.to_string())?;
         let rows = query
             .query_map([], |row| {
@@ -231,11 +235,12 @@ impl SessionStore {
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             })
             .map_err(|error| error.to_string())?;
         rows.map(|row| {
-            let (id, name, workspace, settings_json, updated_at, kind) =
+            let (id, name, workspace, settings_json, updated_at, kind, auto_approve_json) =
                 row.map_err(|error| error.to_string())?;
             let settings = serde_json::from_str(&settings_json)
                 .map_err(|_| "Invalid saved provider settings")?;
@@ -244,6 +249,7 @@ impl SessionStore {
                 name,
                 workspace,
                 kind: SessionKind::from_db(&kind),
+                auto_approve: serde_json::from_str(&auto_approve_json).map_err(|_| "Invalid saved approval policy")?,
                 settings,
                 updated_at,
             })
@@ -254,9 +260,9 @@ impl SessionStore {
     pub fn get(&self, id: &str) -> Result<SessionRecord, String> {
         let db = self.connect()?;
         let row = db.query_row(
-            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind FROM sessions WHERE id=?1",
+            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json FROM sessions WHERE id=?1",
             [id],
-            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?)),
+            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?)),
         ).optional().map_err(|error| error.to_string())?.ok_or("Session not found")?;
         Ok(SessionRecord {
             id: row.0,
@@ -267,7 +273,14 @@ impl SessionStore {
             history: serde_json::from_str(&row.4).map_err(|_| "Invalid saved session history")?,
             updated_at: row.5,
             kind: SessionKind::from_db(&row.6),
+            auto_approve: serde_json::from_str(&row.7).map_err(|_| "Invalid saved approval policy")?,
         })
+    }
+
+    pub fn update_auto_approve(&self, session_id: &str, policy: AutoApprovePolicy) -> Result<(), String> {
+        let changed = self.connect()?.execute("UPDATE sessions SET auto_approve_json=?2,updated_at=?3 WHERE id=?1", params![session_id, serde_json::to_string(&policy).map_err(|error| error.to_string())?, now()]).map_err(|error| error.to_string())?;
+        if changed == 0 { return Err("Session not found".into()); }
+        Ok(())
     }
 
     pub fn rename(&self, id: &str, name: &str) -> Result<(), String> {
@@ -508,6 +521,23 @@ mod tests {
         assert_eq!(reopened.get(&second.id).unwrap().name, "Renamed");
         reopened.delete(&second.id).unwrap();
         assert_eq!(reopened.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn auto_approve_policy_is_per_session_and_persists() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("project");
+        std::fs::create_dir(&workspace).unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+        let first = store.create(&workspace, "First", settings()).unwrap();
+        let second = store.create(&workspace, "Second", settings()).unwrap();
+        assert!(first.auto_approve.edit_files && first.auto_approve.execute_command && first.auto_approve.use_mcp_servers);
+        let mut policy = first.auto_approve;
+        policy.edit_files = false;
+        store.update_auto_approve(&first.id, policy).unwrap();
+        assert!(!store.get(&first.id).unwrap().auto_approve.edit_files);
+        assert!(store.get(&second.id).unwrap().auto_approve.edit_files);
+        assert!(!store.list().unwrap().iter().find(|item| item.id == first.id).unwrap().auto_approve.edit_files);
     }
 
     #[test]

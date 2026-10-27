@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -144,6 +144,25 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
         tx.pragma_update(None, "user_version", 3)
             .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
+        version = 3;
+    }
+
+    if version < 4 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        add_column_if_missing(&tx, "sessions", "auto_approve_json", "TEXT NOT NULL DEFAULT '{}'")?;
+        tx.execute("UPDATE sessions SET auto_approve_json=CASE WHEN kind='code' THEN '{\"readFiles\":true,\"editFiles\":true,\"fetchWebContent\":true,\"executeCommand\":true,\"useMcpServers\":true}' ELSE '{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}' END WHERE auto_approve_json='{}'", [])
+            .map_err(|error| format!("Could not initialize approval policies: {error}"))?;
+        tx.pragma_update(None, "user_version", 4).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        version = 4;
+    }
+
+    if version < 5 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        tx.execute("UPDATE sessions SET auto_approve_json='{\"readFiles\":true,\"editFiles\":true,\"fetchWebContent\":true,\"executeCommand\":true,\"useMcpServers\":true}' WHERE kind='code' AND auto_approve_json='{\"readFiles\":true,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}'", [])
+            .map_err(|error| format!("Could not apply default Code session permissions: {error}"))?;
+        tx.pragma_update(None, "user_version", 5).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -190,6 +209,7 @@ mod tests {
         let db = open(&path).unwrap();
         assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
         assert!(columns(&db, "sessions").unwrap().iter().any(|c| c == "kind"));
+        assert!(columns(&db, "sessions").unwrap().iter().any(|c| c == "auto_approve_json"));
     }
 
     #[test]
@@ -230,5 +250,54 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn a_version_three_database_gets_all_default_code_permissions_without_losing_rows() {
+        let (_root, path) = temporary();
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(V1).unwrap();
+            add_column_if_missing(&db, "sessions", "kind", "TEXT NOT NULL DEFAULT 'code'").unwrap();
+            db.execute_batch("CREATE TABLE attachments (id TEXT,session_id TEXT, name TEXT,kind TEXT,bytes INTEGER,created_at INTEGER,PRIMARY KEY(session_id,id));
+                INSERT INTO sessions VALUES ('s1','Old','/tmp','{}','[]',1,'code');
+                PRAGMA user_version=3;").unwrap();
+        }
+        let db = open(&path).unwrap();
+        let policy: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='s1'", [], |r| r.get(0)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&policy).unwrap();
+        assert_eq!(value["readFiles"], true);
+        assert_eq!(value["fetchWebContent"], true);
+        assert_eq!(value["editFiles"], true);
+        assert_eq!(value["executeCommand"], true);
+        assert_eq!(value["useMcpServers"], true);
+        assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn version_four_code_default_policy_is_upgraded_to_all_five_enabled() {
+        let (_root, path) = temporary();
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(V1).unwrap();
+            add_column_if_missing(&db, "sessions", "kind", "TEXT NOT NULL DEFAULT 'code'").unwrap();
+            db.execute_batch("CREATE TABLE attachments (id TEXT,session_id TEXT,name TEXT,kind TEXT,bytes INTEGER,created_at INTEGER,PRIMARY KEY(session_id,id));
+                ALTER TABLE sessions ADD COLUMN auto_approve_json TEXT NOT NULL DEFAULT '{}';
+                INSERT INTO sessions VALUES ('s1','Old','/tmp','{}','[]',1,'code','{\"readFiles\":true,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}');
+                INSERT INTO sessions VALUES ('s2','Custom','/tmp','{}','[]',2,'code','{\"readFiles\":false,\"editFiles\":false,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":true}');
+                PRAGMA user_version=4;").unwrap();
+        }
+        let db = open(&path).unwrap();
+        let policy: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='s1'", [], |r| r.get(0)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&policy).unwrap();
+        assert_eq!(value["readFiles"], true);
+        assert_eq!(value["editFiles"], true);
+        assert_eq!(value["fetchWebContent"], true);
+        assert_eq!(value["executeCommand"], true);
+        assert_eq!(value["useMcpServers"], true);
+        let custom: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='s2'", [], |r| r.get(0)).unwrap();
+        let custom: serde_json::Value = serde_json::from_str(&custom).unwrap();
+        assert_eq!(custom["readFiles"], false);
+        assert_eq!(custom["useMcpServers"], true);
     }
 }

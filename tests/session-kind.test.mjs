@@ -32,20 +32,18 @@ test('new session action names the selected session kind', () => {
 });
 
 test('sidebar defaults and available panels follow the selected mode', () => {
-  assert.equal(defaultPanelForKind('work'), 'mode');
-  assert.equal(defaultPanelForKind('code'), 'mode');
-  assert.equal(panelAvailableForKind('mode', 'work'), true);
-  assert.equal(panelAvailableForKind('mode', 'code'), true);
+  assert.equal(defaultPanelForKind('work'), 'tasks');
+  assert.equal(defaultPanelForKind('code'), 'projects');
   assert.equal(panelAvailableForKind('tasks', 'work'), true);
   assert.equal(panelAvailableForKind('projects', 'work'), false);
   assert.equal(panelAvailableForKind('sessions', 'work'), false);
   assert.equal(panelAvailableForKind('workspace', 'work'), false);
-  assert.equal(panelAvailableForKind('mode', 'work'), true);
+  assert.equal(panelAvailableForKind('tasks', 'work'), true);
   assert.equal(panelAvailableForKind('tasks', 'code'), false);
   assert.equal(panelAvailableForKind('projects', 'code'), true);
   assert.equal(panelAvailableForKind('sessions', 'code'), true);
   assert.equal(panelAvailableForKind('workspace', 'code'), true);
-  assert.equal(panelAvailableForKind('mode', 'code'), true);
+  assert.equal(panelAvailableForKind('projects', 'code'), true);
   assert.equal(panelAvailableForKind('schedules', 'work'), true);
 });
 
@@ -55,13 +53,25 @@ test('new action captions match the selected sidebar panel', () => {
   assert.equal(newActionLabel('sessions'), 'New Session');
 });
 
-test('Mode contains the Work/Code switch and Explorer owns the folder icon', async () => {
+test('top bar contains the Work/Code switch and Explorer owns the folder icon', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /data-panel-content="mode"[\s\S]*?id="kind-toggle"/);
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(html, /class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
+  assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
+  assert.match(main, /radio\.type = 'radio'/);
   assert.match(html, /data-panel="workspace"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
   assert.match(html, /data-panel="projects"[^>]*>[\s\S]*?#icon-projects/);
-  assert.match(html, /<span>⌘<\/span><i><\/i>/);
+  assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
+});
+
+test('all five Auto-Approve options default on and MCP is marked as a placeholder', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command', 'approve-mcp']) {
+    assert.match(html, new RegExp(`<input id="${id}" type="checkbox" checked`));
+  }
+  assert.match(html, /id="approve-mcp" type="checkbox" checked disabled/);
+  assert.match(html, /MCP server support is a placeholder/);
 });
 
 test('Work profile does not require a GitHub account', () => {

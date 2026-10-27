@@ -6,7 +6,7 @@ Moderado Desktop follows the Cline Desktop interaction model — parallel sessio
 
 ## Current build
 
-M4 supports multiple persistent sessions, one-time and repeating task schedules, and text transcript imports from Codex and Claude Code JSONL files. Scheduled runs work while the desktop app is open and use the session's configured provider and models. An explicit per-schedule approval choice controls whether Act-mode file writes wait for review or proceed unattended; scheduled Act runs create a checkpoint before contacting the model, and writes create another checkpoint before changing files. The app also supports Plan/Act mode and the OpenAI-compatible provider matrix: Moderado Gateway, NVIDIA NIM, OpenRouter, Ollama, LM Studio, and a custom endpoint. API keys stay in the OS keychain. The workspace header carries a sun/moon button beside the Plan/Act selector; it follows local time until you click it. Command execution remains planned work.
+The app supports persistent Work and Code sessions, schedules, transcript imports, Plan/Act mode, and the OpenAI-compatible provider matrix. Code sessions have per-session Auto-Approve settings; all five categories start enabled, and you can turn any category off to require approval. File changes retain their diff preview. On Windows, commands run in a Windows AppContainer against a disposable copy of the project; only the resulting workspace changes are copied back. MCP is shown as a checked placeholder and is not available yet. API keys remain in the OS keychain.
 
 ## Capabilities
 
@@ -14,7 +14,9 @@ M4 supports multiple persistent sessions, one-time and repeating task schedules,
 - **Plan/Act dual mode**: Plan mode is strictly read-only; Act mode enables mutating tools. Each mode can use a different model.
 - **Work and Code modes**: Work answers general questions with no project folder — you attach the text files and images it may read, and it never browses the disk. Code is the workspace-bound agent with Plan/Act, approvals, and checkpoints.
 - **Appearance**: a sun/moon button beside the Plan/Act selector switches the theme. Until you click it, the theme follows local time — light from 07:00 to 18:59 — and re-checks while the app is open; after you choose, that choice sticks.
-- **Human-in-the-loop approval**: manual file writes and edits require explicit approval with a diff preview. Scheduled Act tasks can use an explicit auto-write preset.
+- **Per-session Auto-Approve**: Code sessions default to Read files, Edit files, Fetch web content, Execute command, and Use MCP servers enabled. Turn off read, web, edit, or command access to require a contextual approval; MCP remains a placeholder.
+- **Command sandbox**: Windows commands receive only a disposable AppContainer copy of the project, have bounded output and runtime, and cannot access files outside that copy. The app checks for concurrent workspace changes before copying results back.
+- **Human-in-the-loop approval**: unchecked operations wait for approval; file changes include a diff preview. Scheduled Act tasks retain their explicit write-approval choice.
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.
 - **Local-first**: fully usable offline with Ollama or LM Studio; no accounts required at first launch.
 - **No telemetry**: data never leaves your machine except to explicitly configured remote providers.

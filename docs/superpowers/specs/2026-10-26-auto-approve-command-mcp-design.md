@@ -1,6 +1,6 @@
 # Auto-Approve, Command Tools, MCP, and Compact Mode Design
 
-**Status:** Approved for specification; awaiting user review before implementation
+**Status:** Implemented with subsequent user-directed scope updates
 **Date:** 2026-10-26
 
 ## Goal
@@ -28,10 +28,9 @@ Make Work/Code selection compact and always visible, let the user explicitly sel
 ### Per-session Auto-Approve
 
 - Add an **Auto-Approve** section in Settings for Code sessions, with checkboxes for **Read files**, **Edit files**, **Fetch web content**, **Execute command**, and **Use MCP servers**.
-- Newly created Code sessions start with all five checked, as requested. Checked means the listed action runs without a per-call approval prompt; unchecked means the user must approve each call.
-- Existing sessions preserve current effective behavior during migration: reads and configured web search remain automatic; file edits continue to prompt; command and MCP permissions start disabled. This avoids silently changing the trust policy of existing conversations.
+- New and existing Code sessions default to all five checked. Existing user-customized policies are preserved during migration. Checked means the implemented action runs without a per-call approval prompt; unchecked means the user must approve each call.
 - Work sessions expose no file, command, or MCP tools. Their existing optional web-search behavior is unchanged.
-- Clearly state that auto-approved MCP calls can change connected services and cannot be reverted by local workspace checkpoints.
+- MCP remains a checked, disabled placeholder until MCP tools are implemented.
 - The preference is persisted per session and enforced in Rust. Renderer or model prompt text is not an authorization boundary.
 
 ### Tool behavior
@@ -39,20 +38,15 @@ Make Work/Code selection compact and always visible, let the user explicitly sel
 - Keep Plan mode structural. Plan mode does not expose or dispatch file edits, command execution, or MCP tool calls, even when a preference is checked. These tools are Code Act capabilities.
 - When a category is unchecked, a shared approval flow identifies the action before it runs: file and web target, full command plus working directory, or MCP server and tool name with arguments.
 - File mutations retain the existing diff preview, stale-file check, and checkpoint-before-write behavior when approved automatically or manually.
-- Add an `execute_command` tool that accepts a program and argument array (no implicit shell parsing), uses the session workspace as its working directory, supports cancellation, and bounds execution time and captured output. It must run in an OS-enforced sandbox restricted to the workspace. If the platform sandbox cannot be established, command execution fails closed and reports the reason.
-- Configure the command sandbox separately per platform. Windows uses an AppContainer process with workspace access granted explicitly; Linux uses Landlock when available; macOS uses a sandboxed helper with inherited App Sandbox entitlements. The command capability is unavailable when the required sandbox is not present.
-- Add local stdio MCP client support using the official Rust MCP SDK. MCP servers are explicitly configured by the user in Settings; server definitions are local-device configuration, while the **Use MCP servers** permission remains per session.
-- Initially expose MCP tools only (not prompts, resources, sampling, or remote HTTP transports). Namespace model-visible tool names by the configured server identity to prevent collisions. Do not expose these tools in Work or Plan mode.
-- Start MCP processes only when needed, keep protocol stdout separate from diagnostic stderr, enforce call timeouts/output limits, and terminate child processes on cancellation or session shutdown.
-- MCP server binaries are user-selected code and may perform network actions. Auto-approval of MCP calls is a trust decision; it grants the configured server's available tools permission to run without per-call approval.
-- Store secrets used by MCP server configuration in the OS keychain; do not put secret values in logs, tool results, or session history.
+- Add an `execute_command` tool on Windows that accepts a program and argument array (no implicit shell parsing), uses the session workspace as its working directory, supports cancellation, and bounds execution time and captured output. It runs in a Windows AppContainer against a disposable workspace copy; unsupported platforms fail closed and do not advertise the tool.
+- Keep **Use MCP servers** as a checked, disabled placeholder. No MCP processes or tools are available yet.
 
 ### Persistence and migration
 
 - Add a numbered SQLite migration that stores the five per-session auto-approval booleans.
-- Populate existing Code sessions with the legacy-effective policy: read and web enabled, edit, command, and MCP disabled.
+- Enable all five categories for Code sessions with the previous default policy; preserve any customized policy values.
 - New Code sessions receive all-enabled defaults. New Work sessions retain Work-only capabilities.
-- Store local stdio MCP server definitions in app data, with secret references resolved through the keychain.
+- MCP server configuration and invocation are deferred.
 - No project/session identity redesign or provider contract changes are part of this feature.
 
 ## Architecture
@@ -77,21 +71,21 @@ Make Work/Code selection compact and always visible, let the user explicitly sel
 3. Work task rows and Code project rows each show an accessible radio button aligned to the right.
 4. At most one task or project radio button is selected in the current mode; selecting a task/project activates its context.
 5. A selected project opens its most recent session, and selecting another session within it keeps the project radio button selected.
-6. New Code sessions show all five Auto-Approve boxes checked and persist changes across restart.
-7. Existing sessions retain their effective prior approval behavior after migration.
+6. New Code sessions show all five Auto-Approve boxes checked; existing default Code policies migrate to all enabled while customized policies remain unchanged.
+7. Policy changes persist across restart.
 8. With a category unchecked, each matching operation waits for an explicit approval describing the operation before it runs.
 9. Plan mode structurally blocks edits, command execution, and MCP calls regardless of preferences.
-10. Command execution is limited to Code Act, runs with an OS sandbox rooted at the workspace, supports cancellation and bounded output/time, and fails closed if sandboxing is unavailable.
-11. MCP stdio tools are configurable locally, namespaced, exposed only in Code Act, and use per-session auto-approval. No MCP process is launched from renderer code.
+10. On Windows, command execution is limited to Code Act, runs in an AppContainer with a disposable workspace copy, supports cancellation and bounded output/time, and fails closed if sandboxing is unavailable. Other platforms do not expose the command tool.
+11. MCP remains a checked, disabled placeholder; no MCP process is launched.
 12. Work sessions retain no file/command/MCP capability.
-13. Unit tests verify defaults, migration behavior, each permission gate, Plan-mode enforcement, workspace sandbox boundaries, MCP tool namespacing, and process cancellation. Tests run offline using local mock commands and MCP servers.
+13. Unit tests verify defaults, migration behavior, read/web permission gates, Plan-mode enforcement, workspace sandbox boundaries, and command execution. Tests run offline using local mock commands.
 
 ## Risks and open implementation checks
 
-- AppContainer, Landlock, and macOS App Sandbox have platform/version and packaging constraints. Each backend must be verified in CI or a platform test environment; unsupported configurations fail closed.
+- The current command sandbox is Windows-only; other platforms fail closed and do not advertise command execution.
 - The all-checked default for new Code sessions intentionally removes per-call confirmations for file edits, commands, and configured MCP tools. The Settings text must make this explicit before the user sends work.
 - Existing sessions keep the prior effective policy rather than inheriting all-enabled defaults. This avoids silently widening permissions during upgrade.
-- Local MCP servers are arbitrary user-selected programs. Server setup must identify executable and arguments clearly, and server identity must remain visible in tool results and approval prompts.
+- MCP implementation remains deferred; its checked placeholder does not enable a runtime capability.
 
 ## References
 

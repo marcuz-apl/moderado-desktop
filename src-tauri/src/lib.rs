@@ -1,6 +1,8 @@
 pub mod agent;
 pub mod attachments;
+pub mod approval_policy;
 pub mod checkpoints;
+pub mod command;
 pub mod db;
 pub mod provider;
 pub mod schedules;
@@ -11,7 +13,7 @@ pub mod transcript;
 pub mod workspace;
 
 use agent::runner::{run_turn_with_hooks, AgentEvent, RunConfig};
-use agent::{Approval, Mode};
+use agent::{ApprovalRequest, Mode};
 use provider::settings::ProviderSettings;
 use provider::ProviderId;
 use schedules::{ApprovalPolicy, Schedule, ScheduleStore};
@@ -117,6 +119,10 @@ enum TurnEvent {
 struct ApprovalEvent {
     session_id: String,
     id: u64,
+    category: crate::approval_policy::ApprovalCategory,
+    title: String,
+    detail: String,
+    has_preview: bool,
     path: String,
     before: String,
     after: String,
@@ -229,6 +235,19 @@ fn get_session(
     session_id: String,
 ) -> Result<SessionRecord, String> {
     state.store.get(&session_id)
+}
+
+#[tauri::command]
+fn save_auto_approve(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    policy: crate::approval_policy::AutoApprovePolicy,
+) -> Result<(), String> {
+    let record = state.store.get(&session_id)?;
+    if record.kind != SessionKind::Code {
+        return Err("Auto-Approve settings are available for Code sessions".into());
+    }
+    state.store.update_auto_approve(&session_id, policy)
 }
 
 #[tauri::command]
@@ -754,7 +773,7 @@ async fn await_approval(
     app: &tauri::AppHandle,
     runtime: &SessionRuntime,
     session_id: &str,
-    preview: Approval,
+    request: ApprovalRequest,
 ) -> Option<String> {
     let id = runtime.next_approval.fetch_add(1, Ordering::Relaxed) + 1;
     let (sender, receiver) = oneshot::channel();
@@ -762,9 +781,13 @@ async fn await_approval(
     let event = ApprovalEvent {
         session_id: session_id.to_owned(),
         id,
-        path: preview.path,
-        before: preview.before,
-        after: preview.after,
+        category: request.category,
+        title: request.title,
+        detail: request.detail,
+        has_preview: request.preview.is_some(),
+        path: request.preview.as_ref().map(|preview| preview.path.clone()).unwrap_or_default(),
+        before: request.preview.as_ref().map(|preview| preview.before.clone()).unwrap_or_default(),
+        after: request.preview.as_ref().map(|preview| preview.after.clone()).unwrap_or_default(),
     };
     if let Ok(mut pending) = runtime.pending.lock() {
         *pending = Some(PendingApproval {
@@ -973,20 +996,21 @@ async fn execute_turn(
             mode,
             search: search.as_ref(),
             kind: record.kind,
+            auto_approve: record.auto_approve,
             attachments: &attachment_refs,
             attachments_root: &attachments_root,
             session_id: &session_id,
         },
         &mut messages,
         &prompt,
-        |preview| {
+        |request| {
             let runtime = &runtime;
             let session_id = &session_id;
             async move {
-                if matches!(approval_policy, ApprovalPolicy::AutoWrite) {
-                    Some(preview.after)
+                if matches!(approval_policy, ApprovalPolicy::AutoWrite) && request.category == crate::approval_policy::ApprovalCategory::EditFiles {
+                    Some(request.preview.map(|preview| preview.after).unwrap_or_default())
                 } else {
-                    await_approval(app, runtime, session_id, preview).await
+                    await_approval(app, runtime, session_id, request).await
                 }
             }
         },
@@ -1190,6 +1214,7 @@ pub fn run() {
             create_default_session,
             list_sessions,
             get_session,
+            save_auto_approve,
             list_project_entries,
             read_project_file,
             get_source_control,

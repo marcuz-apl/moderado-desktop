@@ -75,9 +75,11 @@ Requirements:
 
 ### 6.3 Tools & Approval (P0)
 - F8 — Core toolset mirrors the agent runtime: read/list/search files, write/edit files, run command, diagnostics, git diff, web search.
-- F9 — Every mutating tool call requires explicit user approval with diff preview before execution (Approve / Reject / Edit-then-approve).
-- F10 — Auto-approval rules per session (e.g., auto-approve reads, always prompt for shell commands). Defaults: all reads auto, all writes and commands prompt.
+- F9 — Unchecked tool categories require a contextual approval before execution; file writes and edits retain a diff preview (Approve / Reject / Edit-then-approve).
+- F10 — Five per-session Auto-Approve categories: Read files, Edit files, Fetch web content, Execute command, and Use MCP servers. All five default enabled for Code sessions. MCP is currently a disabled placeholder.
 - F11 — Workspace jail: filesystem and command operations constrained to the session's workspace root. No silent failures — every rejected or failed tool call surfaces an explicit error to the model.
+
+Windows command execution uses a disposable workspace copy inside a unique AppContainer. The command receives argv separately, runs without an implicit shell, has a time limit and output cap, and cannot access the original workspace or other user files. Changed files are copied back only if the original workspace still matches the pre-command snapshot. Other operating systems do not advertise command execution until an equivalent sandbox backend is available.
 
 ### 6.4 Checkpoints (P1)
 - F12 — Snapshot workspace state before the first mutating action of each agent step.

@@ -1,5 +1,5 @@
 export type SessionKind = 'work' | 'code';
-export type SidebarPanel = 'mode' | 'tasks' | 'projects' | 'sessions' | 'workspace' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
+export type SidebarPanel = 'tasks' | 'projects' | 'sessions' | 'workspace' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
 
 export type ProjectSessionLike = {
   id: string;
@@ -19,12 +19,11 @@ export type ProjectSummary = {
 
 export const DEFAULT_SESSION_KIND: SessionKind = 'work';
 
-export function defaultPanelForKind(_kind: SessionKind): SidebarPanel {
-  return 'mode';
+export function defaultPanelForKind(kind: SessionKind): SidebarPanel {
+  return kind === 'work' ? 'tasks' : 'projects';
 }
 
 export function panelAvailableForKind(panel: SidebarPanel, kind: SessionKind): boolean {
-  if (panel === 'mode') return true;
   if (kind === 'work') return !['projects', 'sessions', 'workspace', 'checkpoints', 'source-control'].includes(panel);
   return panel !== 'tasks';
 }

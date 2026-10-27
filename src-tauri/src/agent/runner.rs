@@ -1,4 +1,5 @@
-use super::{dispatch_tool_with_checkpoint, tool_definitions, Approval, Mode};
+use super::{dispatch_tool_with_policy, tool_definitions, Approval, ApprovalRequest, Mode};
+use crate::approval_policy::AutoApprovePolicy;
 use crate::attachments;
 use crate::provider;
 use crate::sessions::SessionKind;
@@ -15,6 +16,7 @@ pub struct RunConfig<'a> {
     pub mode: Mode,
     pub search: Option<&'a SearchConfig>,
     pub kind: SessionKind,
+    pub auto_approve: AutoApprovePolicy,
     /// Attachment references for the message being sent, stored in history.
     pub attachments: &'a [Value],
     /// Root of the attachment copies; empty for Code sessions.
@@ -36,7 +38,7 @@ pub async fn run_turn<A, Fut, E>(
     emit: E,
 ) -> Result<(), String>
 where
-    A: FnMut(Approval) -> Fut,
+    A: FnMut(ApprovalRequest) -> Fut,
     Fut: Future<Output = Option<String>>,
     E: FnMut(AgentEvent),
 {
@@ -62,7 +64,7 @@ pub async fn run_turn_with_hooks<A, Fut, E, C, P>(
     mut persist: P,
 ) -> Result<(), String>
 where
-    A: FnMut(Approval) -> Fut,
+    A: FnMut(ApprovalRequest) -> Fut,
     Fut: Future<Output = Option<String>>,
     E: FnMut(AgentEvent),
     C: FnMut(&Approval) -> Result<(), String>,
@@ -133,7 +135,13 @@ where
                 match config.search {
                     Some(search) => match serde_json::from_str::<Value>(&call.arguments) {
                         Ok(args) => match args.get("query").and_then(Value::as_str) {
-                            Some(query) => search::query(search, query).await,
+                            Some(query) => {
+                                if !config.auto_approve.fetch_web_content {
+                                    let request = ApprovalRequest { category: crate::approval_policy::ApprovalCategory::FetchWebContent, title: "Fetch web content".into(), detail: format!("Search the web for: {query}"), preview: None };
+                                    if approve(request).await.is_none() { Err("Web search rejected by user".into()) }
+                                    else { search::query(search, query).await }
+                                } else { search::query(search, query).await }
+                            },
                             None => Err("Search query is required".into()),
                         },
                         Err(_) => Err("Invalid tool arguments".into()),
@@ -141,10 +149,11 @@ where
                     None => Err("Web search is unavailable for this session".into()),
                 }
             } else {
-                dispatch_tool_with_checkpoint(
+                dispatch_tool_with_policy(
                     config.workspace,
                     config.kind,
                     config.mode,
+                    &config.auto_approve,
                     &call,
                     &mut approve,
                     |preview| before_mutation(preview),
@@ -203,6 +212,42 @@ mod tests {
         serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap()
     }
 
+    #[tokio::test]
+    async fn unchecked_web_permission_requests_approval_before_fetching() {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            read_request(&mut first);
+            respond(&mut first, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"web_search\",\"arguments\":\"{\\\"query\\\":\\\"private query\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n");
+            let (mut second, _) = listener.accept().unwrap();
+            let request = read_request(&mut second);
+            assert!(request["messages"].as_array().unwrap().iter().any(|message| message["content"].as_str().unwrap_or_default().contains("rejected")));
+            respond(&mut second, "data: {\"choices\":[{\"delta\":{\"content\":\"Search was not performed\"}}]}\n\ndata: [DONE]\n\n");
+        });
+        let mut policy = AutoApprovePolicy::for_new_session(SessionKind::Code);
+        policy.fetch_web_content = false;
+        let mut history = Vec::new();
+        run_turn(
+            RunConfig {
+                workspace: root.path(), base_url: &base, model: "test-model", api_key: "", mode: Mode::Act,
+                search: Some(&SearchConfig { endpoint: "http://127.0.0.1:1/search".into(), key: String::new() }),
+                kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval",
+            },
+            &mut history,
+            "Search for this",
+            |request| async move {
+                assert_eq!(request.category, crate::approval_policy::ApprovalCategory::FetchWebContent);
+                assert!(request.preview.is_none());
+                None
+            },
+            |_| {},
+        ).await.unwrap();
+        server.join().unwrap();
+        assert_eq!(history.last().unwrap()["content"], "Search was not performed");
+    }
+
     fn respond(socket: &mut TcpStream, body: &str) {
         write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
     }
@@ -239,6 +284,7 @@ mod tests {
                 mode: Mode::Act,
                 search: None,
                 kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::prompt_all(),
                 attachments: &[],
                 attachments_root: root.path(),
                 session_id: "test-session",
@@ -246,6 +292,7 @@ mod tests {
             &mut history,
             "Create hello.txt",
             |preview| async move {
+                let preview = preview.preview.expect("write requires diff preview");
                 assert_eq!(preview.path, "hello.txt");
                 assert_eq!(preview.after, "hello");
                 Some(preview.after)
@@ -294,6 +341,7 @@ mod tests {
                 mode: Mode::Act,
                 search: None,
                 kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::prompt_all(),
                 attachments: &[],
                 attachments_root: root.path(),
                 session_id: "test-session",
@@ -343,6 +391,7 @@ mod tests {
                 mode: Mode::Plan,
                 search: None,
                 kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                 attachments: &[],
                 attachments_root: root.path(),
                 session_id: "test-session",
@@ -415,13 +464,14 @@ mod tests {
                     mode: Mode::Act,
                     search: None,
                     kind: SessionKind::Code,
+                    auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                     attachments: &[],
                     attachments_root: root.path(),
                     session_id: "test-session",
                 },
                 &mut history,
                 "Create m2.txt",
-                |preview| async move { Some(preview.after) },
+                |request| async move { Some(request.preview.expect("write preview").after) },
                 |_| {},
             )
             .await
@@ -485,13 +535,14 @@ mod tests {
                 mode: Mode::Act,
                 search: None,
                 kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                 attachments: &[],
                 attachments_root: &workspace,
                 session_id: "test-session",
             },
             &mut history,
             "Change file.txt",
-            |preview| async move { Some(preview.after) },
+            |request| async move { Some(request.preview.expect("write preview").after) },
             |_| {},
             |preview| {
                 assert_eq!(
@@ -596,13 +647,14 @@ mod tests {
                 mode: Mode::Act,
                 search: None,
                 kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                 attachments: &[],
                 attachments_root: &workspace,
                 session_id: "test-session",
             },
             &mut history,
             &due[0].prompt,
-            |preview| async move { Some(preview.after) },
+            |request| async move { Some(request.preview.expect("write preview").after) },
             |_| {},
             |preview| {
                 let checkpoint = checkpoints.create(&workspace, &session.id, &preview.path)?;

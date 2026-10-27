@@ -1,5 +1,6 @@
 use crate::provider::ToolCall;
 use crate::sessions::SessionKind;
+use crate::approval_policy::{ApprovalCategory, AutoApprovePolicy};
 use crate::workspace;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -40,8 +41,30 @@ pub fn tool_definitions(kind: SessionKind, mode: Mode, web_search: bool) -> Vec<
     if matches!(kind, SessionKind::Code) && matches!(mode, Mode::Act) {
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
+        #[cfg(windows)]
+        tools.push(json!({"type":"function","function":{"name":"execute_command","description":"Run one executable with separate arguments in a Windows AppContainer workspace copy. No shell is invoked implicitly.","parameters":{"type":"object","properties":{"program":{"type":"string","description":"Executable name or absolute path"},"args":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string","description":"Workspace-relative directory"},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000}},"required":["program"]}}}));
     }
     tools
+}
+
+pub fn tool_category(name: &str) -> Option<ApprovalCategory> {
+    match name {
+        "list_files" | "read_file" | "search_files" => Some(ApprovalCategory::ReadFiles),
+        "write_file" | "edit_file" => Some(ApprovalCategory::EditFiles),
+        "web_search" => Some(ApprovalCategory::FetchWebContent),
+        "execute_command" => Some(ApprovalCategory::ExecuteCommand),
+        name if name.starts_with("mcp__") => Some(ApprovalCategory::UseMcpServers),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalRequest {
+    pub category: ApprovalCategory,
+    pub title: String,
+    pub detail: String,
+    pub preview: Option<Approval>,
 }
 
 pub async fn dispatch_tool<F, Fut>(
@@ -71,6 +94,25 @@ where
     Fut: Future<Output = Option<String>>,
     C: FnOnce(&Approval) -> Result<(), String>,
 {
+    dispatch_tool_with_policy(root, kind, mode, &AutoApprovePolicy::prompt_all(), call, move |request| {
+        approve(request.preview.unwrap_or(Approval { path: request.detail, before: String::new(), after: String::new() }))
+    }, checkpoint).await
+}
+
+pub async fn dispatch_tool_with_policy<F, Fut, C>(
+    root: &Path,
+    kind: SessionKind,
+    mode: Mode,
+    policy: &AutoApprovePolicy,
+    call: &ToolCall,
+    approve: F,
+    checkpoint: C,
+) -> Result<String, String>
+where
+    F: FnOnce(ApprovalRequest) -> Fut,
+    Fut: Future<Output = Option<String>>,
+    C: FnOnce(&Approval) -> Result<(), String>,
+{
     // Structural, not prompt-based: a Work session that receives a file tool
     // call fails here even if the model invented the call.
     if matches!(kind, SessionKind::Work) {
@@ -79,13 +121,29 @@ where
     if matches!(call.name.as_str(), "write_file" | "edit_file") && matches!(mode, Mode::Plan) {
         return Err("Plan mode blocks file writes".into());
     }
+    if call.name == "execute_command" && matches!(mode, Mode::Plan) {
+        return Err("Plan mode blocks command execution".into());
+    }
     let args: Value =
         serde_json::from_str(&call.arguments).map_err(|_| "Invalid tool arguments")?;
+    if call.name == "execute_command" {
+        let request: crate::command::CommandRequest = serde_json::from_value(args).map_err(|_| "Invalid command request")?;
+        if !policy.allows(ApprovalCategory::ExecuteCommand) {
+            let arguments = serde_json::to_string(&request.args).map_err(|error| error.to_string())?;
+            approve(ApprovalRequest { category: ApprovalCategory::ExecuteCommand, title: "Execute command".into(), detail: format!("Program: {}\nArguments: {arguments}\nWorking directory: {}", request.program, if request.working_directory.is_empty() { "." } else { &request.working_directory }), preview: None }).await.ok_or("Command execution rejected by user")?;
+        }
+        checkpoint(&Approval { path: ".".into(), before: String::new(), after: String::new() })?;
+        let result = crate::command::execute_sandboxed(root, request).await?;
+        return serde_json::to_string(&result).map_err(|error| error.to_string());
+    }
     if call.name == "search_files" {
         let query = args
             .get("query")
             .and_then(Value::as_str)
             .ok_or("Search query is required")?;
+        if !policy.allows(ApprovalCategory::ReadFiles) {
+            approve(ApprovalRequest { category: ApprovalCategory::ReadFiles, title: "Read workspace files".into(), detail: format!("Search workspace files for: {query}"), preview: None }).await.ok_or("File search rejected by user")?;
+        }
         return Ok(workspace::search_files(root, query)?.join("\n"));
     }
     let path = args
@@ -96,8 +154,14 @@ where
         return Err("Tool path is too long".into());
     }
     match call.name.as_str() {
-        "list_files" => Ok(workspace::list_files(root, path)?.join("\n")),
-        "read_file" => workspace::read_text(root, path),
+        "list_files" => {
+            if !policy.allows(ApprovalCategory::ReadFiles) { approve(ApprovalRequest { category: ApprovalCategory::ReadFiles, title: "List workspace files".into(), detail: format!("List folder: {path}"), preview: None }).await.ok_or("File listing rejected by user")?; }
+            Ok(workspace::list_files(root, path)?.join("\n"))
+        },
+        "read_file" => {
+            if !policy.allows(ApprovalCategory::ReadFiles) { approve(ApprovalRequest { category: ApprovalCategory::ReadFiles, title: "Read workspace file".into(), detail: format!("Read file: {path}"), preview: None }).await.ok_or("File read rejected by user")?; }
+            workspace::read_text(root, path)
+        },
         "write_file" => {
             let content = args
                 .get("content")
@@ -110,9 +174,7 @@ where
                 before,
                 after: content.into(),
             };
-            let approved_content = approve(preview.clone())
-                .await
-                .ok_or("File write rejected by user")?;
+            let approved_content = if policy.allows(ApprovalCategory::EditFiles) { content.to_owned() } else { approve(ApprovalRequest { category: ApprovalCategory::EditFiles, title: "Write workspace file".into(), detail: format!("Write file: {path}"), preview: Some(preview.clone()) }).await.ok_or("File write rejected by user")? };
             if workspace::read_optional(root, path)? != original {
                 return Err("File changed while awaiting approval".into());
             }
@@ -146,9 +208,7 @@ where
                 before: before.clone(),
                 after: after.clone(),
             };
-            let approved_content = approve(preview.clone())
-                .await
-                .ok_or("File edit rejected by user")?;
+            let approved_content = if policy.allows(ApprovalCategory::EditFiles) { after.clone() } else { approve(ApprovalRequest { category: ApprovalCategory::EditFiles, title: "Edit workspace file".into(), detail: format!("Edit file: {path}"), preview: Some(preview.clone()) }).await.ok_or("File edit rejected by user")? };
             if workspace::read_text(root, path)? != before {
                 return Err("File changed while awaiting approval".into());
             }
@@ -169,6 +229,19 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[tokio::test]
+    async fn unchecked_read_permission_requests_approval_before_reading() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("secret.txt"), "secret").unwrap();
+        let call = ToolCall { id: "r1".into(), name: "read_file".into(), arguments: r#"{"path":"secret.txt"}"#.into() };
+        let mut policy = AutoApprovePolicy::for_new_session(SessionKind::Code);
+        policy.read_files = false;
+        let requested = std::sync::atomic::AtomicBool::new(false);
+        let result = dispatch_tool_with_policy(root.path(), SessionKind::Code, Mode::Act, &policy, &call, |_| { requested.store(true, std::sync::atomic::Ordering::Relaxed); async { Some(String::new()) } }, |_| Ok(())).await;
+        assert!(result.is_ok());
+        assert!(requested.load(std::sync::atomic::Ordering::Relaxed), "unchecked reads must wait for a user decision");
+    }
+
     #[test]
     fn web_search_is_advertised_only_when_configured() {
         let has_search = |enabled| {
@@ -178,6 +251,39 @@ mod tests {
         };
         assert!(!has_search(false));
         assert!(has_search(true));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn command_tool_is_available_only_in_code_act_mode() {
+        let has_command = |kind, mode| tool_definitions(kind, mode, false).iter().any(|tool| tool["function"]["name"] == "execute_command");
+        assert!(has_command(SessionKind::Code, Mode::Act));
+        assert!(!has_command(SessionKind::Code, Mode::Plan));
+        assert!(!has_command(SessionKind::Work, Mode::Act));
+    }
+
+    #[tokio::test]
+    async fn plan_mode_blocks_command_before_approval() {
+        let root = tempfile::tempdir().unwrap();
+        let call = ToolCall { id: "c1".into(), name: "execute_command".into(), arguments: r#"{"program":"cmd.exe"}"#.into() };
+        let requested = std::sync::atomic::AtomicBool::new(false);
+        let result = dispatch_tool_with_policy(root.path(), SessionKind::Code, Mode::Plan, &AutoApprovePolicy::for_new_session(SessionKind::Code), &call, |_| { requested.store(true, std::sync::atomic::Ordering::Relaxed); async { Some("ok".into()) } }, |_| Ok(())).await;
+        assert!(result.unwrap_err().contains("Plan mode"));
+        assert!(!requested.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn act_dispatch_runs_approved_command_and_checkpoints_first() {
+        let root = tempfile::tempdir().unwrap();
+        let call = ToolCall { id: "c2".into(), name: "execute_command".into(), arguments: r#"{"program":"cmd.exe","args":["/c","echo done>result.txt"]}"#.into() };
+        let policy = AutoApprovePolicy::for_new_session(SessionKind::Code);
+        let checkpointed = std::sync::atomic::AtomicBool::new(false);
+        let result = dispatch_tool_with_policy(root.path(), SessionKind::Code, Mode::Act, &policy, &call, |_| async { panic!("auto-approved command must not ask") }, |_| { checkpointed.store(true, std::sync::atomic::Ordering::Relaxed); Ok(()) }).await.unwrap();
+        assert!(checkpointed.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(fs::read_to_string(root.path().join("result.txt")).unwrap().trim(), "done");
+        let result: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result["exitCode"], 0);
     }
 
     #[tokio::test]
