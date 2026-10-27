@@ -94,6 +94,13 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
   assert.match(main, /session\.taskId === task\.id/);
 });
 
+test('About displays the VERSION value without its BUILD metadata or an extra label', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(html, /<p class="workspace-name">Moderado Desktop<\/p><p class="path"><span id="about-version"><\/span><\/p>/);
+  assert.match(main, /appVersion\.trim\(\)\.split\('\+'\)\[0\]/);
+});
+
 test('all five Auto-Approve options default on and MCP is marked as a placeholder', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command', 'approve-mcp']) {

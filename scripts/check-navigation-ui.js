@@ -83,6 +83,15 @@ async (page) => {
   await page.goto('http://127.0.0.1:1420');
   await title('Session 1');
   await check(async () => await page.locator('.task-heading input[type="radio"]:checked').count() === 1 && await page.locator('.task-sessions input[type="radio"]:checked').count() === 1, 'Work Task and session selection must use separate radios');
+  await check(async () => {
+    const listLeft = await page.locator('#task-list').evaluate((element) => element.getBoundingClientRect().left);
+    const taskLeft = await page.locator('.task-heading .session-item').first().evaluate((element) => element.getBoundingClientRect().left);
+    const sessionLeft = await page.locator('.task-sessions .session-item').first().evaluate((element) => element.getBoundingClientRect().left);
+    return taskLeft - listLeft <= 20 && sessionLeft - taskLeft >= 20;
+  }, 'Work Tasks should align with the Tasks list edge and sessions should be indented beneath them');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await check(async () => /^v?\d+\.\d+\.\d+$/.test((await page.locator('#about-version').textContent()).trim()) && (await page.locator('.about-group .path').textContent()).trim() === (await page.locator('#about-version').textContent()).trim(), 'About should display only the VERSION value without build metadata');
+  await page.getByRole('button', { name: 'Tasks', exact: true }).click();
   await check(async () => await page.locator('.task-sessions').evaluate((element) => parseFloat(getComputedStyle(element).paddingLeft) >= 30), 'Work sessions should be indented under the Task');
   await check(async () => await page.locator('.task-sessions .session-item.selected').evaluate((element) => getComputedStyle(element).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(element).borderColor === 'rgba(0, 0, 0, 0)'), 'Work session rows should use the radio indicator instead of a box');
   await check(async () => await page.locator('#save-auto-approve').count() === 0, 'Auto-approve should not show a Save button');

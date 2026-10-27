@@ -395,7 +395,7 @@ function renderSessions(): void {
     const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'active-work-task'; radio.checked = activeKind === 'work' && task.id === selectedWorkTaskId;
     radio.setAttribute('aria-label', `Select task ${task.name}`);
     radio.addEventListener('change', () => { void selectWorkTask(task.id); });
-    row.append(expander, button, radio); section.append(row);
+    row.append(button, expander, radio); section.append(row);
     if (expanded) {
       const list = document.createElement('div'); list.className = 'task-sessions'; list.setAttribute('aria-label', `${task.name} sessions`);
       list.append(...children.map((session) => sessionRow(session, 'active-work-session')));
@@ -1051,7 +1051,7 @@ providerSelect.addEventListener('change', () => selectProvider(providerSelect.va
 
 $<HTMLButtonElement>('kind-work').addEventListener('click', () => { void setKind('work'); });
 $<HTMLButtonElement>('kind-code').addEventListener('click', () => { void setKind('code'); });
-$<HTMLElement>('about-version').textContent = appVersion.trim();
+$<HTMLElement>('about-version').textContent = appVersion.trim().split('+')[0] || appVersion.trim();
 
 attachButton.addEventListener('click', async () => {
   const sessionId = activeSessionId;
