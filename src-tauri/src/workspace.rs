@@ -1,5 +1,5 @@
 use cap_std::ambient_authority;
-use cap_std::fs::Dir;
+use cap_std::fs::{Dir, OpenOptions};
 use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -167,6 +167,151 @@ pub fn list_project_entries(root: &Path, relative: &str) -> Result<Vec<ProjectEn
     Ok(entries)
 }
 
+fn validate_entry_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name == ".git"
+        || name.ends_with(' ')
+        || name.ends_with('.')
+        || name
+            .chars()
+            .any(|character| character.is_control() || "<>:\"/\\|?*".contains(character))
+    {
+        return Err("Enter a valid file or folder name without path separators.".into());
+    }
+    let device_name = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    if matches!(device_name.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            device_name
+                .strip_prefix(prefix)
+                .is_some_and(|suffix| {
+                    suffix.len() == 1
+                        && suffix
+                            .as_bytes()
+                            .first()
+                            .is_some_and(|digit| (b'1'..=b'9').contains(digit))
+                })
+        })
+    {
+        return Err("That name is reserved by the operating system.".into());
+    }
+    Ok(())
+}
+
+fn validate_operation_path(root: &Path, relative: &str, allow_root: bool) -> Result<PathBuf, String> {
+    let input = Path::new(relative);
+    if input
+        .components()
+        .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
+    {
+        return Err("Path is outside workspace".into());
+    }
+    if !allow_root && !input.components().any(|part| matches!(part, Component::Normal(_))) {
+        return Err("The project root cannot be renamed or deleted.".into());
+    }
+
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("Workspace unavailable: {error}"))?;
+    let mut candidate = canonical_root.clone();
+    for part in input.components() {
+        let Component::Normal(name) = part else { continue };
+        if name == ".git" {
+            return Err("Git metadata cannot be changed from Explorer.".into());
+        }
+        candidate.push(name);
+        match fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("Symbolic links cannot be changed from Explorer.".into());
+            }
+            Ok(_) => {
+                candidate = candidate.canonicalize().map_err(|error| error.to_string())?;
+                if !candidate.starts_with(&canonical_root) {
+                    return Err("Path is outside workspace".into());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(candidate)
+}
+
+fn validate_parent(root: &Path, parent: &str) -> Result<PathBuf, String> {
+    let path = validate_operation_path(root, parent, true)?;
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.is_dir() {
+        return Err("The selected parent is not a folder.".into());
+    }
+    Ok(path)
+}
+
+fn joined_relative(parent: &str, name: &str) -> String {
+    let path = Path::new(parent).join(name);
+    path.to_string_lossy().replace('\\', "/")
+}
+
+pub fn create_project_file(root: &Path, parent: &str, name: &str) -> Result<(), String> {
+    validate_entry_name(name)?;
+    validate_parent(root, parent)?;
+    let path = joined_relative(parent, name);
+    validate_operation_path(root, &path, false)?;
+    let dir = Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    dir.open_with(path, &options)
+        .map_err(|error| format!("Could not create file: {error}"))?;
+    Ok(())
+}
+
+pub fn create_project_folder(root: &Path, parent: &str, name: &str) -> Result<(), String> {
+    validate_entry_name(name)?;
+    validate_parent(root, parent)?;
+    let path = joined_relative(parent, name);
+    validate_operation_path(root, &path, false)?;
+    let dir = Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    dir.create_dir(path)
+        .map_err(|error| format!("Could not create folder: {error}"))
+}
+
+pub fn rename_project_entry(root: &Path, relative: &str, new_name: &str) -> Result<(), String> {
+    validate_entry_name(new_name)?;
+    let source = validate_operation_path(root, relative, false)?;
+    if !source.exists() {
+        return Err("The selected file or folder no longer exists.".into());
+    }
+    let source_path = Path::new(relative);
+    let parent = source_path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = if parent.as_os_str().is_empty() { "." } else { parent.to_str().ok_or("Invalid parent path")? };
+    validate_parent(root, parent)?;
+    let destination = joined_relative(parent, new_name);
+    let destination_path = validate_operation_path(root, &destination, false)?;
+    if source == destination_path {
+        return Ok(());
+    }
+    match fs::symlink_metadata(&destination_path) {
+        Ok(_) => return Err("A file or folder with that name already exists.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    let dir = Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    dir.rename(relative, &dir, destination)
+        .map_err(|error| format!("Could not rename item: {error}"))
+}
+
+pub fn delete_project_entry(root: &Path, relative: &str) -> Result<(), String> {
+    let path = validate_operation_path(root, relative, false)?;
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    let dir = Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    if metadata.is_dir() {
+        dir.remove_dir_all(relative)
+    } else {
+        dir.remove_file(relative)
+    }
+    .map_err(|error| format!("Could not delete item: {error}"))
+}
+
 pub fn search_files(root: &Path, query: &str) -> Result<Vec<String>, String> {
     if query.is_empty() || query.len() > 200 {
         return Err("Search query must be 1–200 characters".into());
@@ -273,6 +418,63 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         write_text(root.path(), "src/a.txt", "hello").unwrap();
         assert_eq!(read_text(root.path(), "src/a.txt").unwrap(), "hello");
+    }
+
+    #[test]
+    fn creates_new_project_files_and_folders_without_overwriting() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("src")).unwrap();
+
+        create_project_file(root.path(), "src", "new.rs").unwrap();
+        create_project_folder(root.path(), "src", "assets").unwrap();
+
+        assert!(root.path().join("src/new.rs").is_file());
+        assert!(root.path().join("src/assets").is_dir());
+        assert!(create_project_file(root.path(), "src", "new.rs").is_err());
+        assert!(create_project_folder(root.path(), "src", "assets").is_err());
+    }
+
+    #[test]
+    fn renames_project_entries_without_replacing_existing_entries() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("before.txt"), "preserve").unwrap();
+        fs::write(root.path().join("taken.txt"), "target").unwrap();
+
+        rename_project_entry(root.path(), "before.txt", "after.txt").unwrap();
+
+        assert!(!root.path().join("before.txt").exists());
+        assert_eq!(fs::read_to_string(root.path().join("after.txt")).unwrap(), "preserve");
+        assert!(rename_project_entry(root.path(), "after.txt", "taken.txt").is_err());
+        assert_eq!(fs::read_to_string(root.path().join("taken.txt")).unwrap(), "target");
+    }
+
+    #[test]
+    fn deletes_project_files_and_folders_recursively() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/nested")).unwrap();
+        fs::write(root.path().join("src/nested/file.rs"), "data").unwrap();
+        fs::write(root.path().join("loose.txt"), "data").unwrap();
+
+        delete_project_entry(root.path(), "src").unwrap();
+        delete_project_entry(root.path(), "loose.txt").unwrap();
+
+        assert!(!root.path().join("src").exists());
+        assert!(!root.path().join("loose.txt").exists());
+    }
+
+    #[test]
+    fn project_file_operations_reject_escape_root_and_invalid_names() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("file.txt"), "data").unwrap();
+
+        assert!(create_project_file(root.path(), "../", "escape.txt").is_err());
+        assert!(create_project_folder(root.path(), ".", "../escape").is_err());
+        assert!(rename_project_entry(root.path(), "file.txt", "../escape.txt").is_err());
+        assert!(delete_project_entry(root.path(), ".").is_err());
+        assert!(rename_project_entry(root.path(), ".", "renamed").is_err());
+        assert!(create_project_file(root.path(), ".", ".git").is_err());
+
+        assert_eq!(fs::read_to_string(root.path().join("file.txt")).unwrap(), "data");
     }
 
     #[cfg(unix)]

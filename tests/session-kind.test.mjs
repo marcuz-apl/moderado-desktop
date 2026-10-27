@@ -101,6 +101,22 @@ test('About displays the VERSION value without its BUILD metadata or an extra la
   assert.match(main, /appVersion\.trim\(\)\.split\('\+'\)\[0\]/);
 });
 
+test('Code Explorer exposes manual file operations from its context menu', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const rust = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  assert.match(html, /id="explorer-context-menu"[^>]*role="menu"/);
+  assert.match(html, /data-explorer-action="new-file"/);
+  assert.match(html, /data-explorer-action="new-folder"/);
+  assert.match(html, /data-explorer-action="rename"/);
+  assert.match(html, /data-explorer-action="delete"/);
+  assert.match(main, /addEventListener\('contextmenu'/);
+  for (const command of ['create_project_file', 'create_project_folder', 'rename_project_entry', 'delete_project_entry']) {
+    assert.match(main, new RegExp(`invoke\\([^,]*'${command}'`));
+    assert.match(rust, new RegExp(`fn ${command}\\(`));
+  }
+});
+
 test('all five Auto-Approve options default on and MCP is marked as a placeholder', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command', 'approve-mcp']) {

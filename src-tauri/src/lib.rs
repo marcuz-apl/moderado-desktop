@@ -365,6 +365,53 @@ fn read_project_file(
     workspace::read_text(&root, &path)
 }
 
+fn registered_project_root(state: &AppState, project_workspace: &str) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(state.store.get_project(project_workspace)?.workspace))
+}
+
+#[tauri::command]
+fn create_project_file(
+    state: tauri::State<'_, AppState>,
+    project_workspace: String,
+    parent_path: String,
+    name: String,
+) -> Result<(), String> {
+    let root = registered_project_root(&state, &project_workspace)?;
+    workspace::create_project_file(&root, &parent_path, &name)
+}
+
+#[tauri::command]
+fn create_project_folder(
+    state: tauri::State<'_, AppState>,
+    project_workspace: String,
+    parent_path: String,
+    name: String,
+) -> Result<(), String> {
+    let root = registered_project_root(&state, &project_workspace)?;
+    workspace::create_project_folder(&root, &parent_path, &name)
+}
+
+#[tauri::command]
+fn rename_project_entry(
+    state: tauri::State<'_, AppState>,
+    project_workspace: String,
+    path: String,
+    new_name: String,
+) -> Result<(), String> {
+    let root = registered_project_root(&state, &project_workspace)?;
+    workspace::rename_project_entry(&root, &path, &new_name)
+}
+
+#[tauri::command]
+fn delete_project_entry(
+    state: tauri::State<'_, AppState>,
+    project_workspace: String,
+    path: String,
+) -> Result<(), String> {
+    let root = registered_project_root(&state, &project_workspace)?;
+    workspace::delete_project_entry(&root, &path)
+}
+
 #[tauri::command]
 fn get_source_control(
     state: tauri::State<'_, AppState>,
@@ -1350,6 +1397,10 @@ pub fn run() {
             save_auto_approve,
             list_project_entries,
             read_project_file,
+            create_project_file,
+            create_project_folder,
+            rename_project_entry,
+            delete_project_entry,
             get_source_control,
             rename_session,
             delete_session,

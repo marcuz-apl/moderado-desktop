@@ -115,6 +115,12 @@
 :root[data-theme="light"] .empty-symbol{background:#14233a;border-color:transparent}
 :root[data-theme="light"] .model-usage-row #model-usage{color:#5d7480}
 :root[data-theme="light"] .project-group{border-color:var(--light-border)}
+:root[data-theme="light"] .tree-row.selected{background:#d5e9e8;color:#134846}
+:root[data-theme="light"] .explorer-context-menu{border-color:var(--light-border);background:var(--light-panel);box-shadow:0 10px 28px #20374433}
+:root[data-theme="light"] .explorer-context-menu button{color:#203744}
+:root[data-theme="light"] .explorer-context-menu button:hover,:root[data-theme="light"] .explorer-context-menu button:focus-visible{background:#dbeaec;color:#134846}
+:root[data-theme="light"] .explorer-context-menu hr{border-color:var(--light-border)}
+:root[data-theme="light"] #project-entry-name{background:var(--light-surface);border-color:#a9bec5;color:#203744}
 :root[data-theme="light"] .project-expander{color:#45616c}
 :root[data-theme="light"] .auto-approve-bar{background:transparent;border-color:transparent}
 :root[data-theme="light"] .auto-approve-title,:root[data-theme="light"] .auto-approve-option{color:#385461}

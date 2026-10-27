@@ -13,6 +13,7 @@ async (page) => {
       sessions: [record('c1', 'Code one', 'code', 'C:\\Code\\alpha', 10), record('c2', 'Code two', 'code', 'C:\\Code\\alpha', 9), record('w1', 'Session 1', 'work', 'C:\\Documents\\Moderado-Desktop\\work-session0', 8, 'wt0'), record('w2', 'Session 2', 'work', 'C:\\Documents\\Moderado-Desktop\\work-session0', 7, 'wt0'), record('w3', 'Session 1', 'work', 'C:\\Documents\\Moderado-Desktop\\work-session1', 6, 'wt1')],
       workTasks: [{ id: 'wt0', name: 'Task Alpha', workspace: 'C:\\Documents\\Moderado-Desktop\\work-session0', updatedAt: 8 }, { id: 'wt1', name: 'Task Beta', workspace: 'C:\\Documents\\Moderado-Desktop\\work-session1', updatedAt: 6 }],
       projects: [{ workspace: 'C:\\Code\\alpha', name: 'Alpha', updatedAt: 10 }, { workspace: 'C:\\Code\\empty', name: 'Empty', updatedAt: 6 }],
+      projectEntries: [{ workspace: 'C:\\Code\\alpha', name: 'src', path: 'src', isDir: true }, { workspace: 'C:\\Code\\alpha', name: 'code.md', path: 'code.md', isDir: false }, { workspace: 'C:\\Code\\alpha', name: 'main.rs', path: 'src/main.rs', isDir: false }],
       calls: [], callbacks: {}, listeners: {}, next: 0, slow: false, slowCreate: false, finish: null, projectName: 'Alpha', promptAnswer: null,
     };
     const emit = (event, payload) => { for (const id of state.listeners[event] ?? []) state.callbacks[id]({ event, id, payload }); };
@@ -33,8 +34,25 @@ async (page) => {
         if (cmd === 'get_session') { if (state.slow && args.sessionId === 'c1') await new Promise((resolve) => setTimeout(resolve, 250)); const found = state.sessions.find((s) => s.id === args.sessionId); if (!found) throw new Error('Unknown session'); return found; }
         if (['list_pending_approvals', 'list_checkpoints', 'list_schedules', 'probe_local_providers'].includes(cmd)) return [];
         if (cmd === 'get_search_settings') return { enabled: false, endpoint: '' };
-        if (cmd === 'list_project_entries') return [{ name: args.projectWorkspace ? 'code.md' : 'report.md', path: args.projectWorkspace ? 'code.md' : 'report.md', isDir: false }];
+        if (cmd === 'list_project_entries') {
+          if (!args.projectWorkspace) return [{ name: 'report.md', path: 'report.md', isDir: false }];
+          return state.projectEntries.filter((entry) => entry.workspace === args.projectWorkspace && (entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : '.') === args.path);
+        }
         if (cmd === 'read_project_file') return 'Readable document';
+        if (cmd === 'create_project_file' || cmd === 'create_project_folder') {
+          const path = args.parentPath === '.' ? args.name : `${args.parentPath}/${args.name}`;
+          if (state.projectEntries.some((entry) => entry.workspace === args.projectWorkspace && entry.path === path)) throw new Error('Already exists');
+          state.projectEntries.push({ workspace: args.projectWorkspace, name: args.name, path, isDir: cmd === 'create_project_folder' }); return;
+        }
+        if (cmd === 'rename_project_entry') {
+          const item = state.projectEntries.find((entry) => entry.workspace === args.projectWorkspace && entry.path === args.path);
+          if (!item) throw new Error('Missing entry');
+          const nextPath = item.path.includes('/') ? `${item.path.slice(0, item.path.lastIndexOf('/') + 1)}${args.newName}` : args.newName;
+          const prefix = `${item.path}/`;
+          for (const entry of state.projectEntries.filter((candidate) => candidate.workspace === item.workspace && (candidate.path === item.path || candidate.path.startsWith(prefix)))) entry.path = `${nextPath}${entry.path.slice(item.path.length)}`;
+          item.name = args.newName; return;
+        }
+        if (cmd === 'delete_project_entry') { state.projectEntries = state.projectEntries.filter((entry) => entry.workspace !== args.projectWorkspace || (entry.path !== args.path && !entry.path.startsWith(`${args.path}/`))); return; }
         if (cmd === 'save_auto_approve') { state.sessions.find((s) => s.id === args.sessionId).autoApprove = { ...args.policy }; return; }
         if (cmd === 'save_provider_settings') return;
         if (cmd === 'create_work_task') {
@@ -198,6 +216,29 @@ async (page) => {
   await page.getByRole('button', { name: 'Alpha renamed', exact: true }).waitFor();
   await check(async () => (await page.evaluate(() => window.__navigationQA.state.sessions)).some((s) => s.id === 'c1'), 'Project removal deleted sessions');
   await check(async () => await page.getByRole('button', { name: 'Alpha renamed', exact: true }).count() === 1, 'Reopening a project did not preserve its display name');
+  await page.locator('[data-panel="workspace"]').click();
+  await page.locator('.tree-row[data-path="src"]').waitFor();
+  await page.locator('.tree-row[data-path="src"]').click({ button: 'right' });
+  await page.getByRole('menu').getByRole('menuitem', { name: 'New File' }).click();
+  await page.locator('#project-entry-name').fill('manual.txt');
+  await page.locator('#save-project-entry').click();
+  await page.locator('.tree-row[data-path="src/manual.txt"]').waitFor();
+  await page.locator('.tree-row[data-path="src/manual.txt"]').click({ button: 'right' });
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Rename' }).click();
+  await page.locator('#project-entry-name').fill('notes.md');
+  await page.locator('#save-project-entry').click();
+  await page.locator('.tree-row[data-path="src/notes.md"]').waitFor();
+  await page.locator('.tree-row[data-path="src/notes.md"]').click({ button: 'right' });
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Delete' }).click();
+  await page.locator('.tree-row[data-path="src/notes.md"]').waitFor({ state: 'detached' });
+  await page.locator('#project-tree').evaluate((element) => element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 500, clientY: 500 })));
+  await page.getByRole('menu').getByRole('menuitem', { name: 'New Folder' }).click();
+  await page.locator('#project-entry-name').fill('manual-folder');
+  await page.locator('#save-project-entry').click();
+  await page.locator('.tree-row[data-path="manual-folder"]').waitFor();
+  await page.locator('.tree-row[data-path="manual-folder"]').click({ button: 'right' });
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Delete' }).click();
+  await page.locator('.tree-row[data-path="manual-folder"]').waitFor({ state: 'detached' });
   await page.locator('#new-project').click();
   await page.locator('#project-name').fill('NewCodebase');
   await page.getByRole('button', { name: 'Choose parent folder' }).click();

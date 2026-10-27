@@ -32,6 +32,7 @@ type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null
 type ProjectRecord = { workspace: string; name: string; updatedAt: number };
 type WorkTaskRecord = { id: string; name: string; workspace: string; updatedAt: number };
 type ProjectEntry = { name: string; path: string; isDir: boolean };
+type ExplorerOperation = { action: 'new-file' | 'new-folder' | 'rename'; projectWorkspace: string; entry: ProjectEntry | null; parentPath: string };
 type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
 type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
 type GatewayMode = 'prod' | 'dev';
@@ -56,6 +57,7 @@ const keyApplyLink = $<HTMLAnchorElement>('apply-key-link');
 const themeToggle = $<HTMLButtonElement>('theme-toggle');
 const attachButton = $<HTMLButtonElement>('attach-files');
 const attachmentChips = $<HTMLDivElement>('attachment-chips');
+const explorerContextMenu = $<HTMLDivElement>('explorer-context-menu');
 const approvalDialog = $<HTMLDialogElement>('approval-dialog');
 const restoreDialog = $<HTMLDialogElement>('restore-dialog');
 const scheduleDialog = $<HTMLDialogElement>('schedule-dialog');
@@ -82,6 +84,8 @@ let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
 const expandedFolders = new Set<string>();
+let selectedExplorerPath: string | null = null;
+let pendingExplorerOperation: ExplorerOperation | null = null;
 let summaries: SessionSummary[] = [];
 let projects: ProjectRecord[] = [];
 let workTasks: WorkTaskRecord[] = [];
@@ -822,12 +826,21 @@ async function loadProjectFolder(path: string): Promise<ProjectEntry[]> {
   if (folder !== currentFolder()) return [];
   projectEntries.set(path, entries); return entries;
 }
-async function refreshProjectTree(): Promise<void> {
+async function refreshProjectTree(preserveExpanded = false): Promise<void> {
   const tree = $('project-tree'); const folder = currentFolder(); const revision = selectionRevision;
-  projectEntries.clear(); expandedFolders.clear(); updateFolderContext();
+  projectEntries.clear(); if (!preserveExpanded) { expandedFolders.clear(); selectedExplorerPath = null; } updateFolderContext();
   if (!folder) { tree.textContent = 'Select a task or project to browse its files.'; return; }
   tree.textContent = 'Loading files…';
-  try { await loadProjectFolder('.'); if (revision === selectionRevision && folder === currentFolder()) renderProjectTree(); }
+  try {
+    await loadProjectFolder('.');
+    if (preserveExpanded) {
+      for (const path of [...expandedFolders].sort((left, right) => left.split('/').length - right.split('/').length)) {
+        try { await loadProjectFolder(path); }
+        catch { expandedFolders.delete(path); }
+      }
+    }
+    if (revision === selectionRevision && folder === currentFolder()) renderProjectTree();
+  }
   catch (error) { if (revision === selectionRevision) tree.textContent = `Could not load files: ${String(error)}`; }
 }
 
@@ -839,13 +852,18 @@ function renderProjectTree(): void {
       const row = document.createElement('button');
       row.type = 'button';
       row.className = `tree-row${entry.isDir ? ' tree-folder' : ' tree-file'}`;
+      if (entry.path === selectedExplorerPath) row.classList.add('selected');
       row.style.paddingLeft = `${12 + depth * 14}px`;
       row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-selected', String(entry.path === selectedExplorerPath));
+      row.dataset.path = entry.path;
       if (entry.isDir) {
         const open = expandedFolders.has(entry.path);
         row.setAttribute('aria-expanded', String(open));
         row.textContent = `${open ? '▾' : '▸'}  ${entry.name}`;
         row.addEventListener('click', async () => {
+          hideExplorerContextMenu();
+          selectedExplorerPath = entry.path;
           if (expandedFolders.has(entry.path)) expandedFolders.delete(entry.path);
           else {
             expandedFolders.add(entry.path);
@@ -858,7 +876,7 @@ function renderProjectTree(): void {
         });
       } else {
         row.textContent = `   ${entry.name}`;
-        row.addEventListener('click', () => { void previewProjectFile(entry); });
+        row.addEventListener('click', () => { hideExplorerContextMenu(); selectedExplorerPath = entry.path; renderProjectTree(); void previewProjectFile(entry); });
       }
       fragment.append(row);
       if (entry.isDir && expandedFolders.has(entry.path)) append(projectEntries.get(entry.path) ?? [], depth + 1);
@@ -883,6 +901,135 @@ async function previewProjectFile(entry: ProjectEntry): Promise<void> {
     if (folder === currentFolder()) $('file-preview-content').textContent = contents;
   } catch (error) { $('file-preview-content').textContent = `Could not preview file: ${String(error)}`; }
 }
+
+function hideExplorerContextMenu(): void { explorerContextMenu.hidden = true; }
+
+function parentExplorerPath(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash < 0 ? '.' : path.slice(0, slash) || '.';
+}
+
+function openExplorerEntryDialog(operation: ExplorerOperation): void {
+  pendingExplorerOperation = operation;
+  const isRename = operation.action === 'rename';
+  const isFolder = operation.action === 'new-folder' || (isRename && operation.entry?.isDir === true);
+  const title = isRename ? `Rename ${operation.entry?.isDir ? 'folder' : 'file'}` : operation.action === 'new-folder' ? 'New folder' : 'New file';
+  $('project-entry-kind').textContent = `${operation.projectWorkspace.split(/[\\/]/).pop() || 'PROJECT'} · ${isRename ? operation.entry?.path : operation.parentPath}`;
+  $('project-entry-title').textContent = title;
+  $('project-entry-location').textContent = isRename ? `In ${parentExplorerPath(operation.entry?.path ?? '.')}` : 'Create inside the selected folder.';
+  const name = $<HTMLInputElement>('project-entry-name');
+  name.value = isRename && operation.entry ? operation.entry.name : '';
+  name.placeholder = isFolder ? 'Folder name' : 'File name';
+  $('project-entry-error').textContent = '';
+  $('project-entry-error').hidden = true;
+  $('save-project-entry').textContent = isRename ? 'Rename' : 'Create';
+  const dialog = $<HTMLDialogElement>('project-entry-dialog');
+  dialog.showModal();
+  name.focus();
+  name.select();
+}
+
+function showExplorerContextMenu(event: MouseEvent, entry: ProjectEntry | null): void {
+  event.preventDefault();
+  if (activeKind !== 'code' || !selectedProjectWorkspace) { hideExplorerContextMenu(); return; }
+  selectedExplorerPath = entry?.path ?? null;
+  renderProjectTree();
+  const parentPath = !entry ? '.' : entry.isDir ? entry.path : parentExplorerPath(entry.path);
+  const menuActions = new Map(Array.from(explorerContextMenu.querySelectorAll<HTMLButtonElement>('[data-explorer-action]')).map((button) => [button.dataset.explorerAction ?? '', button]));
+  menuActions.get('open-file')!.hidden = !entry || entry.isDir;
+  menuActions.get('rename')!.hidden = !entry;
+  menuActions.get('delete')!.hidden = !entry;
+  explorerContextMenu.dataset.parentPath = parentPath;
+  explorerContextMenu.dataset.entryPath = entry?.path ?? '';
+  explorerContextMenu.hidden = false;
+  const bounds = explorerContextMenu.getBoundingClientRect();
+  explorerContextMenu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8))}px`;
+  explorerContextMenu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8))}px`;
+  menuActions.get('new-file')?.focus();
+}
+
+async function runExplorerContextAction(action: string): Promise<void> {
+  const workspace = selectedProjectWorkspace;
+  if (activeKind !== 'code' || !workspace) return;
+  const entryPath = explorerContextMenu.dataset.entryPath ?? '';
+  const entry = entryPath ? Array.from(projectEntries.values()).flatMap((items) => items).find((item) => item.path === entryPath) ?? null : null;
+  const parentPath = explorerContextMenu.dataset.parentPath || '.';
+  hideExplorerContextMenu();
+  if (action === 'new-file' || action === 'new-folder' || action === 'rename') {
+    openExplorerEntryDialog({ action, projectWorkspace: workspace, entry, parentPath });
+    return;
+  }
+  if (action === 'open-file' && entry && !entry.isDir) { void previewProjectFile(entry); return; }
+  if (action !== 'delete' || !entry) return;
+  const message = entry.isDir
+    ? `Delete folder “${entry.name}” and everything inside it? This cannot be undone.`
+    : `Delete file “${entry.name}”? This cannot be undone.`;
+  if (!window.confirm(message)) return;
+  try {
+    await invoke('delete_project_entry', { projectWorkspace: workspace, path: entry.path });
+    if (selectedExplorerPath === entry.path || selectedExplorerPath?.startsWith(`${entry.path}/`)) selectedExplorerPath = null;
+    for (const path of [...expandedFolders]) if (path === entry.path || path.startsWith(`${entry.path}/`)) expandedFolders.delete(path);
+    const previewPath = $('file-preview-path').textContent;
+    if (previewPath === entry.path || previewPath?.startsWith(`${entry.path}/`)) $<HTMLDialogElement>('file-preview-dialog').close();
+    if (selectedProjectWorkspace === workspace) await refreshProjectTree(true);
+    setStatus(`${entry.isDir ? 'Folder' : 'File'} deleted.`);
+  } catch (error) { setStatus(`Could not delete ${entry.name}: ${String(error)}`); }
+}
+
+explorerContextMenu.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-explorer-action]');
+  if (button) void runExplorerContextAction(button.dataset.explorerAction ?? '');
+});
+
+$<HTMLDivElement>('project-tree').addEventListener('contextmenu', (event) => {
+  const row = (event.target as HTMLElement).closest<HTMLButtonElement>('.tree-row');
+  showExplorerContextMenu(event, row ? Array.from(projectEntries.values()).flatMap((items) => items).find((entry) => entry.path === row.dataset.path) ?? null : null);
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (!explorerContextMenu.contains(event.target as Node)) hideExplorerContextMenu();
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideExplorerContextMenu(); });
+
+$<HTMLButtonElement>('cancel-project-entry').addEventListener('click', () => $<HTMLDialogElement>('project-entry-dialog').close());
+$<HTMLFormElement>('project-entry-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const operation = pendingExplorerOperation;
+  if (!operation) return;
+  const name = $<HTMLInputElement>('project-entry-name').value;
+  const save = $<HTMLButtonElement>('save-project-entry');
+  const error = $('project-entry-error');
+  error.hidden = true;
+  save.disabled = true;
+  try {
+    if (operation.action === 'new-file') {
+      await invoke('create_project_file', { projectWorkspace: operation.projectWorkspace, parentPath: operation.parentPath, name });
+      selectedExplorerPath = operation.parentPath === '.' ? name : `${operation.parentPath}/${name}`;
+    } else if (operation.action === 'new-folder') {
+      await invoke('create_project_folder', { projectWorkspace: operation.projectWorkspace, parentPath: operation.parentPath, name });
+      selectedExplorerPath = operation.parentPath === '.' ? name : `${operation.parentPath}/${name}`;
+    } else if (operation.entry) {
+      const oldPath = operation.entry.path;
+      await invoke('rename_project_entry', { projectWorkspace: operation.projectWorkspace, path: oldPath, newName: name });
+      const nextPath = parentExplorerPath(oldPath) === '.' ? name : `${parentExplorerPath(oldPath)}/${name}`;
+      selectedExplorerPath = nextPath;
+      for (const path of [...expandedFolders]) {
+        if (path === oldPath || path.startsWith(`${oldPath}/`)) {
+          expandedFolders.delete(path);
+          expandedFolders.add(path === oldPath ? nextPath : `${nextPath}${path.slice(oldPath.length)}`);
+        }
+      }
+    }
+    if (operation.parentPath !== '.') expandedFolders.add(operation.parentPath);
+    pendingExplorerOperation = null;
+    $<HTMLDialogElement>('project-entry-dialog').close();
+    if (selectedProjectWorkspace === operation.projectWorkspace) await refreshProjectTree(true);
+    setStatus(operation.action === 'rename' ? 'Explorer item renamed.' : `${operation.action === 'new-folder' ? 'Folder' : 'File'} created.`);
+  } catch (cause) {
+    error.textContent = String(cause);
+    error.hidden = false;
+  } finally { save.disabled = false; }
+});
 
 async function refreshSourceControl(): Promise<void> {
   const folder = currentFolder();
