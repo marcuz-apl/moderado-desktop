@@ -112,3 +112,10 @@
 - The main window now starts `visible: false` with `backgroundColor: "#0d1b2b"`, so no white surface is ever shown. The renderer reveals it after the themed first paint (`getCurrentWindow().show()` after a double rAF, with a 400 ms timer guard), and `core:window:allow-show` is granted.
 - A 4 s Rust fallback in `setup` shows the window if the frontend never asks, so a webview load failure cannot leave the app invisible.
 - Verification: `tsc --noEmit` and `cargo check` are clean; `npm run build` passes.
+
+## Keyless Gateway models (0.4.x)
+
+- The Moderado Gateway now serves two pinned stealth models to every connection without an API key. `discover_models` returns the full catalog with `access`, `capabilities`, and `section` metadata instead of bare ids, and sorts the pinned defaults (`section: "default"`) first.
+- The provider catalog marks Moderado `keyless: true`. The renderer labels models **free, no key**, **free, key required**, or **paid**, preselects a stealth default, shows a "no key needed" hint under the API key field, and reports "N work without a key" after discovery.
+- A keyless turn that picks a key-required model now explains the 401 ("this model needs a Moderado API key; the free stealth models work without one") instead of surfacing a raw status.
+- Tests: `catalog_keeps_gateway_metadata_and_leads_with_pinned_defaults`, `only_moderado_is_keyless`, and `tests/models.test.mjs` (5 cases). `cargo check`, `tsc --noEmit`, and `npm run build` pass.

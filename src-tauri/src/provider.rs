@@ -30,6 +30,11 @@ pub struct ProviderPreset {
     pub default_base_url: &'static str,
     pub editable_url: bool,
     pub local: bool,
+    /// The provider can serve inference without an API key by falling back to
+    /// its free default models. The Moderado Gateway exposes two pinned stealth
+    /// defaults for exactly this purpose; every other free route still needs a
+    /// key so its usage can be attributed.
+    pub keyless: bool,
     pub apply_key_url: Option<&'static str>,
     pub apply_key_label: &'static str,
 }
@@ -41,6 +46,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://modr.alfazen.org/v1",
         editable_url: true,
         local: false,
+        keyless: true,
         apply_key_url: Some("https://modr.alfazen.org/account?mode=signin"),
         apply_key_label: "Get API key",
     },
@@ -50,6 +56,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://integrate.api.nvidia.com/v1",
         editable_url: false,
         local: false,
+        keyless: false,
         apply_key_url: Some("https://build.nvidia.com/settings/api-keys"),
         apply_key_label: "Get API key",
     },
@@ -59,6 +66,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://openrouter.ai/api/v1",
         editable_url: false,
         local: false,
+        keyless: false,
         apply_key_url: Some("https://openrouter.ai/settings/keys"),
         apply_key_label: "Get API key",
     },
@@ -68,6 +76,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "http://localhost:11434/v1",
         editable_url: false,
         local: true,
+        keyless: false,
         apply_key_url: Some("https://ollama.com/download"),
         apply_key_label: "Get Ollama",
     },
@@ -77,6 +86,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "http://localhost:1234/v1",
         editable_url: false,
         local: true,
+        keyless: false,
         apply_key_url: Some("https://lmstudio.ai/download"),
         apply_key_label: "Get LM Studio",
     },
@@ -86,6 +96,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "",
         editable_url: true,
         local: false,
+        keyless: false,
         apply_key_url: None,
         apply_key_label: "",
     },
@@ -281,15 +292,30 @@ pub fn completion_url(base: &str) -> Result<reqwest::Url, String> {
     Ok(url)
 }
 
+/// A model advertised by a provider. The Moderado Gateway adds `access` and
+/// `section`; its two pinned stealth defaults carry `section: "default"` and are
+/// the only routes it serves without an API key. Other providers return only an
+/// `id`, so every extra field is optional.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub access: Option<String>,
+    pub capabilities: Vec<String>,
+    pub section: Option<String>,
+}
+
 pub async fn list_models(base: &str, key: &str) -> Result<Vec<String>, String> {
     list_models_with_timeout(base, key, NETWORK_IDLE_TIMEOUT).await
 }
 
-async fn list_models_with_timeout(
+/// Fetch and parse `/models` once; the id-only and catalog views share it.
+async fn fetch_model_list(
     base: &str,
     key: &str,
     idle_timeout: Duration,
-) -> Result<Vec<String>, String> {
+) -> Result<Value, String> {
     let mut url = completion_url(base)?;
     let path = url.path().trim_end_matches("/chat/completions").to_owned() + "/models";
     url.set_path(&path);
@@ -320,7 +346,15 @@ async fn list_models_with_timeout(
         }
         bytes.extend_from_slice(&chunk);
     }
-    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "Invalid model list response")?;
+    serde_json::from_slice(&bytes).map_err(|_| "Invalid model list response".into())
+}
+
+async fn list_models_with_timeout(
+    base: &str,
+    key: &str,
+    idle_timeout: Duration,
+) -> Result<Vec<String>, String> {
+    let value = fetch_model_list(base, key, idle_timeout).await?;
     let data = value
         .get("data")
         .and_then(Value::as_array)
@@ -335,6 +369,68 @@ async fn list_models_with_timeout(
     models.sort();
     models.dedup();
     Ok(models)
+}
+
+/// The full catalog, keeping the Gateway's `access`/`section` metadata. Pinned
+/// defaults (`section == "default"`) sort first so a keyless client can
+/// preselect one without hardcoding the deployment's model names.
+pub async fn list_model_catalog(base: &str, key: &str) -> Result<Vec<ModelInfo>, String> {
+    let value = fetch_model_list(base, key, NETWORK_IDLE_TIMEOUT).await?;
+    let data = value
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("Model list response has no data array")?;
+    let mut models: Vec<ModelInfo> = data.iter().filter_map(parse_model_info).take(2000).collect();
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    models.dedup_by(|a, b| a.id == b.id);
+    // Stable sort keeps id order inside each section, with defaults first.
+    models.sort_by_key(|model| model_rank(&model.section));
+    Ok(models)
+}
+
+fn model_rank(section: &Option<String>) -> u8 {
+    if section.as_deref() == Some("default") {
+        0
+    } else {
+        1
+    }
+}
+
+fn parse_model_info(entry: &Value) -> Option<ModelInfo> {
+    let id = entry.get("id").and_then(Value::as_str)?;
+    if id.is_empty() || id.len() > 200 {
+        return None;
+    }
+    let name = entry
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty() && name.len() <= 200)
+        .unwrap_or(id);
+    let capabilities = entry
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .take(16)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(ModelInfo {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        access: entry
+            .get("access")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        capabilities,
+        section: entry
+            .get("section")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -645,6 +741,54 @@ mod tests {
             .unwrap();
         server.join().unwrap();
         assert_eq!(models, vec!["model-a", "model-b"]);
+    }
+
+    #[tokio::test]
+    async fn catalog_keeps_gateway_metadata_and_leads_with_pinned_defaults() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let count = socket.read(&mut request).unwrap();
+            assert!(
+                String::from_utf8_lossy(&request[..count]).starts_with("GET /v1/models HTTP/1.1")
+            );
+            let body = r#"{"object":"list","data":[
+                {"id":"other/free","name":"Other Free","access":"free","section":"other","capabilities":["text"]},
+                {"id":"stealth/one:free","name":"Stealth One","access":"free","section":"default","capabilities":["tools","text"]},
+                {"id":"stealth/two:free","name":"Stealth Two","access":"free","section":"default","capabilities":["tools"]}
+            ]}"#;
+            write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let models = list_model_catalog(&format!("http://127.0.0.1:{port}/v1"), "")
+            .await
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["stealth/one:free", "stealth/two:free", "other/free"]
+        );
+        assert_eq!(models[0].section.as_deref(), Some("default"));
+        assert_eq!(models[0].name, "Stealth One");
+        assert_eq!(models[0].capabilities, vec!["tools", "text"]);
+        assert_eq!(models[2].section.as_deref(), Some("other"));
+        assert_eq!(models[2].access.as_deref(), Some("free"));
+    }
+
+    #[test]
+    fn only_moderado_is_keyless() {
+        for preset in PRESETS {
+            assert_eq!(
+                preset.keyless,
+                preset.id == ProviderId::Moderado,
+                "{} has the wrong keyless flag",
+                preset.name
+            );
+        }
     }
 
     #[tokio::test]

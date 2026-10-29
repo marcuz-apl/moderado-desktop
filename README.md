@@ -26,14 +26,14 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 
 | Provider | Transport | Auth |
 | --- | --- | --- |
-| Moderado Gateway (default) | OpenAI-compatible HTTPS | API key (org-scoped) |
+| Moderado Gateway (default) | OpenAI-compatible HTTPS | Optional — two free stealth models work keyless; a key unlocks the full catalog |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key |
 | OpenRouter | OpenAI-compatible HTTPS | API key |
 | Ollama (local) | `http://localhost:11434` | none |
 | LM Studio (local) | `http://localhost:1234` | none |
 | Custom | User-supplied base URL | optional key |
 
-All providers normalize to a single `ChatCompletion` contract. API keys are stored in the OS keychain and never written to plaintext config or logs. Every provider in Settings links to where you get it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and an installer page for the local Ollama and LM Studio runtimes, which need no key.
+All providers normalize to a single `ChatCompletion` contract. API keys are stored in the OS keychain and never written to plaintext config or logs. Every provider in Settings links to where you get it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and an installer page for the local Ollama and LM Studio runtimes, which need no key. The Moderado Gateway also serves two pinned stealth models without any key; they lead the model list tagged **free, no key**, while its other free routes still require a key.
 
 ## Getting Started
 
@@ -54,7 +54,7 @@ npm run lint    # ESLint, TypeScript, and Clippy
 npm run build   # build the standalone app at src-tauri/target/release/moderado-desktop.exe
 ```
 
-Create a session to choose its workspace folder, then select a provider in Settings. Moderado Gateway uses Prod Mode by default and can switch to Dev Mode; custom providers accept a base URL. Enter a key if needed, load available models, select Plan and Act models, and send a task. Local Ollama and LM Studio need a running server and no key. The provider choice and models are saved with the session when you send a task. You can switch sessions while a turn runs in another session. Turns sharing one workspace run in sequence to keep checkpoints and conversation context consistent.
+Create a session to choose its workspace folder, then select a provider in Settings. Moderado Gateway uses Prod Mode by default and can switch to Dev Mode; custom providers accept a base URL. A Moderado key is optional — the two free stealth models work without one. Load available models (the keyless stealth models are preselected and tagged **free, no key**; other free routes show **free, key required**), select Plan and Act models, and send a task. Local Ollama and LM Studio need a running server and no key. The provider choice and models are saved with the session when you send a task. You can switch sessions while a turn runs in another session. Turns sharing one workspace run in sequence to keep checkpoints and conversation context consistent.
 
 Each approved file write or edit creates a checkpoint of the workspace before applying the change. Select a checkpoint to review file differences, then confirm restore. Restore creates a safety checkpoint of the current workspace first. Git is required for checkpoints; the app uses the workspace's Git repository when the workspace is its root, or a separate Git store in app data otherwise. Checkpoint snapshots include nonignored workspace files, so inspect the restore preview before confirming.
 

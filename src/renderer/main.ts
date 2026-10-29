@@ -6,12 +6,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import MarkdownIt from 'markdown-it';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
+import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLabel, type ModelInfo } from './models';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
-type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
+type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebContent: boolean; executeCommand: boolean; useMcpServers: boolean };
 type ModelUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; rateTps: number | null; contextTokens: number | null };
@@ -173,14 +174,17 @@ function renderModelUsage(): void {
   $('model-usage').textContent = `In: ${format(usage?.inputTokens)} | Out: ${format(usage?.outputTokens)} | Total: ${format(usage?.totalTokens)} | Rate: ${rate} | Context: ${format(usage?.contextTokens)}`;
 }
 
-function setModelOptions(models: string[], planValue: string, actValue: string): void {
+function setModelOptions(models: ModelInfo[], planValue: string, actValue: string): void {
+  const ids = models.map((model) => model.id);
+  const fallback = defaultModelId(models);
   for (const [id, selected] of [['plan-model', planValue], ['act-model', actValue]] as const) {
     const select = $<HTMLSelectElement>(id);
     const options = [new Option('Choose a model', '')];
-    for (const model of models) options.push(new Option(model, model));
-    if (selected && !models.includes(selected)) options.push(new Option(selected, selected));
+    for (const model of models) options.push(new Option(modelOptionLabel(model), model.id));
+    const value = selected || fallback;
+    if (value && !ids.includes(value)) options.push(new Option(value, value));
     select.replaceChildren(...options);
-    select.value = selected;
+    select.value = value;
   }
   updateSelectedModel();
 }
@@ -226,6 +230,8 @@ function selectProvider(id: ProviderId): void {
   setModelOptions([], draft?.planModel ?? '', draft?.actModel ?? '');
   keyField.value = '';
   keyField.disabled = preset.local;
+  keyField.placeholder = preset.keyless ? 'Optional — free models work without a key' : 'Saved in OS keychain';
+  $('keyless-hint').hidden = !preset.keyless;
   const applyUrl = preset.applyKeyUrl;
   if (applyUrl) {
     keyApplyLink.href = applyUrl;
@@ -1262,14 +1268,17 @@ $('load-models').addEventListener('click', async () => {
   setStatus('Loading models…');
   try {
     await saveEnteredKey(settings);
-    const models = await invoke<string[]>('discover_models', { providerId: settings.providerId, baseUrl: settings.baseUrl });
+    const models = await invoke<ModelInfo[]>('discover_models', { providerId: settings.providerId, baseUrl: settings.baseUrl });
     if (settings.providerId === activeProvider && settings.baseUrl === endpoint.value.trim()) {
-      const first = models[0];
-      const planModel = $<HTMLSelectElement>('plan-model').value || first || '';
-      const actModel = $<HTMLSelectElement>('act-model').value || first || '';
+      const first = defaultModelId(models);
+      const planModel = $<HTMLSelectElement>('plan-model').value || first;
+      const actModel = $<HTMLSelectElement>('act-model').value || first;
       setModelOptions(models, planModel, actModel);
     }
-    setStatus(models.length ? `${models.length} models available.` : 'The endpoint returned no models.');
+    const keyless = keylessModelCount(models);
+    setStatus(models.length
+      ? `${models.length} models available${keyless ? ` · ${keyless} work without a key` : ''}.`
+      : 'The endpoint returned no models.');
   } catch (error) { setStatus(String(error)); }
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
@@ -1548,7 +1557,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
   else if (payload.kind === 'tool') setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', payload.value?.startsWith('Error:') ? 'attention' : 'completed', payload.value ?? '');
   else if (payload.kind === 'error') {
     if (!scheduledPending.has(id)) running.delete(id);
-    if (id === activeSessionId) setStatus(payload.value ?? 'Turn failed.');
+    if (id === activeSessionId) setStatus(explainProviderError(payload.value ?? 'Turn failed.', providers.find((provider) => provider.id === activeProvider)));
   } else {
     if (payload.kind === 'cancelled') {
       for (let index = approvalQueue.length - 1; index >= 0; index--) {
@@ -1715,7 +1724,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
       attachments: sent.map(({ id: attachmentId, name, kind }) => ({ id: attachmentId, name, kind })),
     });
   } catch (error) {
-    const detail = String(error);
+    const detail = explainProviderError(String(error), providers.find((provider) => provider.id === activeProvider));
     if (!detail.includes('stopped by user')) addDisplay(id, 'Error', detail);
     if (id === activeSessionId) setStatus(detail.includes('stopped by user') ? 'Side question stopped.' : detail);
   } finally {

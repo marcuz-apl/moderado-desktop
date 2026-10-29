@@ -824,10 +824,13 @@ async fn configured_key(provider_id: ProviderId, base_url: &str) -> Result<Strin
 }
 
 #[tauri::command]
-async fn discover_models(provider_id: ProviderId, base_url: String) -> Result<Vec<String>, String> {
+async fn discover_models(
+    provider_id: ProviderId,
+    base_url: String,
+) -> Result<Vec<provider::ModelInfo>, String> {
     let base_url = provider_id.base_url(&base_url)?;
     let key = configured_key(provider_id, &base_url).await?;
-    provider::list_models(&base_url, &key).await
+    provider::list_model_catalog(&base_url, &key).await
 }
 
 #[tauri::command]

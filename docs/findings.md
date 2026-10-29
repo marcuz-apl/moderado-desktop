@@ -39,3 +39,11 @@
 - `PRAGMA user_version` was chosen over a migration crate: it is one integer in the database header, needs no dependency, and every migration here is plain SQL. A migration library would add a dependency for behaviour that fits in about forty lines (Decision Ladder, N6).
 - Version 1 has to be idempotent rather than conditional. An existing install reports `user_version = 0` while already holding the tables, so version 1 is written with `IF NOT EXISTS` and carries the old column repair. That lets one code path serve both a fresh database and a pre-versioning one, with no baseline detection branch.
 - Staging inside `prepare-commit-msg` or `commit-msg` does not reach the commit: git freezes the tree after `pre-commit`. That is why the version bump stays in `pre-commit`, and why the patch digit moves through an explicit `npm run version:patch` rather than from the commit message.
+
+## Keyless Gateway Models
+
+- `GET /v1/models` is served without an account. Each entry now carries `access` (`free`/`paid`), `capabilities`, and `section`; the two pinned stealth defaults lead the list with `section: "default"`.
+- Only those pinned defaults serve inference keyless. Every other `access: "free"` route returns 401 until the request carries a valid `mrd_…` key, so "free" cannot be read as "no key".
+- The provider preset declares `keyless: true` only for Moderado. Discovery keeps the metadata (`ModelInfo`) instead of flattening to ids, sorts `section: "default"` first, and the renderer preselects a stealth default while labelling the rest "free, key required" or "paid".
+- A 401 from a keyless provider is explained rather than surfaced raw: the chosen model needs a key, the stealth defaults do not. This mirrors the CLI, which lists only `section: "default"` for a keyless session and tags them "No key or sign-in required".
+- Nothing is hardcoded: the model ids and even their count can change with the deployment, so the client reads `section` instead of naming `stealth/ocevolex:free` or `recursive/flint-v1.0`.
