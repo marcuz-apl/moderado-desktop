@@ -1372,6 +1372,18 @@ pub fn run() {
                 runtimes: Mutex::new(HashMap::new()),
                 workspace_locks: Mutex::new(HashMap::new()),
             });
+            // The window starts hidden so WebView2's default white surface never
+            // flashes on launch. The frontend reveals it after the themed first
+            // paint; this fallback shows it even if the webview fails to load.
+            let reveal = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                if let Some(window) = reveal.get_webview_window("main") {
+                    if !window.is_visible().unwrap_or(true) {
+                        let _ = window.show();
+                    }
+                }
+            });
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 poll_schedules(handle).await;

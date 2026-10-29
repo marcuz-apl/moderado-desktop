@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import MarkdownIt from 'markdown-it';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
@@ -134,6 +135,17 @@ themeToggle.addEventListener('click', () => {
 applyTheme();
 setInterval(() => { if (themePreference === 'auto') applyTheme(); }, 60_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && themePreference === 'auto') applyTheme(); });
+
+// The window is created hidden (visible: false in tauri.conf.json) so the
+// WebView2 default white surface never flashes on launch. Reveal it once the
+// themed first paint has happened; the timer covers a paint/rAF that never
+// arrives. The Rust side has a matching fallback so the window cannot stay
+// invisible.
+const revealWindow = (): void => {
+  try { void getCurrentWindow().show().catch(() => {}); } catch { /* not running inside Tauri */ }
+};
+requestAnimationFrame(() => requestAnimationFrame(revealWindow));
+setTimeout(revealWindow, 400);
 function activeSession(): SessionRecord | null { return activeSessionId ? sessions.get(activeSessionId) ?? null : null; }
 function binding(settings: ProviderSettings): string { return `${settings.providerId}\n${settings.baseUrl.trim()}`; }
 

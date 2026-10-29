@@ -105,3 +105,10 @@
 - Path-escape and symlink guards reject any attempt to write outside the workspace root; invalid names (`.git`, `..`, etc.) are rejected before reaching the backend.
 - Delete shows a confirmation dialog and clears selection/preview state for removed items; rename updates expanded-folder tracking and preserves selection on the renamed path.
 - Verification: 95 Rust tests and 35 Node tests pass offline; `tsc --noEmit`, `eslint`, and `cargo clippy -D warnings` are clean; `npm run build` passes.
+
+## Startup flash removed (0.4.x)
+
+- The launch "white box inside a black box" was WebView2's default surface painting before the themed page: `tauri-runtime-wry` feeds the window config's `backgroundColor` to the webview via `with_background_color`, and falls back to white when it is unset.
+- The main window now starts `visible: false` with `backgroundColor: "#0d1b2b"`, so no white surface is ever shown. The renderer reveals it after the themed first paint (`getCurrentWindow().show()` after a double rAF, with a 400 ms timer guard), and `core:window:allow-show` is granted.
+- A 4 s Rust fallback in `setup` shows the window if the frontend never asks, so a webview load failure cannot leave the app invisible.
+- Verification: `tsc --noEmit` and `cargo check` are clean; `npm run build` passes.
