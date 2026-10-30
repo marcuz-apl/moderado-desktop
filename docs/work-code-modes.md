@@ -31,7 +31,7 @@ The compact Work/Code selector restores that mode's last task/session or Code pr
 
 Async selection results are guarded by a revision counter. A delayed request cannot reactivate another mode or overwrite a newer selection. Completion and attachment events are scoped to their originating conversation. Deleting the active session selects another conversation only in the same task mode or Code project; otherwise it displays a new draft.
 
-The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web approval controls; Code also shows command and the MCP placeholder. Checkbox changes save immediately per session. Provider/model and usage share a row below the input.
+The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web approval controls; Code also shows command and MCP. Checkbox changes save immediately per session. Provider/model and usage share a row below the input.
 
 Assistant replies and final turn summaries render Markdown with embedded HTML disabled. Completed assistant replies are presented as Turn summaries; a requested summary heading is separated from any preceding response text. Tool calls appear in a compact activity timeline with running/completed/error states, timestamps, and expandable results.
 

@@ -4,6 +4,7 @@ pub mod approval_policy;
 pub mod checkpoints;
 pub mod command;
 pub mod db;
+pub mod mcp;
 pub mod provider;
 pub mod schedules;
 pub mod search;
@@ -834,6 +835,26 @@ async fn discover_models(
 }
 
 #[tauri::command]
+fn load_mcp_config() -> Result<mcp::McpConfig, String> {
+    mcp::load()
+}
+
+#[tauri::command]
+fn save_mcp_config(config: mcp::McpConfig) -> Result<mcp::McpConfig, String> {
+    mcp::save(&config)
+}
+
+#[tauri::command]
+async fn discover_mcp_tools(config: mcp::McpConfig) -> Result<mcp::McpDiscovery, String> {
+    mcp::validate(&config)?;
+    let registry = mcp::McpRegistry::connect(&config).await;
+    Ok(mcp::McpDiscovery {
+        tools: registry.tools().to_vec(),
+        errors: registry.errors().to_vec(),
+    })
+}
+
+#[tauri::command]
 fn provider_catalog() -> Vec<provider::ProviderPreset> {
     provider::PRESETS.to_vec()
 }
@@ -1139,6 +1160,14 @@ async fn execute_turn(
         state.store.add_checkpoint(&checkpoint)?;
         let _ = app.emit("checkpoint-created", &checkpoint);
     }
+    // Connect MCP servers for Code sessions only. A server that fails to start
+    // is recorded and skipped, never allowed to block the turn.
+    let mcp_registry = if record.kind == SessionKind::Code {
+        let config = mcp::load().unwrap_or_default();
+        Some(mcp::McpRegistry::connect(&config).await)
+    } else {
+        None
+    };
     let turn = run_turn_with_hooks(
         RunConfig {
             workspace: &workspace,
@@ -1152,6 +1181,7 @@ async fn execute_turn(
             attachments: &attachment_refs,
             attachments_root: &attachments_root,
             session_id: &session_id,
+            mcp: mcp_registry.as_ref(),
         },
         &mut messages,
         &prompt,
@@ -1435,6 +1465,9 @@ pub fn run() {
             list_pending_approvals,
             save_provider_key,
             discover_models,
+            load_mcp_config,
+            save_mcp_config,
+            discover_mcp_tools,
             provider_catalog,
             probe_local_providers,
             load_provider_settings,

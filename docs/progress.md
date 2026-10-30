@@ -119,3 +119,10 @@
 - The provider catalog marks Moderado `keyless: true`. The renderer labels models **free, no key**, **free, key required**, or **paid**, preselects a stealth default, shows a "no key needed" hint under the API key field, and reports "N work without a key" after discovery.
 - A keyless turn that picks a key-required model now explains the 401 ("this model needs a Moderado API key; the free stealth models work without one") instead of surfacing a raw status.
 - Tests: `catalog_keeps_gateway_metadata_and_leads_with_pinned_defaults`, `only_moderado_is_keyless`, and `tests/models.test.mjs` (5 cases). `cargo check`, `tsc --noEmit`, and `npm run build` pass.
+
+## MCP runtime (0.4.2)
+
+- Stdio MCP servers are configured in `~/.moderado/mcp.json` (`servers[]` with `id`, `command`, `args`, `env`, `enabled`). `mcp.rs` spawns enabled servers per Code turn, performs the `initialize` / `tools/list` handshake over newline-delimited JSON-RPC 2.0, and exposes each tool as `mcp__<server>__<tool>`.
+- Tools are advertised only to Code/Act sessions. Dispatch is gated by the `UseMcpServers` Auto-Approve category; Plan mode and Work sessions reject MCP calls before approval. A server that fails to start is recorded and skipped, never blocking the turn, and its process is killed when the turn ends (`kill_on_drop`).
+- Settings gains an **MCP servers** section to edit the JSON config, save it, and discover tools; discovery reports both tools and per-server errors.
+- Tests: `mcp.rs` covers config validation, public-name parsing, registry list/call, failing/unknown tools, and a broken server alongside a healthy one; runner tests cover auto-approved dispatch and the Plan-mode guard, all against a local Node mock server.

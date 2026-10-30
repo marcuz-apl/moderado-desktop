@@ -1191,6 +1191,7 @@ async function initialize(): Promise<void> {
     catch (error) { setStatus(`Saved provider settings could not be loaded: ${String(error)}. Using defaults.`); }
     if (saved) providerDrafts.set(saved.providerId, { baseUrl: saved.baseUrl, planModel: saved.planModel, actModel: saved.actModel });
     selectProvider(saved?.providerId ?? 'moderado');
+    void loadMcpConfig();
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
@@ -1301,6 +1302,41 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
     setStatus('Settings saved on this device.');
   } catch (error) { setStatus(String(error)); }
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
+});
+
+async function loadMcpConfig(): Promise<void> {
+  try {
+    const config = await invoke<{ servers: unknown[] }>('load_mcp_config');
+    $<HTMLTextAreaElement>('mcp-config').value = JSON.stringify(config, null, 2);
+  } catch (error) {
+    $('mcp-status').textContent = String(error);
+  }
+}
+
+function readMcpConfig(): unknown {
+  const text = $<HTMLTextAreaElement>('mcp-config').value.trim();
+  return JSON.parse(text || '{"servers":[]}');
+}
+
+$('save-mcp-config').addEventListener('click', async () => {
+  try {
+    await invoke('save_mcp_config', { config: readMcpConfig() });
+    $('mcp-status').textContent = 'MCP config saved.';
+  } catch (error) {
+    $('mcp-status').textContent = String(error);
+  }
+});
+
+$('discover-mcp').addEventListener('click', async () => {
+  $('mcp-status').textContent = 'Starting MCP servers…';
+  try {
+    const discovery = await invoke<{ tools: { publicName: string }[]; errors: string[] }>('discover_mcp_tools', { config: readMcpConfig() });
+    const tools = discovery.tools.map((tool) => tool.publicName).join(', ') || 'no tools';
+    const errors = discovery.errors.length ? ` · Errors: ${discovery.errors.join('; ')}` : '';
+    $('mcp-status').textContent = `Tools: ${tools}${errors}`;
+  } catch (error) {
+    $('mcp-status').textContent = String(error);
+  }
 });
 
 async function createSession(settings: ProviderSettings, kind: SessionKind = activeKind, workspace: string | null = selectedProjectWorkspace, taskId: string | null = selectedWorkTaskId): Promise<string> {

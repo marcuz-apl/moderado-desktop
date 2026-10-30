@@ -24,6 +24,17 @@ pub struct Approval {
 }
 
 pub fn tool_definitions(kind: SessionKind, mode: Mode, web_search: bool) -> Vec<Value> {
+    tool_definitions_with_mcp(kind, mode, web_search, &[])
+}
+
+/// The built-in tools plus any MCP tools the caller discovered for this turn.
+/// MCP tools are only ever passed in for Code/Act sessions.
+pub fn tool_definitions_with_mcp(
+    kind: SessionKind,
+    mode: Mode,
+    web_search: bool,
+    mcp_tools: &[Value],
+) -> Vec<Value> {
     let mut tools = vec![
         json!({"type":"function","function":{"name":"list_files","description":"List direct children of a workspace directory","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a UTF-8 file in the workspace","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"}},"required":["path"]}}}),
@@ -42,6 +53,7 @@ pub fn tool_definitions(kind: SessionKind, mode: Mode, web_search: bool) -> Vec<
     }
     #[cfg(not(windows))]
     let _ = kind;
+    tools.extend(mcp_tools.iter().cloned());
     tools
 }
 
@@ -237,6 +249,18 @@ mod tests {
         let result = dispatch_tool_with_policy(root.path(), SessionKind::Code, Mode::Act, &policy, &call, |_| { requested.store(true, std::sync::atomic::Ordering::Relaxed); async { Some(String::new()) } }, |_| Ok(())).await;
         assert!(result.is_ok());
         assert!(requested.load(std::sync::atomic::Ordering::Relaxed), "unchecked reads must wait for a user decision");
+    }
+
+    #[test]
+    fn mcp_tools_are_appended_to_the_tool_list() {
+        let mcp = vec![json!({"type":"function","function":{"name":"mcp__srv__echo","description":"Echo","parameters":{"type":"object"}}})];
+        let tools = tool_definitions_with_mcp(SessionKind::Code, Mode::Act, false, &mcp);
+        assert!(tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "mcp__srv__echo"));
+        assert!(tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "read_file"));
     }
 
     #[test]

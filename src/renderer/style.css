@@ -38,6 +38,7 @@
 
 .task-operations{display:flex;flex-wrap:wrap;gap:10px;padding:8px 14px 0}
 .task-operations .text-button{margin:0}
+#mcp-config{width:100%;min-height:120px;margin-top:8px;border:1px solid #426078;border-radius:7px;background:#102236;color:#e9f4f7;padding:9px 10px;font:12px/1.5 "Cascadia Code",Consolas,monospace;resize:vertical}
 .task-group{padding:5px 0;border:0}
 .task-heading>.session-item{padding-left:0}
 .task-sessions{padding:3px 0 8px 34px}

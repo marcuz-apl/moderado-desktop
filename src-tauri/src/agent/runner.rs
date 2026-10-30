@@ -1,4 +1,4 @@
-use super::{dispatch_tool_with_policy, tool_definitions, Approval, ApprovalRequest, Mode};
+use super::{dispatch_tool_with_policy, tool_definitions_with_mcp, Approval, ApprovalRequest, Mode};
 use crate::approval_policy::AutoApprovePolicy;
 use crate::attachments;
 use crate::provider;
@@ -23,6 +23,8 @@ pub struct RunConfig<'a> {
     /// Root of the attachment copies; empty for Code sessions.
     pub attachments_root: &'a Path,
     pub session_id: &'a str,
+    /// MCP servers connected for this turn; only Code/Act sessions use them.
+    pub mcp: Option<&'a crate::mcp::McpRegistry>,
 }
 
 #[derive(Debug)]
@@ -100,7 +102,16 @@ where
         attachments::restore_workspace_copies(config.attachments_root, config.workspace, config.session_id, history)?;
     }
     persist(history)?;
-    let tools = tool_definitions(config.kind, config.mode, config.search.is_some());
+    let mcp_tools = match (config.kind, config.mode, config.mcp) {
+        (SessionKind::Code, Mode::Act, Some(registry)) => registry.tool_definitions(),
+        _ => Vec::new(),
+    };
+    let tools = tool_definitions_with_mcp(
+        config.kind,
+        config.mode,
+        config.search.is_some(),
+        &mcp_tools,
+    );
     let mode_instruction = match config.kind {
         SessionKind::Work => {
             "Help the user complete their task. You may read, create, and edit UTF-8 documents \
@@ -194,6 +205,25 @@ where
                     },
                     None => Err("Web search is unavailable for this session".into()),
                 }
+            } else if call.name.starts_with("mcp__") {
+                match (config.kind, config.mode, config.mcp) {
+                    (SessionKind::Work, _, _) => Err("Work tasks cannot use MCP tools".into()),
+                    (_, Mode::Plan, _) => Err("Plan mode blocks MCP tools".into()),
+                    (_, _, None) => Err("MCP is not configured for this session".into()),
+                    (_, _, Some(registry)) => {
+                        let request = ApprovalRequest {
+                            category: crate::approval_policy::ApprovalCategory::UseMcpServers,
+                            title: "Use MCP tool".into(),
+                            detail: format!("MCP tool: {}", call.name),
+                            preview: None,
+                        };
+                        if !config.auto_approve.use_mcp_servers && approve(request).await.is_none() {
+                            Err("MCP tool call rejected by user".into())
+                        } else {
+                            registry.call(&call.name, &call.arguments).await
+                        }
+                    }
+                }
             } else {
                 dispatch_tool_with_policy(
                     config.workspace,
@@ -279,7 +309,7 @@ mod tests {
             RunConfig {
                 workspace: root.path(), base_url: &base, model: "test-model", api_key: "", mode: Mode::Act,
                 search: Some(&SearchConfig { endpoint: "http://127.0.0.1:1/search".into(), key: String::new() }),
-                kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval",
+                kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval", mcp: None,
             },
             &mut history,
             "Search for this",
@@ -336,6 +366,7 @@ mod tests {
                 attachments: &[],
                 attachments_root: root.path(),
                 session_id: "test-session",
+                mcp: None,
             },
             &mut history,
             "Create hello.txt",
@@ -396,6 +427,7 @@ mod tests {
                 attachments: &[],
                 attachments_root: root.path(),
                 session_id: "test-session",
+                mcp: None,
             },
             &mut history,
             "Write a.txt",
@@ -446,6 +478,7 @@ mod tests {
                 attachments: &[],
                 attachments_root: root.path(),
                 session_id: "test-session",
+                mcp: None,
             },
             &mut history,
             "Plan a change",
@@ -519,6 +552,7 @@ mod tests {
                     attachments: &[],
                     attachments_root: root.path(),
                     session_id: "test-session",
+                mcp: None,
                 },
                 &mut history,
                 "Create m2.txt",
@@ -590,6 +624,7 @@ mod tests {
                 attachments: &[],
                 attachments_root: &workspace,
                 session_id: "test-session",
+                mcp: None,
             },
             &mut history,
             "Change file.txt",
@@ -702,6 +737,7 @@ mod tests {
                 attachments: &[],
                 attachments_root: &workspace,
                 session_id: "test-session",
+                mcp: None,
             },
             &mut history,
             &due[0].prompt,
@@ -724,5 +760,117 @@ mod tests {
         assert_eq!(sessions.list_checkpoints(&session.id).unwrap().len(), 2);
         assert_eq!(schedules.list(&session.id).unwrap()[0].next_run_at, 160);
         assert!(schedules.claim_due(100, 8).unwrap().is_empty());
+    }
+
+    fn mock_mcp_registry() -> crate::mcp::McpConfig {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("mock_mcp_server.mjs");
+        crate::mcp::McpConfig {
+            servers: vec![crate::mcp::McpServerConfig {
+                id: "mock".into(),
+                command: "node".into(),
+                args: vec![script.to_string_lossy().into_owned()],
+                env: Default::default(),
+                enabled: true,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_tool_calls_are_dispatched_after_approval() {
+        let registry = crate::mcp::McpRegistry::connect(&mock_mcp_registry()).await;
+        assert!(registry.errors().is_empty(), "{:?}", registry.errors());
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            let request = read_request(&mut first);
+            assert!(request["tools"].to_string().contains("mcp__mock__echo"));
+            respond(&mut first, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"mcp__mock__echo\",\"arguments\":\"{\\\"text\\\":\\\"hi\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n");
+            let (mut second, _) = listener.accept().unwrap();
+            let request = read_request(&mut second);
+            assert_eq!(
+                request["messages"].as_array().unwrap().last().unwrap()["content"],
+                "echo:hi"
+            );
+            respond(&mut second, "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: [DONE]\n\n");
+        });
+        let mut history = Vec::new();
+        run_turn(
+            RunConfig {
+                workspace: root.path(),
+                base_url: &base,
+                model: "test-model",
+                api_key: "",
+                mode: Mode::Act,
+                search: None,
+                kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
+                attachments: &[],
+                attachments_root: root.path(),
+                session_id: "mcp-test",
+                mcp: Some(&registry),
+            },
+            &mut history,
+            "Use the echo tool",
+            |_| async { panic!("auto-approved MCP calls must not ask") },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(history.last().unwrap()["content"], "Done");
+    }
+
+    #[tokio::test]
+    async fn plan_mode_blocks_mcp_tools_before_dispatch() {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            read_request(&mut first);
+            respond(&mut first, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"mcp__mock__echo\",\"arguments\":\"{\\\"text\\\":\\\"hi\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n");
+            let (mut second, _) = listener.accept().unwrap();
+            let request = read_request(&mut second);
+            assert!(request["messages"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains("Plan mode blocks MCP tools"));
+            respond(&mut second, "data: {\"choices\":[{\"delta\":{\"content\":\"Read only\"}}]}\n\ndata: [DONE]\n\n");
+        });
+        let mut history = Vec::new();
+        run_turn(
+            RunConfig {
+                workspace: root.path(),
+                base_url: &base,
+                model: "test-model",
+                api_key: "",
+                mode: Mode::Plan,
+                search: None,
+                kind: SessionKind::Code,
+                auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
+                attachments: &[],
+                attachments_root: root.path(),
+                session_id: "mcp-plan",
+                mcp: None,
+            },
+            &mut history,
+            "Plan with an MCP tool",
+            |_| async { panic!("Plan mode must reject before approval") },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(history.last().unwrap()["content"], "Read only");
     }
 }

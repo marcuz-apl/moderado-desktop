@@ -6,7 +6,7 @@ Moderado Desktop follows the Cline Desktop interaction model — parallel sessio
 
 ## Current build
 
-The app supports persistent Work and Code sessions, schedules, transcript imports, Plan/Act mode, and the OpenAI-compatible provider matrix. Tasks and sessions have per-conversation Auto-Approve settings; Code starts with all five categories enabled; Work starts with read, edit, and web enabled, and you can turn any category off to require approval. File changes retain their diff preview. On Windows, commands run in a Windows AppContainer against a disposable copy of the project; only the resulting workspace changes are copied back. MCP is shown as a checked placeholder and is not available yet. API keys remain in the OS keychain.
+The app supports persistent Work and Code sessions, schedules, transcript imports, Plan/Act mode, and the OpenAI-compatible provider matrix. Tasks and sessions have per-conversation Auto-Approve settings; Code starts with all five categories enabled; Work starts with read, edit, and web enabled, and you can turn any category off to require approval. File changes retain their diff preview. On Windows, commands run in a Windows AppContainer against a disposable copy of the project; only the resulting workspace changes are copied back. MCP servers configured in `~/.moderado/mcp.json` are available to Code/Act sessions through the Use MCP servers approval category. API keys remain in the OS keychain.
 
 ## Capabilities
 
@@ -15,7 +15,7 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 - **Work and Code modes**: Work tasks own a conversation and a managed Documents folder for questions, attachments, and editable UTF-8 documents. Code projects own a chosen codebase folder with multiple independent sessions. Both use jailed file tools and checkpoints; Code also supports Plan/Act and Windows commands.
 - **Appearance**: a sun/moon button beside the Plan/Act selector switches the theme. Until you click it, the theme follows local time — light from 07:00 to 18:59 — and re-checks while the app is open; after you choose, that choice sticks.
 - **Project navigation**: New creates a named folder; Open registers an existing codebase. Sessions appear beneath each project. Deleting a session preserves the project; removing a project preserves its files and history for reopening. Mode switching restores its last conversation and unsent draft.
-- **Per-session Auto-Approve**: Code sessions default to Read files, Edit files, Fetch web content, Execute command, and Use MCP servers enabled. Turn off read, web, edit, or command access to require a contextual approval; MCP remains a placeholder.
+- **Per-session Auto-Approve**: Code sessions default to Read files, Edit files, Fetch web content, Execute command, and Use MCP servers enabled. Turn off read, web, edit, or command access to require a contextual approval; MCP tools are gated the same way.
 - **Command sandbox**: Windows commands receive only a disposable AppContainer copy of the project, have bounded output and runtime, and cannot access files outside that copy. The app checks for concurrent workspace changes before copying results back.
 - **Human-in-the-loop approval**: unchecked operations wait for approval; file changes include a diff preview. Scheduled Act tasks retain their explicit write-approval choice.
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.

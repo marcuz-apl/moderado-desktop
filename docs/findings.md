@@ -47,3 +47,11 @@
 - The provider preset declares `keyless: true` only for Moderado. Discovery keeps the metadata (`ModelInfo`) instead of flattening to ids, sorts `section: "default"` first, and the renderer preselects a stealth default while labelling the rest "free, key required" or "paid".
 - A 401 from a keyless provider is explained rather than surfaced raw: the chosen model needs a key, the stealth defaults do not. This mirrors the CLI, which lists only `section: "default"` for a keyless session and tags them "No key or sign-in required".
 - Nothing is hardcoded: the model ids and even their count can change with the deployment, so the client reads `section` instead of naming `stealth/ocevolex:free` or `recursive/flint-v1.0`.
+
+## MCP Transport
+
+- MCP's stdio transport is newline-delimited JSON-RPC 2.0, so the client is a line reader with request/response id matching rather than a streaming parser. Servers may print logs to stdout, so non-JSON lines are ignored instead of treated as protocol errors.
+- A 20 s per-request timeout and a 1 MiB line cap bound a hung or runaway server. `kill_on_drop` ties the child process to the turn, so no orphan MCP server survives it.
+- Tools are namespaced `mcp__<server>__<tool>`, and a server id may not contain `__`, so the public name stays unambiguous. Each server's `inputSchema` is passed through as the function `parameters`, so the model sees the server's own schema.
+- Connection is per turn and best effort: one broken server must not stop the others or the session, so failures are collected and surfaced through discovery rather than aborting the run.
+- MCP is Code/Act only. Plan mode rejects the call before approval, matching the structural mode gate used for file writes and commands.
