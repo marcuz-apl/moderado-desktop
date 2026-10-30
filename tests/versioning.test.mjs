@@ -76,12 +76,22 @@ test('the bump script moves the patch and the hook keeps it', () => {
   }
 });
 
-test('the bump script rolls over at nine and rejects a bad kind', () => {
+test('the bump script advances the patch past nine and caps it at 99', () => {
   const patchRoot = repository('v0.1.9+2610114');
   try {
-    assert.equal(bump(patchRoot, 'patch'), 'v0.2.0+2610114');
+    assert.equal(bump(patchRoot, 'patch'), 'v0.1.10+2610114');
   } finally {
     rmSync(patchRoot, { recursive: true, force: true });
+  }
+
+  const capRoot = repository('v0.1.99+2610114');
+  try {
+    const result = spawnSync(process.execPath, [bumpScript, 'patch'], { cwd: capRoot, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /capped at 99/);
+    assert.equal(readFileSync(join(capRoot, 'VERSION'), 'utf8').trim(), 'v0.1.99+2610114');
+  } finally {
+    rmSync(capRoot, { recursive: true, force: true });
   }
 
   const minorRoot = repository('v0.9.9+2610114');

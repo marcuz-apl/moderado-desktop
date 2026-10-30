@@ -1,6 +1,6 @@
 #!/bin/sh
 VERSION_FILE=VERSION
-IDENT_RE='^v[0-9]+\.[0-9]\.[0-9][+-][0-9]{6}[1-9a-z]$'
+IDENT_RE='^v[0-9]+\.[0-9]\.[0-9]{1,2}[+-][0-9]{6}[1-9a-z]$'
 
 die() { echo "alfazen-versioning: $*" >&2; exit 1; }
 utc_yymmdd() { TZ=UTC LC_ALL=C date -u +%y%m%d; }
@@ -57,12 +57,15 @@ bump_semver() {
     major_requires_approval)
       die "Major version bump (m) detected. Major version increments require explicit user approval. Set ALFAZEN_MAJOR_APPROVED=1 to proceed, or stage as minor/patch."
       ;;
-    minor) echo "v${m}.$((n + 1)).0" ;;
+    minor)
+      if [ "$n" -eq 9 ]; then echo "v$((m + 1)).0.0"
+      else echo "v${m}.$((n + 1)).0"; fi
+      ;;
     patch)
-      if [ "$p" -eq 9 ]; then
-        if [ "$n" -eq 9 ]; then echo "v$((m + 1)).0.0"
-        else echo "v${m}.$((n + 1)).0"; fi
-      else echo "v${m}.${n}.$((p + 1))"; fi
+      if [ "$p" -ge 99 ]; then
+        die "patch digit is capped at 99; a minor bump requires explicit approval"
+      fi
+      echo "v${m}.${n}.$((p + 1))"
       ;;
     *)     echo "v${m}.${n}.${p}" ;;
   esac
