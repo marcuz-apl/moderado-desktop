@@ -122,7 +122,7 @@ test('daily counter advances and rejects exhaustion or an invalid date', () => {
     rmSync(root, { recursive: true, force: true });
   }
 
-  for (const version of [`v0.1.3+${today}z`, 'v0.1.3+2610001', 'v0.1.10+2610111']) {
+  for (const version of [`v0.1.3+${today}z`, 'v0.1.3+2610001', 'v0.1.100+2610111']) {
     const invalid = repository(version);
     try {
       writeFileSync(join(invalid, 'change.txt'), 'one');

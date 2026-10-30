@@ -3,6 +3,9 @@
   "version": "0.4.6",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "vite:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build && tauri build --no-bundle",
