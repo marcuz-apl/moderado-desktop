@@ -141,3 +141,10 @@
 - `git_diff` and the symbol searches are Code-only read tools under the Read files category; `diagnostics` is Code-only and spawns the language server matching the file extension.
 - Added `lsp.rs` with a `~/.moderado/lsp.json` config (id, extensions, command, args, env, languageId), a `Content-Length` framed LSP client (`initialize`, `didOpen`, `publishDiagnostics`), and a registry that skips broken servers. Settings gains a Language Servers JSON editor.
 - Tests: `git_diff` (tracked diff, untracked fallback, non-repository, path escape), the symbol tools, and LSP diagnostics against a Node mock server.
+
+## Linux command sandbox (0.4.6)
+
+- Added a Landlock backend in `command.rs`: the command runs in the workspace with read/execute on system paths and read/write on the workspace plus a private temp folder, and every other path is denied. It fails closed when Landlock is unavailable instead of running unsandboxed.
+- `execute_command` is now advertised on Windows and Linux (x86_64/aarch64); macOS still fails closed.
+- Added `.github/workflows/ci.yml` so `npm test` runs on Ubuntu and Windows, which compiles and exercises the Linux backend (WSL is unavailable in the local environment).
+- Tests: a Linux-only test proves a command can write inside the workspace while an outside file stays unreadable.

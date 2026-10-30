@@ -69,3 +69,11 @@
 - `find_references` and `get_definition` are workspace text searches, not a language server: `find_references` reuses `search_files`, and `get_definition` filters those matches to lines that look like declarations. This is language-agnostic and needs no server, at the cost of semantic accuracy.
 - `diagnostics` is the only tool that needs a language server. LSP framing is `Content-Length: N\r\n\r\n` plus a JSON body, unlike MCP's newline-delimited stdio, so it has its own client. Diagnostics are push-based (`textDocument/publishDiagnostics` after `didOpen`) with an 8 s wait.
 - Language servers are matched by file extension. A server that fails to start is recorded and skipped, and a file with no matching server returns a clear error instead of failing the turn.
+
+## Linux Command Sandbox
+
+- Landlock is applied in `pre_exec`, after `PR_SET_NO_NEW_PRIVS`, with a ruleset that handles every filesystem access class the kernel ABI supports. Read/execute is allowed on system paths; read/write is allowed only on the workspace and a private temp folder.
+- The ruleset is built in the parent and passed to the child as pre-built `CString`s, so the `pre_exec` closure only issues syscalls instead of allocating after fork.
+- The ABI is probed first; if Landlock is unavailable the command is refused rather than run unsandboxed. This is the "fail closed" rule from the PRD.
+- Unlike the Windows backend, the Linux command runs in the workspace directly rather than in a disposable copy, so changes are in place; `changed_files` is derived from a metadata snapshot before and after the run.
+- The Linux backend is verified by the new CI job, not locally: WSL is blocked and only the Windows Rust target is installed here.

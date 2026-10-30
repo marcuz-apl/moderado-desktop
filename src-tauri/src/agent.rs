@@ -52,7 +52,7 @@ pub fn tool_definitions_with_mcp(
     if matches!(mode, Mode::Act) {
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         if matches!(kind, SessionKind::Code) {
         tools.push(json!({"type":"function","function":{"name":"execute_command","description":"Run one executable with separate arguments in a Windows AppContainer workspace copy. No shell is invoked implicitly.","parameters":{"type":"object","properties":{"program":{"type":"string","description":"Executable name or absolute path"},"args":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string","description":"Workspace-relative directory"},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000}},"required":["program"]}}}));
         }

@@ -70,10 +70,27 @@ pub async fn execute_sandboxed(workspace: &Path, request: CommandRequest) -> Res
         drop(cancellation_guard);
         result
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        {
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let cancellation_guard = CancelGuard(cancelled.clone());
+            let task = tokio::task::spawn_blocking(move || linux::execute(root, cwd, request, timeout, cancelled));
+            let result = task.await.map_err(|error| format!("Command worker failed: {error}"))?;
+            drop(cancellation_guard);
+            result
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            let _ = (root, cwd, request, timeout);
+            Err("Command execution is not available on this Linux architecture".into())
+        }
+    }
+    #[cfg(all(not(windows), not(target_os = "linux")))]
     {
         let _ = (root, cwd, request, timeout);
-        Err("Sandboxed command execution is currently supported on Windows only".into())
+        Err("Sandboxed command execution is not available on this platform yet".into())
     }
 }
 
@@ -374,6 +391,373 @@ mod windows {
 
 }
 
+/// Linux backend: runs the command in the workspace with a Landlock ruleset
+/// that allows read/execute on system paths and read/write on the workspace
+/// and a private temp folder, denying everything else. It fails closed when
+/// Landlock is unavailable rather than running the command unsandboxed.
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::ffi::CString;
+    use std::fs;
+    use std::io::Read;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    use std::thread;
+
+    const SYS_LANDLOCK_CREATE_RULESET: libc::c_long = 444;
+    const SYS_LANDLOCK_ADD_RULE: libc::c_long = 445;
+    const SYS_LANDLOCK_RESTRICT_SELF: libc::c_long = 446;
+    const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
+    const LANDLOCK_RULE_PATH_BENEATH: u32 = 1;
+
+    const ACCESS_EXECUTE: u64 = 1 << 0;
+    const ACCESS_WRITE_FILE: u64 = 1 << 1;
+    const ACCESS_READ_FILE: u64 = 1 << 2;
+    const ACCESS_READ_DIR: u64 = 1 << 3;
+    const ACCESS_REMOVE_DIR: u64 = 1 << 4;
+    const ACCESS_REMOVE_FILE: u64 = 1 << 5;
+    const ACCESS_MAKE_CHAR: u64 = 1 << 6;
+    const ACCESS_MAKE_DIR: u64 = 1 << 7;
+    const ACCESS_MAKE_REG: u64 = 1 << 8;
+    const ACCESS_MAKE_SOCK: u64 = 1 << 9;
+    const ACCESS_MAKE_FIFO: u64 = 1 << 10;
+    const ACCESS_MAKE_BLOCK: u64 = 1 << 11;
+    const ACCESS_MAKE_SYM: u64 = 1 << 12;
+    const ACCESS_REFER: u64 = 1 << 13;
+    const ACCESS_TRUNCATE: u64 = 1 << 14;
+    const ACCESS_IOCTL_DEV: u64 = 1 << 15;
+
+    struct ProcessOutput {
+        stdout: String,
+        stderr: String,
+        exit_code: Option<i32>,
+        timed_out: bool,
+        output_truncated: bool,
+        cancelled: bool,
+    }
+
+    pub fn execute(
+        root: PathBuf,
+        cwd: PathBuf,
+        request: CommandRequest,
+        timeout: Duration,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<CommandResult, String> {
+        let temp = std::env::temp_dir().join(format!("moderado-command-{}", crate::sessions::new_id()));
+        fs::create_dir_all(&temp).map_err(|error| format!("Could not create command temp folder: {error}"))?;
+        let operation = (|| {
+            let before = snapshot(&root)?;
+            let output = run_landlocked(&root, &temp, &cwd, &request, timeout, &cancelled)?;
+            let after = snapshot(&root)?;
+            Ok(CommandResult {
+                stdout: output.stdout,
+                stderr: output.stderr,
+                exit_code: output.exit_code,
+                timed_out: output.timed_out,
+                cancelled: output.cancelled,
+                output_truncated: output.output_truncated,
+                changed_files: diff_names(&before, &after),
+            })
+        })();
+        let _ = fs::remove_dir_all(&temp);
+        operation
+    }
+
+    fn run_landlocked(
+        root: &Path,
+        temp: &Path,
+        cwd: &Path,
+        request: &CommandRequest,
+        timeout: Duration,
+        cancelled: &AtomicBool,
+    ) -> Result<ProcessOutput, String> {
+        let abi = abi_version();
+        if abi == 0 {
+            return Err("Landlock is unavailable on this kernel; refusing to run an unsandboxed command".into());
+        }
+        let handled = full_access(abi);
+        let rules = landlock_rules(root, temp, handled)?;
+        let program = resolve_program(&request.program)?;
+        let mut command = std::process::Command::new(&program);
+        command
+            .args(&request.args)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command.env_clear();
+        for (key, value) in std::env::vars_os() {
+            let name = key.to_string_lossy().to_ascii_lowercase();
+            if ["secret", "token", "password", "credential", "apikey", "api_key", "auth", "private_key", "privatekey"]
+                .iter()
+                .any(|part| name.contains(part))
+            {
+                continue;
+            }
+            command.env(&key, &value);
+        }
+        let _ = fs::create_dir_all(temp.join("cache"));
+        let _ = fs::create_dir_all(temp.join("config"));
+        command
+            .env("HOME", temp)
+            .env("TMPDIR", temp)
+            .env("XDG_CACHE_HOME", temp.join("cache"))
+            .env("XDG_CONFIG_HOME", temp.join("config"));
+        unsafe {
+            command.pre_exec(move || apply_landlock(&rules, handled));
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("Sandboxed command could not start: {error}"))?;
+        let stdout = child.stdout.take().ok_or("Command has no stdout")?;
+        let stderr = child.stderr.take().ok_or("Command has no stderr")?;
+        let out_thread = read_pipe(stdout);
+        let err_thread = read_pipe(stderr);
+        let deadline = Instant::now() + timeout;
+        let (mut timed_out, mut was_cancelled) = (false, false);
+        loop {
+            if cancelled.load(Ordering::Acquire) {
+                was_cancelled = true;
+                let _ = child.kill();
+                break;
+            }
+            if Instant::now() >= deadline {
+                timed_out = true;
+                let _ = child.kill();
+                break;
+            }
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => thread::sleep(Duration::from_millis(20)),
+                Err(error) => {
+                    let _ = child.kill();
+                    return Err(format!("Could not wait for sandboxed command: {error}"));
+                }
+            }
+        }
+        let status = child.wait().map_err(|error| error.to_string())?;
+        let (out, trunc_out) = out_thread.join().map_err(|_| "Could not read command output")?;
+        let (err, trunc_err) = err_thread.join().map_err(|_| "Could not read command errors")?;
+        Ok(ProcessOutput {
+            stdout: String::from_utf8_lossy(&out).into_owned(),
+            stderr: String::from_utf8_lossy(&err).into_owned(),
+            exit_code: status.code(),
+            timed_out,
+            output_truncated: trunc_out || trunc_err,
+            cancelled: was_cancelled,
+        })
+    }
+
+    struct Rule {
+        path: CString,
+        access: u64,
+    }
+
+    fn abi_version() -> u64 {
+        let value = unsafe {
+            libc::syscall(
+                SYS_LANDLOCK_CREATE_RULESET,
+                std::ptr::null::<u8>(),
+                0usize,
+                LANDLOCK_CREATE_RULESET_VERSION,
+            )
+        };
+        if value < 0 { 0 } else { value as u64 }
+    }
+
+    fn full_access(abi: u64) -> u64 {
+        let mut access = ACCESS_EXECUTE
+            | ACCESS_WRITE_FILE
+            | ACCESS_READ_FILE
+            | ACCESS_READ_DIR
+            | ACCESS_REMOVE_DIR
+            | ACCESS_REMOVE_FILE
+            | ACCESS_MAKE_CHAR
+            | ACCESS_MAKE_DIR
+            | ACCESS_MAKE_REG
+            | ACCESS_MAKE_SOCK
+            | ACCESS_MAKE_FIFO
+            | ACCESS_MAKE_BLOCK
+            | ACCESS_MAKE_SYM;
+        if abi >= 2 {
+            access |= ACCESS_REFER;
+        }
+        if abi >= 3 {
+            access |= ACCESS_TRUNCATE;
+        }
+        if abi >= 5 {
+            access |= ACCESS_IOCTL_DEV;
+        }
+        access
+    }
+
+    fn landlock_rules(workspace: &Path, temp: &Path, access: u64) -> Result<Vec<Rule>, String> {
+        let mut rules = Vec::new();
+        let read_only = ACCESS_EXECUTE | ACCESS_READ_FILE | ACCESS_READ_DIR;
+        for path in [
+            "/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc", "/proc", "/dev/null",
+            "/dev/urandom", "/dev/zero", "/dev/tty",
+        ] {
+            if Path::new(path).exists() {
+                if let Ok(name) = CString::new(path) {
+                    rules.push(Rule { path: name, access: read_only });
+                }
+            }
+        }
+        for path in [workspace, temp] {
+            let name = CString::new(path.as_os_str().as_bytes())
+                .map_err(|_| "Command path contains a NUL byte")?;
+            rules.push(Rule { path: name, access });
+        }
+        Ok(rules)
+    }
+
+    fn apply_landlock(rules: &[Rule], handled: u64) -> std::io::Result<()> {
+        unsafe {
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            #[repr(C)]
+            struct RulesetAttr {
+                handled_access_fs: u64,
+            }
+            let attr = RulesetAttr { handled_access_fs: handled };
+            let ruleset = libc::syscall(
+                SYS_LANDLOCK_CREATE_RULESET,
+                &attr as *const RulesetAttr,
+                std::mem::size_of::<RulesetAttr>(),
+                0u32,
+            );
+            if ruleset < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let ruleset = ruleset as i32;
+            #[repr(C, packed)]
+            struct PathBeneathAttr {
+                allowed_access: u64,
+                parent_fd: i32,
+            }
+            for rule in rules {
+                let fd = libc::open(rule.path.as_ptr(), libc::O_PATH | libc::O_CLOEXEC);
+                if fd < 0 {
+                    let error = std::io::Error::last_os_error();
+                    libc::close(ruleset);
+                    return Err(error);
+                }
+                let path_rule = PathBeneathAttr {
+                    allowed_access: rule.access,
+                    parent_fd: fd,
+                };
+                let result = libc::syscall(
+                    SYS_LANDLOCK_ADD_RULE,
+                    ruleset,
+                    LANDLOCK_RULE_PATH_BENEATH,
+                    &path_rule as *const PathBeneathAttr,
+                    0u32,
+                );
+                libc::close(fd);
+                if result < 0 {
+                    let error = std::io::Error::last_os_error();
+                    libc::close(ruleset);
+                    return Err(error);
+                }
+            }
+            let result = libc::syscall(SYS_LANDLOCK_RESTRICT_SELF, ruleset, 0u32);
+            libc::close(ruleset);
+            if result < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+
+    fn read_pipe(mut reader: impl Read + Send + 'static) -> thread::JoinHandle<(Vec<u8>, bool)> {
+        thread::spawn(move || {
+            let mut output = Vec::with_capacity(8192);
+            let mut buffer = [0u8; 8192];
+            let mut truncated = false;
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => {
+                        let remaining = MAX_OUTPUT_BYTES.saturating_sub(output.len());
+                        output.extend_from_slice(&buffer[..count.min(remaining)]);
+                        truncated |= count > remaining;
+                    }
+                }
+            }
+            (output, truncated)
+        })
+    }
+
+    fn resolve_program(program: &str) -> Result<PathBuf, String> {
+        let candidate = PathBuf::from(program);
+        if candidate.is_absolute() {
+            return candidate
+                .canonicalize()
+                .map_err(|error| format!("Command program unavailable: {error}"));
+        }
+        let path = std::env::var_os("PATH").ok_or("Could not resolve command program")?;
+        for directory in std::env::split_paths(&path) {
+            let candidate = directory.join(program);
+            if candidate.is_file() {
+                return candidate.canonicalize().map_err(|error| error.to_string());
+            }
+        }
+        Err("Command program was not found in PATH".into())
+    }
+
+    type Snapshot = BTreeMap<PathBuf, (u64, Option<std::time::SystemTime>)>;
+
+    fn snapshot(root: &Path) -> Result<Snapshot, String> {
+        let mut map = BTreeMap::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(directory) = stack.pop() {
+            for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+                let entry = entry.map_err(|error| error.to_string())?;
+                let metadata = fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                let name = entry.file_name();
+                if metadata.is_dir() {
+                    if matches!(name.to_str(), Some(".git" | "node_modules" | "target")) {
+                        continue;
+                    }
+                    stack.push(entry.path());
+                } else if metadata.is_file() {
+                    let relative = entry
+                        .path()
+                        .strip_prefix(root)
+                        .map_err(|_| "Workspace entry escaped root")?
+                        .to_owned();
+                    map.insert(relative, (metadata.len(), metadata.modified().ok()));
+                }
+            }
+        }
+        Ok(map)
+    }
+
+    fn diff_names(before: &Snapshot, after: &Snapshot) -> Vec<String> {
+        let mut names: Vec<String> = before
+            .iter()
+            .filter(|(path, value)| after.get(*path) != Some(*value))
+            .map(|(path, _)| path.to_string_lossy().into_owned())
+            .collect();
+        names.extend(
+            after
+                .keys()
+                .filter(|path| !before.contains_key(*path))
+                .map(|path| path.to_string_lossy().into_owned()),
+        );
+        names.sort();
+        names
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,6 +798,46 @@ mod tests {
         let result = execute_sandboxed(&workspace, request).await.unwrap();
         assert_eq!(std::fs::read_to_string(workspace.join("output.txt")).unwrap().trim(), "after");
         assert!(!result.stdout.contains("must remain private"));
+        assert!(result.changed_files.iter().any(|path| path == "output.txt"));
+        std::fs::remove_file(outside).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn landlock_command_changes_only_the_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root
+            .path()
+            .parent()
+            .unwrap()
+            .join(format!("moderado-outside-{}.txt", crate::sessions::new_id()));
+        std::fs::write(&outside, "must remain private").unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let request = CommandRequest {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "echo after > output.txt; cat '{}' 2>/dev/null || true",
+                    outside.display()
+                ),
+            ],
+            working_directory: String::new(),
+            timeout_ms: Some(10_000),
+        };
+        let result = execute_sandboxed(&workspace, request).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("output.txt"))
+                .unwrap()
+                .trim(),
+            "after"
+        );
+        assert!(
+            !result.stdout.contains("must remain private"),
+            "{}",
+            result.stdout
+        );
         assert!(result.changed_files.iter().any(|path| path == "output.txt"));
         std::fs::remove_file(outside).unwrap();
     }
