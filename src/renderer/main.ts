@@ -1193,6 +1193,7 @@ async function initialize(): Promise<void> {
     if (saved) providerDrafts.set(saved.providerId, { baseUrl: saved.baseUrl, planModel: saved.planModel, actModel: saved.actModel });
     selectProvider(saved?.providerId ?? 'moderado');
     void loadMcpConfig();
+    void loadLspConfig();
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
@@ -1441,6 +1442,25 @@ $('discover-mcp').addEventListener('click', async () => {
     $('mcp-status').textContent = discovery.servers.length ? 'Test complete.' : 'No enabled servers.';
   } catch (error) {
     $('mcp-status').textContent = String(error);
+  }
+});
+
+async function loadLspConfig(): Promise<void> {
+  try {
+    const config = await invoke<unknown>('load_lsp_config');
+    $<HTMLTextAreaElement>('lsp-config').value = JSON.stringify(config, null, 2);
+  } catch (error) {
+    $('lsp-status').textContent = String(error);
+  }
+}
+
+$('save-lsp-config').addEventListener('click', async () => {
+  try {
+    const config = JSON.parse($<HTMLTextAreaElement>('lsp-config').value.trim() || '{"servers":[]}');
+    await invoke('save_lsp_config', { config });
+    $('lsp-status').textContent = 'LSP config saved.';
+  } catch (error) {
+    $('lsp-status').textContent = String(error);
   }
 });
 

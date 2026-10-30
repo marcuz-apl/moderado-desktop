@@ -25,6 +25,8 @@ pub struct RunConfig<'a> {
     pub session_id: &'a str,
     /// MCP servers connected for this turn; only Code/Act sessions use them.
     pub mcp: Option<&'a crate::mcp::McpRegistry>,
+    /// Language servers connected for this turn; only Code sessions use them.
+    pub lsp: Option<&'a crate::lsp::LspRegistry>,
 }
 
 #[derive(Debug)]
@@ -205,6 +207,35 @@ where
                     },
                     None => Err("Web search is unavailable for this session".into()),
                 }
+            } else if call.name == "diagnostics" {
+                if matches!(config.kind, SessionKind::Work) {
+                    Err("Work tasks cannot use diagnostics".into())
+                } else if let Some(registry) = config.lsp {
+                    let path = serde_json::from_str::<Value>(&call.arguments)
+                        .ok()
+                        .and_then(|args| args.get("path").and_then(Value::as_str).map(str::to_owned));
+                    match path {
+                        None => Err("Diagnostics path is required".into()),
+                        Some(path) => {
+                            let approved = config.auto_approve.read_files
+                                || approve(ApprovalRequest {
+                                    category: crate::approval_policy::ApprovalCategory::ReadFiles,
+                                    title: "Run diagnostics".into(),
+                                    detail: format!("Diagnostics for {path}"),
+                                    preview: None,
+                                })
+                                .await
+                                .is_some();
+                            if approved {
+                                registry.diagnostics(&path).await
+                            } else {
+                                Err("Diagnostics rejected by user".into())
+                            }
+                        }
+                    }
+                } else {
+                    Err("Diagnostics need a language server in ~/.moderado/lsp.json".into())
+                }
             } else if call.name.starts_with("mcp__") {
                 match (config.kind, config.mode, config.mcp) {
                     (SessionKind::Work, _, _) => Err("Work tasks cannot use MCP tools".into()),
@@ -309,7 +340,7 @@ mod tests {
             RunConfig {
                 workspace: root.path(), base_url: &base, model: "test-model", api_key: "", mode: Mode::Act,
                 search: Some(&SearchConfig { endpoint: "http://127.0.0.1:1/search".into(), key: String::new() }),
-                kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval", mcp: None,
+                kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval", mcp: None, lsp: None,
             },
             &mut history,
             "Search for this",
@@ -367,6 +398,7 @@ mod tests {
                 attachments_root: root.path(),
                 session_id: "test-session",
                 mcp: None,
+                lsp: None,
             },
             &mut history,
             "Create hello.txt",
@@ -428,6 +460,7 @@ mod tests {
                 attachments_root: root.path(),
                 session_id: "test-session",
                 mcp: None,
+                lsp: None,
             },
             &mut history,
             "Write a.txt",
@@ -479,6 +512,7 @@ mod tests {
                 attachments_root: root.path(),
                 session_id: "test-session",
                 mcp: None,
+                lsp: None,
             },
             &mut history,
             "Plan a change",
@@ -553,6 +587,7 @@ mod tests {
                     attachments_root: root.path(),
                     session_id: "test-session",
                 mcp: None,
+                lsp: None,
                 },
                 &mut history,
                 "Create m2.txt",
@@ -625,6 +660,7 @@ mod tests {
                 attachments_root: &workspace,
                 session_id: "test-session",
                 mcp: None,
+                lsp: None,
             },
             &mut history,
             "Change file.txt",
@@ -738,6 +774,7 @@ mod tests {
                 attachments_root: &workspace,
                 session_id: "test-session",
                 mcp: None,
+                lsp: None,
             },
             &mut history,
             &due[0].prompt,
@@ -817,6 +854,7 @@ mod tests {
                 attachments_root: root.path(),
                 session_id: "mcp-test",
                 mcp: Some(&registry),
+                lsp: None,
             },
             &mut history,
             "Use the echo tool",
@@ -865,6 +903,7 @@ mod tests {
                 attachments_root: root.path(),
                 session_id: "mcp-plan",
                 mcp: None,
+                lsp: None,
             },
             &mut history,
             "Plan with an MCP tool",

@@ -4,6 +4,7 @@ pub mod approval_policy;
 pub mod checkpoints;
 pub mod command;
 pub mod db;
+pub mod lsp;
 pub mod mcp;
 pub mod provider;
 pub mod schedules;
@@ -856,6 +857,16 @@ async fn discover_mcp_tools(config: mcp::McpConfig) -> Result<mcp::McpDiscovery,
 }
 
 #[tauri::command]
+fn load_lsp_config() -> Result<lsp::LspConfig, String> {
+    lsp::load()
+}
+
+#[tauri::command]
+fn save_lsp_config(config: lsp::LspConfig) -> Result<lsp::LspConfig, String> {
+    lsp::save(&config)
+}
+
+#[tauri::command]
 fn provider_catalog() -> Vec<provider::ProviderPreset> {
     provider::PRESETS.to_vec()
 }
@@ -1169,6 +1180,12 @@ async fn execute_turn(
     } else {
         None
     };
+    let lsp_registry = if record.kind == SessionKind::Code {
+        let config = lsp::load().unwrap_or_default();
+        Some(lsp::LspRegistry::connect(&config, &workspace).await)
+    } else {
+        None
+    };
     let turn = run_turn_with_hooks(
         RunConfig {
             workspace: &workspace,
@@ -1183,6 +1200,7 @@ async fn execute_turn(
             attachments_root: &attachments_root,
             session_id: &session_id,
             mcp: mcp_registry.as_ref(),
+            lsp: lsp_registry.as_ref(),
         },
         &mut messages,
         &prompt,
@@ -1469,6 +1487,8 @@ pub fn run() {
             load_mcp_config,
             save_mcp_config,
             discover_mcp_tools,
+            load_lsp_config,
+            save_lsp_config,
             provider_catalog,
             probe_local_providers,
             load_provider_settings,

@@ -58,6 +58,47 @@ fn checked_output(output: Output, operation: &str) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| "Git returned invalid text".into())
 }
 
+/// Show the workspace diff for the agent. Prefers the working tree against
+/// HEAD so staged and unstaged edits both appear; falls back to the plain
+/// working-tree diff before the first commit.
+pub fn git_diff(workspace: &Path, path: Option<&str>) -> Result<String, String> {
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| format!("Workspace unavailable: {error}"))?;
+    let root = git(&workspace, &["rev-parse", "--show-toplevel"])?;
+    if !root.status.success() {
+        return Err("Workspace is not a Git repository".into());
+    }
+    let mut args: Vec<String> = vec!["diff".into(), "--no-color".into(), "--no-ext-diff".into()];
+    if git(&workspace, &["rev-parse", "--verify", "HEAD"])?.status.success() {
+        args.push("HEAD".into());
+    }
+    if let Some(path) = path {
+        let path = path.trim();
+        if path.is_empty() || path.len() > 4096 {
+            return Err("Diff path is invalid".into());
+        }
+        crate::workspace::resolve_path(&workspace, path)?;
+        args.push("--".into());
+        args.push(path.to_owned());
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let text = checked_output(git(&workspace, &refs)?, "diff")?;
+    if !text.trim().is_empty() {
+        return Ok(text);
+    }
+    // `git diff` omits untracked files; list them so "no changes" is accurate.
+    let status = checked_output(
+        git(&workspace, &["status", "--porcelain", "--untracked-files=all"])?,
+        "status",
+    )?;
+    Ok(if status.trim().is_empty() {
+        "No changes.".into()
+    } else {
+        format!("No tracked diff. Staged or untracked entries:\n{status}")
+    })
+}
+
 pub fn get_source_control(workspace: &Path) -> Result<SourceControlSnapshot, String> {
     let workspace = workspace
         .canonicalize()
@@ -151,6 +192,41 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
+    }
+
+    #[test]
+    fn git_diff_shows_tracked_changes_and_falls_back_to_untracked_entries() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), &["init", "--quiet"]);
+        git(root.path(), &["config", "user.name", "Test User"]);
+        git(root.path(), &["config", "user.email", "test@example.invalid"]);
+        fs::write(root.path().join("tracked.txt"), "first\n").unwrap();
+        git(root.path(), &["add", "tracked.txt"]);
+        git(
+            root.path(),
+            &["-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Initial"],
+        );
+        fs::write(root.path().join("tracked.txt"), "changed\n").unwrap();
+        let diff = git_diff(root.path(), None).unwrap();
+        assert!(diff.contains("-first") && diff.contains("+changed"), "{diff}");
+        assert!(git_diff(root.path(), Some("tracked.txt"))
+            .unwrap()
+            .contains("+changed"));
+
+        fs::write(root.path().join("tracked.txt"), "first\n").unwrap();
+        fs::write(root.path().join("untracked.txt"), "new\n").unwrap();
+        let fallback = git_diff(root.path(), None).unwrap();
+        assert!(fallback.contains("untracked.txt"), "{fallback}");
+    }
+
+    #[test]
+    fn git_diff_rejects_non_repositories_and_escaping_paths() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(git_diff(root.path(), None)
+            .unwrap_err()
+            .contains("not a Git repository"));
+        git(root.path(), &["init", "--quiet"]);
+        assert!(git_diff(root.path(), Some("../outside.txt")).is_err());
     }
 
     #[test]

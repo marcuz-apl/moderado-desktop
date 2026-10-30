@@ -134,3 +134,10 @@
 - Added a per-server tool allow-list (`tools: ["echo"]`); omitting it still exposes every advertised tool.
 - `discover_mcp_tools` now returns per-server status (connected, tool count, error) in addition to tools. Settings renders an add/edit/remove form with id, transport, command/URL, args, tools, and env, and **Test / reconnect** lists each server's tools by name so the allow-list is easy to fill.
 - Tests: HTTP JSON + SSE round trip, allow-list filtering, per-server status, and HTTP/tool validation. Stop already cancels a hung call through the turn-level `tokio::select!`.
+
+## Agent tool parity (0.4.5)
+
+- Added `git_diff` (working tree against HEAD, falling back to the plain working-tree diff before the first commit, with untracked entries listed when there is no diff), `find_references` and `get_definition` (workspace text search; `get_definition` filters common declaration patterns), and `diagnostics` (language server).
+- `git_diff` and the symbol searches are Code-only read tools under the Read files category; `diagnostics` is Code-only and spawns the language server matching the file extension.
+- Added `lsp.rs` with a `~/.moderado/lsp.json` config (id, extensions, command, args, env, languageId), a `Content-Length` framed LSP client (`initialize`, `didOpen`, `publishDiagnostics`), and a registry that skips broken servers. Settings gains a Language Servers JSON editor.
+- Tests: `git_diff` (tracked diff, untracked fallback, non-repository, path escape), the symbol tools, and LSP diagnostics against a Node mock server.

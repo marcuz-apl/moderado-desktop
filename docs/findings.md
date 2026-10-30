@@ -62,3 +62,10 @@
 - Idle connection pooling is disabled (`pool_max_idle_per_host(0)`): a turn makes only a handful of calls, and reusing a keep-alive socket against a restarted server is worse than opening a fresh one.
 - The allow-list is applied at discovery time, so a server's other tools never reach the model and cannot be called by name.
 - The HTTP test originally joined its mock thread before `tools/call`, deadlocking the mock and the test; the join now follows the call. That is a harness ordering rule, not a client issue.
+
+## Agent Tool Parity
+
+- `git_diff` reuses the Source Control `git` helper (`-C <workspace>`, no pager, no optional locks) and prefers `git diff HEAD` so staged and unstaged edits both appear; before the first commit it falls back to the plain working-tree diff, and untracked files are listed when there is no diff at all.
+- `find_references` and `get_definition` are workspace text searches, not a language server: `find_references` reuses `search_files`, and `get_definition` filters those matches to lines that look like declarations. This is language-agnostic and needs no server, at the cost of semantic accuracy.
+- `diagnostics` is the only tool that needs a language server. LSP framing is `Content-Length: N\r\n\r\n` plus a JSON body, unlike MCP's newline-delimited stdio, so it has its own client. Diagnostics are push-based (`textDocument/publishDiagnostics` after `didOpen`) with an 8 s wait.
+- Language servers are matched by file extension. A server that fails to start is recorded and skipped, and a file with no matching server returns a clear error instead of failing the turn.

@@ -43,6 +43,12 @@ pub fn tool_definitions_with_mcp(
     if web_search {
         tools.push(json!({"type":"function","function":{"name":"web_search","description":"Search the configured web search API","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}));
     }
+    if matches!(kind, SessionKind::Code) {
+        tools.push(json!({"type":"function","function":{"name":"git_diff","description":"Show the workspace Git diff (working tree against HEAD, or the plain working-tree diff before the first commit)","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Optional workspace-relative path"}}}}}));
+        tools.push(json!({"type":"function","function":{"name":"find_references","description":"Find textual occurrences of a symbol in workspace files","parameters":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}}}));
+        tools.push(json!({"type":"function","function":{"name":"get_definition","description":"Find likely declaration sites of a symbol by searching common declaration patterns","parameters":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}}}));
+        tools.push(json!({"type":"function","function":{"name":"diagnostics","description":"Report language-server diagnostics for a workspace file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}));
+    }
     if matches!(mode, Mode::Act) {
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
@@ -63,6 +69,9 @@ pub fn tool_category(name: &str) -> Option<ApprovalCategory> {
         "write_file" | "edit_file" => Some(ApprovalCategory::EditFiles),
         "web_search" => Some(ApprovalCategory::FetchWebContent),
         "execute_command" => Some(ApprovalCategory::ExecuteCommand),
+        "git_diff" | "find_references" | "get_definition" | "diagnostics" => {
+            Some(ApprovalCategory::ReadFiles)
+        }
         name if name.starts_with("mcp__") => Some(ApprovalCategory::UseMcpServers),
         _ => None,
     }
@@ -143,6 +152,54 @@ where
         checkpoint(&Approval { path: ".".into(), before: String::new(), after: String::new() })?;
         let result = crate::command::execute_sandboxed(root, request).await?;
         return serde_json::to_string(&result).map_err(|error| error.to_string());
+    }
+    if call.name == "git_diff" {
+        if !policy.allows(ApprovalCategory::ReadFiles) {
+            approve(ApprovalRequest { category: ApprovalCategory::ReadFiles, title: "Show Git diff".into(), detail: "Show the workspace Git diff".into(), preview: None }).await.ok_or("Git diff rejected by user")?;
+        }
+        return crate::source_control::git_diff(root, args.get("path").and_then(Value::as_str));
+    }
+    if call.name == "find_references" || call.name == "get_definition" {
+        let symbol = args
+            .get("symbol")
+            .and_then(Value::as_str)
+            .ok_or("Symbol is required")?;
+        if symbol.trim().is_empty() || symbol.len() > 128 {
+            return Err("Symbol must be 1–128 characters".into());
+        }
+        if !policy.allows(ApprovalCategory::ReadFiles) {
+            let title = if call.name == "get_definition" {
+                "Find definition"
+            } else {
+                "Find references"
+            };
+            approve(ApprovalRequest { category: ApprovalCategory::ReadFiles, title: title.into(), detail: format!("Symbol: {symbol}"), preview: None }).await.ok_or("Search rejected by user")?;
+        }
+        let matches = workspace::search_files(root, symbol)?;
+        if call.name == "find_references" {
+            return Ok(if matches.is_empty() {
+                format!("No references to '{symbol}'.")
+            } else {
+                matches.join("\n")
+            });
+        }
+        let keywords = [
+            "fn", "def", "class", "struct", "enum", "interface", "type", "function", "const", "let",
+            "var",
+        ];
+        let declarations: Vec<String> = matches
+            .into_iter()
+            .filter(|line| {
+                keywords
+                    .iter()
+                    .any(|keyword| line.contains(&format!("{keyword} {symbol}")))
+            })
+            .collect();
+        return Ok(if declarations.is_empty() {
+            format!("No declaration found for '{symbol}'.")
+        } else {
+            declarations.join("\n")
+        });
     }
     if call.name == "search_files" {
         let query = args
@@ -437,6 +494,29 @@ mod tests {
         })
         .await;
         assert!(result.unwrap_err().contains("Plan mode"));
+    }
+
+    #[tokio::test]
+    async fn symbol_tools_find_references_and_declarations() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("a.rs"),
+            "fn target() {}\nfn caller() { target(); }\n",
+        )
+        .unwrap();
+        for (name, expected) in [("find_references", "target();"), ("get_definition", "fn target")] {
+            let call = ToolCall {
+                id: "1".into(),
+                name: name.into(),
+                arguments: r#"{"symbol":"target"}"#.into(),
+            };
+            let result = dispatch_tool(root.path(), SessionKind::Code, Mode::Plan, &call, |_| async {
+                Some(String::new())
+            })
+            .await
+            .unwrap();
+            assert!(result.contains(expected), "{name}: {result}");
+        }
     }
 
     #[tokio::test]

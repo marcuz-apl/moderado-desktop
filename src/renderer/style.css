@@ -52,6 +52,7 @@
 .mcp-status-row span{color:#9eb8c7;overflow-wrap:anywhere}
 .mcp-status-row.ok strong{color:#86d8cc}
 .mcp-status-row.error strong{color:#ffb7a9}
+#lsp-config{width:100%;min-height:100px;margin-top:8px;border:1px solid #426078;border-radius:7px;background:#102236;color:#e9f4f7;padding:9px 10px;font:12px/1.5 "Cascadia Code",Consolas,monospace;resize:vertical}
 .task-group{padding:5px 0;border:0}
 .task-heading>.session-item{padding-left:0}
 .task-sessions{padding:3px 0 8px 34px}
