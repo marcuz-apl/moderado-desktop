@@ -7,7 +7,7 @@
     "vite:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build && tauri build --no-bundle",
     "dev": "tauri dev",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml && node --test tests/*.test.mjs",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml && node scripts/run-node-tests.mjs",
     "version:patch": "node scripts/bump-version.mjs patch",
     "version:minor": "node scripts/bump-version.mjs minor",
     "version:major": "node scripts/bump-version.mjs major",

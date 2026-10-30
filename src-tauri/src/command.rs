@@ -597,14 +597,23 @@ mod linux {
     fn landlock_rules(workspace: &Path, temp: &Path, access: u64) -> Result<Vec<Rule>, String> {
         let mut rules = Vec::new();
         let read_only = ACCESS_EXECUTE | ACCESS_READ_FILE | ACCESS_READ_DIR;
-        for path in [
-            "/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc", "/proc", "/dev/null",
-            "/dev/urandom", "/dev/zero", "/dev/tty",
-        ] {
-            if Path::new(path).exists() {
+        // Landlock rules apply to a directory subtree; a rule for a file is
+        // rejected with EINVAL, so only directories are added here.
+        for path in ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc", "/proc"] {
+            if Path::new(path).is_dir() {
                 if let Ok(name) = CString::new(path) {
                     rules.push(Rule { path: name, access: read_only });
                 }
+            }
+        }
+        // `/dev` needs write access for `/dev/null`; Landlock cannot target a
+        // single file, so the whole `/dev` subtree is allowed.
+        if Path::new("/dev").is_dir() {
+            if let Ok(name) = CString::new("/dev") {
+                rules.push(Rule {
+                    path: name,
+                    access: ACCESS_READ_FILE | ACCESS_READ_DIR | ACCESS_WRITE_FILE,
+                });
             }
         }
         for path in [workspace, temp] {
@@ -645,7 +654,10 @@ mod linux {
                 if fd < 0 {
                     let error = std::io::Error::last_os_error();
                     libc::close(ruleset);
-                    return Err(error);
+                    return Err(std::io::Error::new(
+                        error.kind(),
+                        format!("Landlock could not open a rule path: {error}"),
+                    ));
                 }
                 let path_rule = PathBeneathAttr {
                     allowed_access: rule.access,
@@ -662,7 +674,10 @@ mod linux {
                 if result < 0 {
                     let error = std::io::Error::last_os_error();
                     libc::close(ruleset);
-                    return Err(error);
+                    return Err(std::io::Error::new(
+                        error.kind(),
+                        format!("Landlock add_rule failed: {error}"),
+                    ));
                 }
             }
             let result = libc::syscall(SYS_LANDLOCK_RESTRICT_SELF, ruleset, 0u32);
