@@ -1,14 +1,22 @@
 use serde::{Deserialize, Serialize};
+#[cfg(any(windows, target_os = "linux"))]
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
+#[cfg(any(windows, target_os = "linux"))]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(any(windows, target_os = "linux"))]
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(any(windows, target_os = "linux"))]
+use std::time::Instant;
 
 const MAX_ARGUMENTS: usize = 256;
 const MAX_ARG_BYTES: usize = 32 * 1024;
+#[cfg(windows)]
 const MAX_WORKSPACE_BYTES: u64 = 1024 * 1024 * 1024;
+#[cfg(windows)]
 const MAX_WORKSPACE_FILES: usize = 100_000;
+#[cfg(any(windows, target_os = "linux"))]
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
@@ -94,7 +102,9 @@ pub async fn execute_sandboxed(workspace: &Path, request: CommandRequest) -> Res
     }
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 struct CancelGuard(Arc<AtomicBool>);
+#[cfg(any(windows, target_os = "linux"))]
 impl Drop for CancelGuard { fn drop(&mut self) { self.0.store(true, Ordering::Release); } }
 
 #[cfg(windows)]
@@ -398,7 +408,6 @@ mod windows {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use std::collections::BTreeMap;
     use std::ffi::CString;
     use std::fs;
     use std::io::Read;

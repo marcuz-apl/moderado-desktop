@@ -437,7 +437,10 @@ fn git(
 }
 
 fn git_command() -> Command {
+    #[cfg(windows)]
     let mut command = Command::new("git");
+    #[cfg(not(windows))]
+    let command = Command::new("git");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
