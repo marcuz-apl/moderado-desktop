@@ -15,6 +15,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Moderado",
+    "category": "DeveloperTool",
+    "shortDescription": "Autonomous coding agent sessions outside the IDE.",
+    "longDescription": "Moderado Desktop runs parallel agent sessions against the Moderado Gateway, OpenAI-compatible providers, and local models, with Plan/Act modes, approvals, checkpoints, MCP tools, and a Linux/Windows command sandbox.",
+    "copyright": "Copyright © 2026 Moderado",
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",

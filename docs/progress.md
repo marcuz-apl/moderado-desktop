@@ -148,3 +148,10 @@
 - `execute_command` is now advertised on Windows and Linux (x86_64/aarch64); macOS still fails closed.
 - Added `.github/workflows/ci.yml` so `npm test` runs on Ubuntu and Windows, which compiles and exercises the Linux backend (WSL is unavailable in the local environment).
 - Tests: a Linux-only test proves a command can write inside the workspace while an outside file stays unreadable.
+
+## Release readiness (0.4.6)
+
+- Bundle metadata (publisher, category, short/long description, copyright) is set in `tauri.conf.json`, so installers carry proper product metadata.
+- CI now runs on Ubuntu, Windows, and macOS, and executes `npm run lint` (including Clippy, which compiles the Linux Landlock module) before `npm test`.
+- Added `docs/release.md`: version/tag flow, artifacts, and the signing, auto-update, and GitHub App work that is blocked on external credentials.
+- Code signing, the Tauri updater, and GitHub sign-in remain blocked on certificates, a signing keypair/endpoint, and a GitHub App client ID respectively.
