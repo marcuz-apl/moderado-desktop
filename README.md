@@ -6,7 +6,7 @@ Moderado Desktop follows the Cline Desktop interaction model — parallel sessio
 
 ## Current build
 
-The app supports persistent Work and Code sessions, schedules, transcript imports, Plan/Act mode, and the OpenAI-compatible provider matrix. Tasks and sessions have per-conversation Auto-Approve settings; Code starts with all five categories enabled; Work starts with read, edit, and web enabled, and you can turn any category off to require approval. File changes retain their diff preview. On Windows, commands run in a Windows AppContainer against a disposable copy of the project; only the resulting workspace changes are copied back. MCP servers configured in `~/.moderado/mcp.json` are available to Code/Act sessions through the Use MCP servers approval category. API keys remain in the OS keychain.
+The app supports persistent Work and Code sessions, schedules, transcript imports, Plan/Act mode, and the OpenAI-compatible provider matrix. Tasks and sessions have per-conversation Auto-Approve settings; Code starts with all five categories enabled; Work starts with read, edit, and web enabled, and you can turn any category off to require approval. File changes retain their diff preview. On Windows, commands run in a Windows AppContainer against a disposable copy of the project; only the resulting workspace changes are copied back. MCP servers (stdio or Streamable HTTP) configured in `~/.moderado/mcp.json` are available to Code/Act sessions through the Use MCP servers approval category, with an optional per-server tool allow-list. API keys remain in the OS keychain.
 
 ## Capabilities
 

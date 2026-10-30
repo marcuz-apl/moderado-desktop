@@ -1304,23 +1304,116 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
   finally { button.disabled = activeSessionId ? running.has(activeSessionId) : false; }
 });
 
+type McpServerConfig = { id: string; transport: 'stdio' | 'http'; command: string; url: string; args: string[]; env: Record<string, string>; tools: string[] | null; enabled: boolean };
+
+let mcpEnv = new Map<string, Record<string, string>>();
+
+function mcpField(label: string, input: HTMLElement): HTMLLabelElement {
+  const wrap = document.createElement('label');
+  wrap.className = 'mcp-field';
+  wrap.append(document.createTextNode(label), input);
+  return wrap;
+}
+
+function mcpRow(server: McpServerConfig): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'mcp-server-row';
+  const id = document.createElement('input');
+  id.value = server.id;
+  id.placeholder = 'id';
+  id.dataset.field = 'id';
+  const transport = document.createElement('select');
+  transport.dataset.field = 'transport';
+  for (const value of ['stdio', 'http']) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    transport.append(option);
+  }
+  transport.value = server.transport;
+  const target = document.createElement('input');
+  target.dataset.field = 'target';
+  const placeholder = () => (transport.value === 'http' ? 'https://host/mcp' : 'npx.cmd');
+  target.placeholder = placeholder();
+  target.value = server.transport === 'http' ? server.url : server.command;
+  transport.addEventListener('change', () => { target.placeholder = placeholder(); });
+  const args = document.createElement('input');
+  args.dataset.field = 'args';
+  args.placeholder = '["-y","pkg"]';
+  args.value = server.args.length ? JSON.stringify(server.args) : '';
+  const tools = document.createElement('input');
+  tools.dataset.field = 'tools';
+  tools.placeholder = 'blank = all tools';
+  tools.value = (server.tools ?? []).join(', ');
+  const enabled = document.createElement('input');
+  enabled.type = 'checkbox';
+  enabled.dataset.field = 'enabled';
+  enabled.checked = server.enabled;
+  const enabledLabel = document.createElement('label');
+  enabledLabel.className = 'mcp-enabled';
+  enabledLabel.append(enabled, document.createTextNode(' enabled'));
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'text-button';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', () => row.remove());
+  row.append(mcpField('Id', id), mcpField('Transport', transport), mcpField('Command / URL', target), mcpField('Args (JSON)', args), mcpField('Tools', tools), enabledLabel, remove);
+  return row;
+}
+
+function renderMcpServers(config: { servers: McpServerConfig[] }): void {
+  $('mcp-servers').replaceChildren(...config.servers.map((server) => mcpRow(server)));
+}
+
+function readMcpServers(): { servers: McpServerConfig[] } {
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('#mcp-servers .mcp-server-row'));
+  return {
+    servers: rows.map((row) => {
+      const value = (field: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field="${field}"]`)?.value ?? '';
+      const transport = value('transport') === 'http' ? 'http' : 'stdio';
+      const target = value('target').trim();
+      const argsText = value('args').trim();
+      let args: string[] = [];
+      if (argsText) {
+        const parsed: unknown = JSON.parse(argsText);
+        if (!Array.isArray(parsed)) throw new Error('Args must be a JSON array');
+        args = parsed.map((item) => String(item));
+      }
+      const tools = value('tools').split(',').map((tool) => tool.trim()).filter(Boolean);
+      const id = value('id').trim();
+      return {
+        id,
+        transport,
+        command: transport === 'stdio' ? target : '',
+        url: transport === 'http' ? target : '',
+        args,
+        env: mcpEnv.get(id) ?? {},
+        tools: tools.length ? tools : null,
+        enabled: row.querySelector<HTMLInputElement>('[data-field="enabled"]')?.checked ?? true,
+      };
+    }),
+  };
+}
+
 async function loadMcpConfig(): Promise<void> {
   try {
-    const config = await invoke<{ servers: unknown[] }>('load_mcp_config');
-    $<HTMLTextAreaElement>('mcp-config').value = JSON.stringify(config, null, 2);
+    const config = await invoke<{ servers: McpServerConfig[] }>('load_mcp_config');
+    mcpEnv = new Map(config.servers.map((server) => [server.id, server.env ?? {}]));
+    renderMcpServers(config);
   } catch (error) {
     $('mcp-status').textContent = String(error);
   }
 }
 
-function readMcpConfig(): unknown {
-  const text = $<HTMLTextAreaElement>('mcp-config').value.trim();
-  return JSON.parse(text || '{"servers":[]}');
-}
+$('add-mcp-server').addEventListener('click', () => {
+  $('mcp-servers').append(mcpRow({ id: '', transport: 'stdio', command: '', url: '', args: [], env: {}, tools: null, enabled: true }));
+});
 
 $('save-mcp-config').addEventListener('click', async () => {
   try {
-    await invoke('save_mcp_config', { config: readMcpConfig() });
+    const config = readMcpServers();
+    await invoke('save_mcp_config', { config });
+    mcpEnv = new Map(config.servers.map((server) => [server.id, server.env]));
     $('mcp-status').textContent = 'MCP config saved.';
   } catch (error) {
     $('mcp-status').textContent = String(error);
@@ -1328,12 +1421,11 @@ $('save-mcp-config').addEventListener('click', async () => {
 });
 
 $('discover-mcp').addEventListener('click', async () => {
-  $('mcp-status').textContent = 'Starting MCP servers…';
+  $('mcp-status').textContent = 'Testing MCP servers…';
   try {
-    const discovery = await invoke<{ tools: { publicName: string }[]; errors: string[] }>('discover_mcp_tools', { config: readMcpConfig() });
-    const tools = discovery.tools.map((tool) => tool.publicName).join(', ') || 'no tools';
-    const errors = discovery.errors.length ? ` · Errors: ${discovery.errors.join('; ')}` : '';
-    $('mcp-status').textContent = `Tools: ${tools}${errors}`;
+    const discovery = await invoke<{ tools: { publicName: string }[]; servers: { id: string; connected: boolean; toolCount: number; error?: string | null }[] }>('discover_mcp_tools', { config: readMcpServers() });
+    const lines = discovery.servers.map((server) => server.connected ? `${server.id}: ${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}` : `${server.id}: ${server.error ?? 'failed'}`);
+    $('mcp-status').textContent = lines.length ? lines.join(' · ') : 'No enabled servers.';
   } catch (error) {
     $('mcp-status').textContent = String(error);
   }

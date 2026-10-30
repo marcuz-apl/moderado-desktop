@@ -850,6 +850,7 @@ async fn discover_mcp_tools(config: mcp::McpConfig) -> Result<mcp::McpDiscovery,
     let registry = mcp::McpRegistry::connect(&config).await;
     Ok(mcp::McpDiscovery {
         tools: registry.tools().to_vec(),
+        servers: registry.servers().to_vec(),
         errors: registry.errors().to_vec(),
     })
 }

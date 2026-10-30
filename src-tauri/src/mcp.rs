@@ -1,10 +1,13 @@
-//! Minimal Model Context Protocol (MCP) client over stdio.
+//! Minimal Model Context Protocol (MCP) client.
 //!
-//! Servers are configured in `~/.moderado/mcp.json`, spawned per turn, and
-//! spoken to with newline-delimited JSON-RPC 2.0: `initialize`, `tools/list`,
-//! then `tools/call`. Their tools are advertised to Code/Act sessions as
-//! `mcp__<server>__<tool>` and gated by the `UseMcpServers` approval category.
+//! Servers are configured in `~/.moderado/mcp.json`, connected per turn, and
+//! spoken to with JSON-RPC 2.0. Two transports are supported: `stdio`
+//! (newline-delimited JSON over a child process) and `http` (Streamable HTTP:
+//! POST with a JSON or `text/event-stream` response). Their tools are exposed
+//! to Code/Act sessions as `mcp__<server>__<tool>` and gated by the
+//! `UseMcpServers` approval category.
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -24,15 +27,29 @@ fn default_true() -> bool {
     true
 }
 
+fn default_transport() -> String {
+    "stdio".into()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     pub id: String,
+    /// `stdio` (default) or `http`.
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    #[serde(default)]
     pub command: String,
+    #[serde(default)]
+    pub url: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// `None` exposes every tool the server advertises; `Some` limits it to the
+    /// listed tool names.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -55,8 +72,19 @@ pub struct McpToolInfo {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct McpServerStatus {
+    pub id: String,
+    pub transport: String,
+    pub connected: bool,
+    pub tool_count: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpDiscovery {
     pub tools: Vec<McpToolInfo>,
+    pub servers: Vec<McpServerStatus>,
     pub errors: Vec<String>,
 }
 
@@ -108,8 +136,20 @@ pub fn validate(config: &McpConfig) -> Result<(), String> {
         if !ids.insert(id.clone()) {
             return Err(format!("Duplicate MCP server id '{id}'"));
         }
-        if server.command.trim().is_empty() || server.command.len() > 4096 {
-            return Err(format!("MCP server '{id}' needs a command of 1-4,096 characters"));
+        match server.transport.as_str() {
+            "stdio" => {
+                if server.command.trim().is_empty() || server.command.len() > 4096 {
+                    return Err(format!(
+                        "MCP server '{id}' needs a command of 1-4,096 characters"
+                    ));
+                }
+            }
+            "http" => validate_url(id, &server.url)?,
+            other => {
+                return Err(format!(
+                    "MCP server '{id}' has unknown transport '{other}' (use 'stdio' or 'http')"
+                ))
+            }
         }
         if server.args.len() > 64 || server.args.iter().any(|arg| arg.len() > 4096) {
             return Err(format!("MCP server '{id}' has too many or too long arguments"));
@@ -122,6 +162,37 @@ pub fn validate(config: &McpConfig) -> Result<(), String> {
         {
             return Err(format!("MCP server '{id}' has an invalid environment"));
         }
+        if let Some(tools) = &server.tools {
+            if tools.len() > MAX_TOOLS_PER_SERVER {
+                return Err(format!("MCP server '{id}' lists too many tools"));
+            }
+            let mut seen = HashSet::new();
+            for tool in tools {
+                if tool.is_empty() || tool.len() > 128 {
+                    return Err(format!("MCP server '{id}' has an invalid tool name"));
+                }
+                if !seen.insert(tool) {
+                    return Err(format!("MCP server '{id}' lists tool '{tool}' twice"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_url(id: &str, url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url.trim())
+        .map_err(|_| format!("MCP server '{id}' has an invalid URL"))?;
+    let local = parsed
+        .host_str()
+        .is_some_and(|host| host == "localhost" || host == "127.0.0.1" || host == "[::1]");
+    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && local) {
+        return Err(format!(
+            "MCP server '{id}' must use HTTPS, except for localhost"
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(format!("MCP server '{id}' URL cannot contain credentials"));
     }
     Ok(())
 }
@@ -140,7 +211,46 @@ fn split_public_name(name: &str) -> Option<(&str, &str)> {
     }
 }
 
-struct McpClient {
+fn tool_allowed(server: &McpServerConfig, name: &str) -> bool {
+    match &server.tools {
+        None => true,
+        Some(tools) => tools.iter().any(|tool| tool == name),
+    }
+}
+
+fn result_text(result: &Value) -> (String, bool) {
+    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let mut text = String::new();
+    if let Some(blocks) = result.get("content").and_then(Value::as_array) {
+        for block in blocks {
+            if let Some(value) = block.get("text").and_then(Value::as_str) {
+                text.push_str(value);
+            } else if block.get("type").and_then(Value::as_str) == Some("image") {
+                text.push_str("[image]");
+            }
+        }
+    }
+    if text.is_empty() {
+        text = result.to_string();
+    }
+    (text, is_error)
+}
+
+fn response_result(message: &Value, id: u64) -> Option<Result<Value, String>> {
+    if message.get("id").and_then(Value::as_u64) != Some(id) {
+        return None;
+    }
+    if let Some(error) = message.get("error") {
+        let text = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("MCP server error");
+        return Some(Err(format!("MCP server error: {text}")));
+    }
+    Some(Ok(message.get("result").cloned().unwrap_or(Value::Null)))
+}
+
+struct StdioClient {
     /// Held only so `kill_on_drop` terminates the server when the turn ends.
     _child: Child,
     stdin: ChildStdin,
@@ -148,7 +258,7 @@ struct McpClient {
     next_id: u64,
 }
 
-impl McpClient {
+impl StdioClient {
     async fn spawn(server: &McpServerConfig) -> Result<Self, String> {
         let mut command = Command::new(&server.command);
         command
@@ -217,32 +327,186 @@ impl McpClient {
             let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
                 continue;
             };
-            if value.get("id").and_then(Value::as_u64) != Some(id) {
-                continue;
+            if let Some(result) = response_result(&value, id) {
+                return result;
             }
-            if let Some(error) = value.get("error") {
-                let message = error
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("MCP server error");
-                return Err(format!("MCP server error: {message}"));
-            }
-            return Ok(value.get("result").cloned().unwrap_or(Value::Null));
         }
     }
 
     async fn initialize(&mut self) -> Result<(), String> {
-        self.request(
-            "initialize",
-            json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "moderado-desktop", "version": env!("CARGO_PKG_VERSION")}
-            }),
-        )
-        .await?;
+        self.request("initialize", initialize_params()).await?;
         self.send(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
             .await
+    }
+}
+
+struct HttpClient {
+    client: reqwest::Client,
+    url: String,
+    session_id: Option<String>,
+    next_id: u64,
+}
+
+impl HttpClient {
+    fn new(server: &McpServerConfig) -> Result<Self, String> {
+        validate_url(&server.id, &server.url)?;
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            // A turn makes only a handful of calls; not reusing idle sockets
+            // avoids a stale keep-alive connection after a server restart.
+            .pool_max_idle_per_host(0)
+            .build()
+            .map_err(|_| "Could not create MCP HTTP client")?;
+        Ok(Self {
+            client,
+            url: server.url.trim().to_owned(),
+            session_id: None,
+            next_id: 1,
+        })
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        let mut request = self
+            .client
+            .post(&self.url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .json(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+        if let Some(session) = &self.session_id {
+            request = request.header("Mcp-Session-Id", session);
+        }
+        let response = tokio::time::timeout(REQUEST_TIMEOUT, request.send())
+            .await
+            .map_err(|_| format!("MCP HTTP server timed out during {method}"))?
+            .map_err(|error| format!("MCP HTTP connection failed: {error}"))?;
+        if let Some(session) = response
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|value| value.to_str().ok())
+        {
+            self.session_id = Some(session.to_owned());
+        }
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("MCP HTTP server returned HTTP {status}"));
+        }
+        let event_stream = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("text/event-stream"));
+        if event_stream {
+            read_event_stream(response, id).await
+        } else {
+            let value: Value = response
+                .json()
+                .await
+                .map_err(|_| "Invalid MCP HTTP response")?;
+            let messages: Vec<&Value> = match &value {
+                Value::Array(items) => items.iter().collect(),
+                other => vec![other],
+            };
+            messages
+                .into_iter()
+                .find_map(|message| response_result(message, id))
+                .unwrap_or_else(|| Err("MCP HTTP response did not include the request id".into()))
+        }
+    }
+
+    async fn initialize(&mut self) -> Result<(), String> {
+        self.request("initialize", initialize_params()).await?;
+        let _ = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .json(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+            .send()
+            .await;
+        Ok(())
+    }
+}
+
+fn initialize_params() -> Value {
+    json!({
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "moderado-desktop", "version": env!("CARGO_PKG_VERSION")}
+    })
+}
+
+async fn read_event_stream(response: reqwest::Response, id: u64) -> Result<Value, String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut data = String::new();
+    loop {
+        let chunk = tokio::time::timeout(REQUEST_TIMEOUT, stream.next())
+            .await
+            .map_err(|_| "MCP HTTP stream timed out")?
+            .transpose()
+            .map_err(|error| format!("MCP HTTP stream failed: {error}"))?;
+        let Some(chunk) = chunk else { break };
+        if buffer.len() + chunk.len() > MAX_MESSAGE_BYTES {
+            return Err("MCP HTTP message is too large".into());
+        }
+        buffer.extend_from_slice(&chunk);
+        while let Some(position) = buffer.iter().position(|byte| *byte == b'\n') {
+            let line = String::from_utf8_lossy(&buffer[..position])
+                .trim_end_matches('\r')
+                .to_owned();
+            buffer.drain(..=position);
+            if line.is_empty() {
+                if data.is_empty() {
+                    continue;
+                }
+                if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                    if let Some(result) = response_result(&value, id) {
+                        return result;
+                    }
+                }
+                data.clear();
+            } else if let Some(payload) = line.strip_prefix("data:") {
+                if !data.is_empty() {
+                    data.push('\n');
+                }
+                data.push_str(payload.trim_start());
+            }
+        }
+    }
+    Err("MCP HTTP stream ended before the response".into())
+}
+
+enum Transport {
+    Stdio(Box<StdioClient>),
+    Http(HttpClient),
+}
+
+struct McpClient {
+    transport: Transport,
+}
+
+impl McpClient {
+    async fn connect(server: &McpServerConfig) -> Result<Self, String> {
+        let transport = match server.transport.as_str() {
+            "http" => Transport::Http(HttpClient::new(server)?),
+            _ => Transport::Stdio(Box::new(StdioClient::spawn(server).await?)),
+        };
+        Ok(Self { transport })
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        match &mut self.transport {
+            Transport::Stdio(client) => client.request(method, params).await,
+            Transport::Http(client) => client.request(method, params).await,
+        }
+    }
+
+    async fn initialize(&mut self) -> Result<(), String> {
+        match &mut self.transport {
+            Transport::Stdio(client) => client.initialize().await,
+            Transport::Http(client) => client.initialize().await,
+        }
     }
 
     async fn list_tools(&mut self) -> Result<Vec<(String, String, Value)>, String> {
@@ -281,20 +545,7 @@ impl McpClient {
         let result = self
             .request("tools/call", json!({"name": name, "arguments": arguments}))
             .await?;
-        let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
-        let mut text = String::new();
-        if let Some(blocks) = result.get("content").and_then(Value::as_array) {
-            for block in blocks {
-                if let Some(value) = block.get("text").and_then(Value::as_str) {
-                    text.push_str(value);
-                } else if block.get("type").and_then(Value::as_str) == Some("image") {
-                    text.push_str("[image]");
-                }
-            }
-        }
-        if text.is_empty() {
-            text = result.to_string();
-        }
+        let (text, is_error) = result_text(&result);
         if is_error {
             Err(text)
         } else {
@@ -312,6 +563,7 @@ pub struct McpRegistry {
     clients: Mutex<Vec<ServerClient>>,
     tools: Vec<McpToolInfo>,
     schemas: HashMap<String, Value>,
+    servers: Vec<McpServerStatus>,
     errors: Vec<String>,
 }
 
@@ -321,36 +573,55 @@ impl McpRegistry {
             clients: Mutex::new(Vec::new()),
             tools: Vec::new(),
             schemas: HashMap::new(),
+            servers: Vec::new(),
             errors: Vec::new(),
         }
     }
 
     /// Connect to every enabled server, best effort. Failures are collected in
-    /// `errors()` instead of aborting the turn; a broken server must not stop
-    /// the others or the session.
+    /// `errors()` and per-server `servers()` status instead of aborting the
+    /// turn; a broken server must not stop the others or the session.
     pub async fn connect(config: &McpConfig) -> Self {
         let mut registry = Self::empty();
         let mut clients = Vec::new();
         for server in config.servers.iter().filter(|server| server.enabled) {
-            let mut client = match McpClient::spawn(server).await {
+            let mut status = McpServerStatus {
+                id: server.id.clone(),
+                transport: server.transport.clone(),
+                connected: false,
+                tool_count: 0,
+                error: None,
+            };
+            let mut client = match McpClient::connect(server).await {
                 Ok(client) => client,
                 Err(error) => {
+                    status.error = Some(error.clone());
                     registry.errors.push(error);
+                    registry.servers.push(status);
                     continue;
                 }
             };
             if let Err(error) = client.initialize().await {
-                registry.errors.push(format!("{}: {error}", server.id));
+                let error = format!("{}: {error}", server.id);
+                status.error = Some(error.clone());
+                registry.errors.push(error);
+                registry.servers.push(status);
                 continue;
             }
             let listed = match client.list_tools().await {
                 Ok(listed) => listed,
                 Err(error) => {
-                    registry.errors.push(format!("{}: {error}", server.id));
+                    let error = format!("{}: {error}", server.id);
+                    status.error = Some(error.clone());
+                    registry.errors.push(error);
+                    registry.servers.push(status);
                     continue;
                 }
             };
             for (name, description, schema) in listed {
+                if !tool_allowed(server, &name) {
+                    continue;
+                }
                 let public_name = public_tool_name(&server.id, &name);
                 registry.schemas.insert(public_name.clone(), schema);
                 registry.tools.push(McpToolInfo {
@@ -360,6 +631,13 @@ impl McpRegistry {
                     description,
                 });
             }
+            status.connected = true;
+            status.tool_count = registry
+                .tools
+                .iter()
+                .filter(|tool| tool.server_id == server.id)
+                .count();
+            registry.servers.push(status);
             clients.push(ServerClient {
                 id: server.id.clone(),
                 client,
@@ -395,6 +673,10 @@ impl McpRegistry {
         &self.tools
     }
 
+    pub fn servers(&self) -> &[McpServerStatus] {
+        &self.servers
+    }
+
     pub fn errors(&self) -> &[String] {
         &self.errors
     }
@@ -423,6 +705,8 @@ impl McpRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
     use std::path::Path;
 
     fn mock_server() -> McpServerConfig {
@@ -433,9 +717,12 @@ mod tests {
             .join("mock_mcp_server.mjs");
         McpServerConfig {
             id: "mock".into(),
+            transport: "stdio".into(),
             command: "node".into(),
+            url: String::new(),
             args: vec![script.to_string_lossy().into_owned()],
             env: BTreeMap::new(),
+            tools: None,
             enabled: true,
         }
     }
@@ -443,9 +730,12 @@ mod tests {
     fn server(id: &str) -> McpServerConfig {
         McpServerConfig {
             id: id.into(),
+            transport: "stdio".into(),
             command: "node".into(),
+            url: String::new(),
             args: Vec::new(),
             env: BTreeMap::new(),
+            tools: None,
             enabled: true,
         }
     }
@@ -467,11 +757,45 @@ mod tests {
     }
 
     #[test]
+    fn validates_http_servers_and_tool_lists() {
+        let mut config = McpConfig {
+            servers: vec![McpServerConfig {
+                id: "remote".into(),
+                transport: "http".into(),
+                command: String::new(),
+                url: "http://example.com/mcp".into(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                tools: None,
+                enabled: true,
+            }],
+        };
+        assert!(validate(&config).unwrap_err().contains("HTTPS"));
+        config.servers[0].url = "https://example.com/mcp".into();
+        assert!(validate(&config).is_ok());
+        config.servers[0].transport = "carrier-pigeon".into();
+        assert!(validate(&config).is_err());
+        config.servers[0].transport = "http".into();
+        config.servers[0].tools = Some(vec!["echo".into(), "echo".into()]);
+        assert!(validate(&config).unwrap_err().contains("twice"));
+    }
+
+    #[test]
     fn public_names_round_trip() {
         assert_eq!(public_tool_name("srv", "echo"), "mcp__srv__echo");
         assert_eq!(split_public_name("mcp__srv__echo"), Some(("srv", "echo")));
         assert_eq!(split_public_name("echo"), None);
         assert_eq!(split_public_name("mcp__srv"), None);
+    }
+
+    #[test]
+    fn tool_allow_list_filters_names() {
+        let mut server = server("srv");
+        server.tools = Some(vec!["echo".into()]);
+        assert!(tool_allowed(&server, "echo"));
+        assert!(!tool_allowed(&server, "fail"));
+        server.tools = None;
+        assert!(tool_allowed(&server, "anything"));
     }
 
     #[tokio::test]
@@ -481,6 +805,7 @@ mod tests {
         };
         let registry = McpRegistry::connect(&config).await;
         assert!(registry.errors().is_empty(), "{:?}", registry.errors());
+        assert!(registry.servers()[0].connected);
         let names: Vec<&str> = registry
             .tools()
             .iter()
@@ -498,6 +823,23 @@ mod tests {
                 .unwrap(),
             "echo:hello"
         );
+    }
+
+    #[tokio::test]
+    async fn allow_list_hides_tools_the_server_still_advertises() {
+        let mut server = mock_server();
+        server.tools = Some(vec!["echo".into()]);
+        let config = McpConfig {
+            servers: vec![server],
+        };
+        let registry = McpRegistry::connect(&config).await;
+        let names: Vec<&str> = registry
+            .tools()
+            .iter()
+            .map(|tool| tool.public_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["mcp__mock__echo"]);
+        assert!(registry.call("mcp__mock__fail", "{}").await.is_err());
     }
 
     #[tokio::test]
@@ -522,9 +864,12 @@ mod tests {
             servers: vec![
                 McpServerConfig {
                     id: "broken".into(),
+                    transport: "stdio".into(),
                     command: "definitely-not-a-real-command".into(),
+                    url: String::new(),
                     args: Vec::new(),
                     env: BTreeMap::new(),
+                    tools: None,
                     enabled: true,
                 },
                 mock_server(),
@@ -532,9 +877,106 @@ mod tests {
         };
         let registry = McpRegistry::connect(&config).await;
         assert_eq!(registry.errors().len(), 1);
+        assert_eq!(registry.servers().len(), 2);
+        assert!(registry.servers()[0].error.is_some());
+        assert!(registry.servers()[1].connected);
         assert!(registry
             .tools()
             .iter()
             .any(|tool| tool.public_name == "mcp__mock__echo"));
+    }
+
+    fn read_http_request(socket: &mut TcpStream) -> Value {
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut buffer = [0u8; 4096];
+        let header_end = loop {
+            let count = socket.read(&mut buffer).unwrap();
+            assert!(count > 0);
+            bytes.extend_from_slice(&buffer[..count]);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                break end + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&bytes[..header_end]);
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length: ")
+                    .and_then(|value| value.trim().parse().ok())
+            })
+            .unwrap();
+        while bytes.len() - header_end < length {
+            let count = socket.read(&mut buffer).unwrap();
+            assert!(count > 0);
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn http_transport_handles_json_and_event_stream_responses() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            // The `notifications/initialized` POST is best effort and may not
+            // arrive, so count only the three request-bearing calls.
+            let mut handled = 0;
+            while handled < 3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                let request = read_http_request(&mut socket);
+                let Some(id) = request["id"].as_u64() else {
+                    socket
+                        .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .unwrap();
+                    continue;
+                };
+                handled += 1;
+                let method = request["method"].as_str().unwrap();
+                match method {
+                    "initialize" => {
+                        let body = json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"mock","version":"1"}}}).to_string();
+                        write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nMcp-Session-Id: test-session\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+                    }
+                    "tools/list" => {
+                        let body = json!({"jsonrpc":"2.0","id":id,"result":{"tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}}]}}).to_string();
+                        write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+                    }
+                    "tools/call" => {
+                        let message = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":"http:ok"}],"isError":false}}).to_string();
+                        let body = format!("event: message\ndata: {message}\n\n");
+                        write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+                    }
+                    other => panic!("unexpected method {other}"),
+                }
+            }
+        });
+        let config = McpConfig {
+            servers: vec![McpServerConfig {
+                id: "remote".into(),
+                transport: "http".into(),
+                command: String::new(),
+                url: format!("http://127.0.0.1:{port}/mcp"),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                tools: None,
+                enabled: true,
+            }],
+        };
+        let registry = McpRegistry::connect(&config).await;
+        assert!(registry.errors().is_empty(), "{:?}", registry.errors());
+        assert_eq!(registry.tools().len(), 1);
+        assert_eq!(registry.tools()[0].public_name, "mcp__remote__echo");
+        assert_eq!(
+            registry
+                .call("mcp__remote__echo", r#"{"text":"hi"}"#)
+                .await
+                .unwrap(),
+            "http:ok"
+        );
+        server.join().unwrap();
     }
 }

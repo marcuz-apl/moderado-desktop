@@ -771,9 +771,12 @@ mod tests {
         crate::mcp::McpConfig {
             servers: vec![crate::mcp::McpServerConfig {
                 id: "mock".into(),
+                transport: "stdio".into(),
                 command: "node".into(),
+                url: String::new(),
                 args: vec![script.to_string_lossy().into_owned()],
                 env: Default::default(),
+                tools: None,
                 enabled: true,
             }],
         }

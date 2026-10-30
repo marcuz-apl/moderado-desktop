@@ -55,3 +55,10 @@
 - Tools are namespaced `mcp__<server>__<tool>`, and a server id may not contain `__`, so the public name stays unambiguous. Each server's `inputSchema` is passed through as the function `parameters`, so the model sees the server's own schema.
 - Connection is per turn and best effort: one broken server must not stop the others or the session, so failures are collected and surfaced through discovery rather than aborting the run.
 - MCP is Code/Act only. Plan mode rejects the call before approval, matching the structural mode gate used for file writes and commands.
+
+## MCP Transport Hardening
+
+- Streamable HTTP is a POST of one JSON-RPC message whose reply is either `application/json` or a `text/event-stream`; one request/response pair is enough for `initialize`, `tools/list`, and `tools/call`, so the client never keeps a long-lived stream. The `Mcp-Session-Id` returned by `initialize` is echoed on later requests.
+- Idle connection pooling is disabled (`pool_max_idle_per_host(0)`): a turn makes only a handful of calls, and reusing a keep-alive socket against a restarted server is worse than opening a fresh one.
+- The allow-list is applied at discovery time, so a server's other tools never reach the model and cannot be called by name.
+- The HTTP test originally joined its mock thread before `tools/call`, deadlocking the mock and the test; the join now follows the call. That is a harness ordering rule, not a client issue.

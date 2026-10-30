@@ -38,7 +38,14 @@
 
 .task-operations{display:flex;flex-wrap:wrap;gap:10px;padding:8px 14px 0}
 .task-operations .text-button{margin:0}
-#mcp-config{width:100%;min-height:120px;margin-top:8px;border:1px solid #426078;border-radius:7px;background:#102236;color:#e9f4f7;padding:9px 10px;font:12px/1.5 "Cascadia Code",Consolas,monospace;resize:vertical}
+#mcp-servers{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.mcp-server-row{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;align-items:end;padding:9px;border:1px solid #345064;border-radius:8px;background:#14283c}
+.mcp-field{display:flex;flex-direction:column;gap:3px;min-width:0;color:#9eb8c7;font-size:10px;font-weight:600}
+.mcp-field:nth-child(3),.mcp-field:nth-child(4),.mcp-field:nth-child(5){grid-column:1 / -1}
+.mcp-field input,.mcp-field select{width:100%;min-width:0;height:30px;border:1px solid #426078;border-radius:6px;background:#102236;color:#e9f4f7;padding:0 7px;font:11px "Segoe UI",sans-serif}
+.mcp-enabled{display:flex;align-items:center;gap:4px;height:30px;color:#c9dbe5;font-size:11px;white-space:nowrap}
+.mcp-enabled input{accent-color:#65cbbd}
+.mcp-server-row .text-button{margin:0;padding:0 0 7px;font-size:11px;justify-self:start}
 .task-group{padding:5px 0;border:0}
 .task-heading>.session-item{padding-left:0}
 .task-sessions{padding:3px 0 8px 34px}

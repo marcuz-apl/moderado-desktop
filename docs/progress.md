@@ -127,3 +127,10 @@
 - Tools are advertised only to Code/Act sessions. Dispatch is gated by the `UseMcpServers` Auto-Approve category; Plan mode and Work sessions reject MCP calls before approval. A server that fails to start is recorded and skipped, never blocking the turn, and its process is killed when the turn ends (`kill_on_drop`).
 - Settings gains an **MCP servers** section to edit the JSON config, save it, and discover tools; discovery reports both tools and per-server errors.
 - Tests: `mcp.rs` covers config validation, public-name parsing, registry list/call, failing/unknown tools, and a broken server alongside a healthy one; runner tests cover auto-approved dispatch and the Plan-mode guard, all against a local Node mock server.
+
+## MCP hardening (0.4.3)
+
+- Added Streamable HTTP alongside stdio: `transport: "http"` with a `url`, POSTing JSON-RPC and accepting either `application/json` or `text/event-stream` responses; the `Mcp-Session-Id` header is carried forward.
+- Added a per-server tool allow-list (`tools: ["echo"]`); omitting it still exposes every advertised tool.
+- `discover_mcp_tools` now returns per-server status (connected, tool count, error) in addition to tools, and Settings renders an add/edit/remove form instead of a JSON textarea. Environment variables are preserved by id and remain editable in `~/.moderado/mcp.json`.
+- Tests: HTTP JSON + SSE round trip, allow-list filtering, per-server status, and HTTP/tool validation. Stop already cancels a hung call through the turn-level `tokio::select!`.
