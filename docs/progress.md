@@ -132,5 +132,5 @@
 
 - Added Streamable HTTP alongside stdio: `transport: "http"` with a `url`, POSTing JSON-RPC and accepting either `application/json` or `text/event-stream` responses; the `Mcp-Session-Id` header is carried forward.
 - Added a per-server tool allow-list (`tools: ["echo"]`); omitting it still exposes every advertised tool.
-- `discover_mcp_tools` now returns per-server status (connected, tool count, error) in addition to tools, and Settings renders an add/edit/remove form instead of a JSON textarea. Environment variables are preserved by id and remain editable in `~/.moderado/mcp.json`.
+- `discover_mcp_tools` now returns per-server status (connected, tool count, error) in addition to tools. Settings renders an add/edit/remove form with id, transport, command/URL, args, tools, and env, and **Test / reconnect** lists each server's tools by name so the allow-list is easy to fill.
 - Tests: HTTP JSON + SSE round trip, allow-list filtering, per-server status, and HTTP/tool validation. Stop already cancels a hung call through the turn-level `tokio::select!`.

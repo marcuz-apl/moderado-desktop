@@ -7,6 +7,7 @@ import MarkdownIt from 'markdown-it';
 import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLabel, type ModelInfo } from './models';
+import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
@@ -1305,8 +1306,8 @@ $<HTMLButtonElement>('save-provider-settings').addEventListener('click', async (
 });
 
 type McpServerConfig = { id: string; transport: 'stdio' | 'http'; command: string; url: string; args: string[]; env: Record<string, string>; tools: string[] | null; enabled: boolean };
-
-let mcpEnv = new Map<string, Record<string, string>>();
+type McpServerStatus = { id: string; transport: string; connected: boolean; toolCount: number; error?: string | null };
+type McpToolInfo = { serverId: string; name: string; publicName: string; description: string };
 
 function mcpField(label: string, input: HTMLElement): HTMLLabelElement {
   const wrap = document.createElement('label');
@@ -1345,6 +1346,10 @@ function mcpRow(server: McpServerConfig): HTMLElement {
   tools.dataset.field = 'tools';
   tools.placeholder = 'blank = all tools';
   tools.value = (server.tools ?? []).join(', ');
+  const env = document.createElement('input');
+  env.dataset.field = 'env';
+  env.placeholder = '{"KEY":"value"}';
+  env.value = Object.keys(server.env).length ? JSON.stringify(server.env) : '';
   const enabled = document.createElement('input');
   enabled.type = 'checkbox';
   enabled.dataset.field = 'enabled';
@@ -1357,7 +1362,7 @@ function mcpRow(server: McpServerConfig): HTMLElement {
   remove.className = 'text-button';
   remove.textContent = 'Remove';
   remove.addEventListener('click', () => row.remove());
-  row.append(mcpField('Id', id), mcpField('Transport', transport), mcpField('Command / URL', target), mcpField('Args (JSON)', args), mcpField('Tools', tools), enabledLabel, remove);
+  row.append(mcpField('Id', id), mcpField('Transport', transport), mcpField('Command / URL', target), mcpField('Args (JSON)', args), mcpField('Tools', tools), mcpField('Env (JSON)', env), enabledLabel, remove);
   return row;
 }
 
@@ -1372,34 +1377,42 @@ function readMcpServers(): { servers: McpServerConfig[] } {
       const value = (field: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field="${field}"]`)?.value ?? '';
       const transport = value('transport') === 'http' ? 'http' : 'stdio';
       const target = value('target').trim();
-      const argsText = value('args').trim();
-      let args: string[] = [];
-      if (argsText) {
-        const parsed: unknown = JSON.parse(argsText);
-        if (!Array.isArray(parsed)) throw new Error('Args must be a JSON array');
-        args = parsed.map((item) => String(item));
-      }
-      const tools = value('tools').split(',').map((tool) => tool.trim()).filter(Boolean);
-      const id = value('id').trim();
       return {
-        id,
+        id: value('id').trim(),
         transport,
         command: transport === 'stdio' ? target : '',
         url: transport === 'http' ? target : '',
-        args,
-        env: mcpEnv.get(id) ?? {},
-        tools: tools.length ? tools : null,
+        args: parseMcpArgs(value('args')),
+        env: parseMcpEnv(value('env')),
+        tools: parseMcpTools(value('tools')),
         enabled: row.querySelector<HTMLInputElement>('[data-field="enabled"]')?.checked ?? true,
       };
     }),
   };
 }
 
+function renderMcpStatus(servers: McpServerStatus[], tools: McpToolInfo[]): void {
+  const container = $('mcp-status-list');
+  container.replaceChildren(...servers.map((server) => {
+    const row = document.createElement('div');
+    row.className = `mcp-status-row ${server.connected ? 'ok' : 'error'}`;
+    const head = document.createElement('strong');
+    head.textContent = `${server.connected ? '✓' : '✗'} ${server.id}`;
+    const detail = document.createElement('span');
+    if (server.connected) {
+      const names = tools.filter((tool) => tool.serverId === server.id).map((tool) => tool.name);
+      detail.textContent = `${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}${names.length ? `: ${names.join(', ')}` : ''}`;
+    } else {
+      detail.textContent = server.error ?? 'failed';
+    }
+    row.append(head, detail);
+    return row;
+  }));
+}
+
 async function loadMcpConfig(): Promise<void> {
   try {
-    const config = await invoke<{ servers: McpServerConfig[] }>('load_mcp_config');
-    mcpEnv = new Map(config.servers.map((server) => [server.id, server.env ?? {}]));
-    renderMcpServers(config);
+    renderMcpServers(await invoke<{ servers: McpServerConfig[] }>('load_mcp_config'));
   } catch (error) {
     $('mcp-status').textContent = String(error);
   }
@@ -1411,10 +1424,9 @@ $('add-mcp-server').addEventListener('click', () => {
 
 $('save-mcp-config').addEventListener('click', async () => {
   try {
-    const config = readMcpServers();
-    await invoke('save_mcp_config', { config });
-    mcpEnv = new Map(config.servers.map((server) => [server.id, server.env]));
+    await invoke('save_mcp_config', { config: readMcpServers() });
     $('mcp-status').textContent = 'MCP config saved.';
+    $('mcp-status-list').replaceChildren();
   } catch (error) {
     $('mcp-status').textContent = String(error);
   }
@@ -1422,10 +1434,11 @@ $('save-mcp-config').addEventListener('click', async () => {
 
 $('discover-mcp').addEventListener('click', async () => {
   $('mcp-status').textContent = 'Testing MCP servers…';
+  $('mcp-status-list').replaceChildren();
   try {
-    const discovery = await invoke<{ tools: { publicName: string }[]; servers: { id: string; connected: boolean; toolCount: number; error?: string | null }[] }>('discover_mcp_tools', { config: readMcpServers() });
-    const lines = discovery.servers.map((server) => server.connected ? `${server.id}: ${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}` : `${server.id}: ${server.error ?? 'failed'}`);
-    $('mcp-status').textContent = lines.length ? lines.join(' · ') : 'No enabled servers.';
+    const discovery = await invoke<{ tools: McpToolInfo[]; servers: McpServerStatus[] }>('discover_mcp_tools', { config: readMcpServers() });
+    renderMcpStatus(discovery.servers, discovery.tools);
+    $('mcp-status').textContent = discovery.servers.length ? 'Test complete.' : 'No enabled servers.';
   } catch (error) {
     $('mcp-status').textContent = String(error);
   }
