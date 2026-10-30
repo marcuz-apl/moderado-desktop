@@ -577,6 +577,41 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
+    /// Read a whole HTTP request (headers plus the Content-Length body) before
+    /// replying. A single `read` can return only the headers while the client
+    /// is still writing the body, so replying then closing resets the request
+    /// and makes these tests flaky.
+    fn read_full_request(socket: &mut std::net::TcpStream) -> String {
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut buffer = [0u8; 4096];
+        let header_end = loop {
+            let count = socket.read(&mut buffer).unwrap();
+            assert!(count > 0);
+            bytes.extend_from_slice(&buffer[..count]);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                break end + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&bytes[..header_end]);
+        let length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length: ")
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+        while bytes.len() - header_end < length {
+            let count = socket.read(&mut buffer).unwrap();
+            assert!(count > 0);
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
     #[test]
     fn provider_catalog_resolves_supported_endpoints() {
         assert_eq!(PRESETS.len(), 6);
@@ -696,8 +731,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
-            let mut request = [0u8; 4096];
-            assert!(socket.read(&mut request).unwrap() > 0);
+            let _ = read_full_request(&mut socket);
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n").unwrap();
             std::thread::sleep(Duration::from_millis(100));
         });
@@ -797,9 +831,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
-            let mut request = [0u8; 4096];
-            let count = socket.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..count]);
+            let request = read_full_request(&mut socket);
             assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1"));
             let body =
                 "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n";
@@ -827,9 +859,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
-            let mut request = [0u8; 1024];
-            let count = socket.read(&mut request).unwrap();
-            assert!(count > 0);
+            let _ = read_full_request(&mut socket);
             socket.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/v1/chat/completions\r\nContent-Length: 0\r\n\r\n").unwrap();
         });
         let result = chat_completion(
