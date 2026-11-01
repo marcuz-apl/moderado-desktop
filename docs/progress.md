@@ -182,3 +182,13 @@
 - `web_search` is advertised in every session instead of depending on configuration; the runner calls `search::query(query)` with no per-turn config.
 - Migration 10 drops the `search_settings` table and the `schedules.search_json` column. Schedules no longer pause when search settings change, because there are none.
 - Tests: keyless SSE parsing, server fallback, all-fail error, and the migration; the provider-adapter and renderer `search-config` tests were removed with the code they covered.
+
+## One sidebar for both modes (0.4.10)
+
+- Tasks and Projects were two panels in the first rail slot, so switching Work/Code changed that icon's identity, its heading, and the default panel. They are now one **library** panel: it lists tasks in Work and projects in Code, with the heading and action row following the mode.
+- The rail is identical in both modes except Git, which stays Code-only because it is a capability rather than a navigation concept.
+- `panelAvailableForKind` is now a single rule (`source-control` requires Code) instead of two mode-specific exclusion lists. The dead `sessions` panel id is gone, and `newActionLabel` went with it.
+- The Explorer panel id is now `explorer`; it was `workspace`, which also names the conversation canvas.
+- `applyKindUi` hid rail buttons in three overlapping passes; one pass now does it.
+- Profile is one block with a conditional GitHub row instead of two mutually exclusive blocks.
+- Tests: the rail is asserted to be the same seven panels in both modes, and the merged panel is asserted to hold both action groups and both lists.

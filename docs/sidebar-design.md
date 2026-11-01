@@ -6,6 +6,8 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 
 ## Layout
 
+- Later change (0.4.10): the separate Sessions, Tasks, and Projects panels were consolidated into one `library` panel that lists tasks in Work mode and projects in Code mode. See `progress.md`.
+
 - The leftmost Activity Bar is a narrow icon rail, about 52 px wide. Its upper group contains Sessions, Workspace, Checkpoints, Schedules, and Source Control in that order. Its lower group contains Profile immediately above Settings.
 - Selecting an icon shows one contextual panel beside the rail. The panel is about 260 px wide and has a heading, relevant actions, and a scrollable body. The conversation remains visible to the right.
 - The selected icon has a visible accent marker and background. Every icon button has a tooltip, an accessible name, a keyboard focus state, and `aria-pressed` or equivalent selection semantics. Use a consistent set of inline SVG icons; no new icon package or network asset is needed.

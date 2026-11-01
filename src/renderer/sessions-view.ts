@@ -1,5 +1,6 @@
 export type SessionKind = 'work' | 'code';
-export type SidebarPanel = 'tasks' | 'projects' | 'sessions' | 'workspace' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
+/** One rail for both modes. `library` lists tasks in Work and projects in Code. */
+export type SidebarPanel = 'library' | 'explorer' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
 
 export type ProjectSessionLike = {
   id: string;
@@ -19,14 +20,15 @@ export type ProjectSummary = {
 
 export const DEFAULT_SESSION_KIND: SessionKind = 'work';
 
-export function defaultPanelForKind(kind: SessionKind): SidebarPanel {
-  return kind === 'work' ? 'tasks' : 'projects';
+/// Both modes open on the same panel; only its contents change.
+export function defaultPanel(): SidebarPanel {
+  return 'library';
 }
 
+/// Git is the one capability that only exists in Code, so it is the only panel
+/// that differs between modes.
 export function panelAvailableForKind(panel: SidebarPanel, kind: SessionKind): boolean {
-  if (panel === 'sessions') return false;
-  if (kind === 'work') return !['projects', 'source-control'].includes(panel);
-  return panel !== 'tasks';
+  return panel !== 'source-control' || kind === 'code';
 }
 
 export function sessionForMode<T extends { id: string; kind: SessionKind; workspace: string }>(
@@ -35,11 +37,6 @@ export function sessionForMode<T extends { id: string; kind: SessionKind; worksp
   const candidates = sessions.filter((session) => session.kind === kind
     && (kind !== 'code' || !projectWorkspace || session.workspace === projectWorkspace));
   return candidates.find((session) => session.id === rememberedId) ?? candidates[0];
-}
-
-export function newActionLabel(panel: 'tasks' | 'projects' | 'sessions'): string {
-  if (panel === 'tasks') return 'New Task';
-  return panel === 'projects' ? 'New Project' : 'New Session';
 }
 
 export function nextSessionKind(kind: SessionKind): SessionKind {

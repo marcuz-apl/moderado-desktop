@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { DEFAULT_SESSION_KIND, defaultPanelForKind, needsWorkspacePicker, newActionLabel, newSessionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { DEFAULT_SESSION_KIND, defaultPanel, needsWorkspacePicker, newSessionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -31,27 +31,15 @@ test('new session action names the selected session kind', () => {
   assert.equal(newSessionLabel('code'), '+ New Code session');
 });
 
-test('sidebar defaults and available panels follow the selected mode', () => {
-  assert.equal(defaultPanelForKind('work'), 'tasks');
-  assert.equal(defaultPanelForKind('code'), 'projects');
-  assert.equal(panelAvailableForKind('tasks', 'work'), true);
-  assert.equal(panelAvailableForKind('projects', 'work'), false);
-  assert.equal(panelAvailableForKind('sessions', 'work'), false);
-  assert.equal(panelAvailableForKind('workspace', 'work'), true);
-  assert.equal(panelAvailableForKind('checkpoints', 'work'), true);
-  assert.equal(panelAvailableForKind('tasks', 'work'), true);
-  assert.equal(panelAvailableForKind('tasks', 'code'), false);
-  assert.equal(panelAvailableForKind('projects', 'code'), true);
-  assert.equal(panelAvailableForKind('sessions', 'code'), false);
-  assert.equal(panelAvailableForKind('workspace', 'code'), true);
-  assert.equal(panelAvailableForKind('projects', 'code'), true);
-  assert.equal(panelAvailableForKind('schedules', 'work'), true);
-});
-
-test('new action captions match the selected sidebar panel', () => {
-  assert.equal(newActionLabel('tasks'), 'New Task');
-  assert.equal(newActionLabel('projects'), 'New Project');
-  assert.equal(newActionLabel('sessions'), 'New Session');
+test('both modes open on the same panel and only Git differs', () => {
+  assert.equal(defaultPanel(), 'library');
+  for (const kind of ['work', 'code']) {
+    for (const panel of ['library', 'explorer', 'checkpoints', 'schedules', 'profile', 'settings']) {
+      assert.equal(panelAvailableForKind(panel, kind), true, `${panel} ${kind}`);
+    }
+  }
+  assert.equal(panelAvailableForKind('source-control', 'work'), false);
+  assert.equal(panelAvailableForKind('source-control', 'code'), true);
 });
 
 test('top bar contains the Work/Code switch and Explorer owns the folder icon', async () => {
@@ -62,18 +50,26 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
   assert.match(main, /radio\.type = 'radio'/);
-  assert.match(html, /data-panel="workspace"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
-  assert.match(html, /data-panel="projects"[^>]*>[\s\S]*?#icon-projects/);
+  assert.match(html, /data-panel="explorer"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
+  assert.match(html, /data-panel="library"[^>]*>[\s\S]*?#icon-projects/);
   assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
+});
+
+test('both modes share one activity rail', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const rail = [...html.matchAll(/class="activity-button" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(rail, ['library', 'explorer', 'checkpoints', 'schedules', 'source-control', 'profile', 'settings']);
+  assert.doesNotMatch(html, /data-panel="tasks"|data-panel="projects"/);
+  assert.match(html, /data-panel-content="library"><header class="panel-heading"><h2 id="library-title">/);
 });
 
 test('project operations stay under Projects and session navigation remains nested without session actions', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  const panel = html.match(/data-panel-content="projects">([\s\S]*?)<\/section>/)?.[1] ?? '';
-  assert.match(panel, /<h2>Projects<\/h2>[\s\S]*class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"[\s\S]*id="project-list"/);
+  const panel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"[\s\S]*id="project-list"/);
   assert.match(main, /className = 'project-sessions'/);
   assert.match(style, /\.project-sessions\{padding:[^}]*\}/);
   assert.doesNotMatch(main, /\['New Session',[\s\S]*renameProject\(project\)/);
@@ -83,14 +79,14 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  const taskPanel = html.match(/data-panel-content="tasks">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  const taskPanel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
   const workspace = html.match(/class="session-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
-  assert.match(taskPanel, /<h2>Tasks<\/h2>[\s\S]*class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"[\s\S]*id="task-list"/);
+  assert.match(taskPanel, /class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"[\s\S]*id="task-list"/);
   assert.match(workspace, /id="new-session"[\s\S]*id="rename-session"[\s\S]*id="delete-session"/);
   assert.match(main, /className = 'task-sessions'/);
   assert.match(main, /session\.taskId/);
   assert.match(style, /\.task-sessions\{padding:[^}]*\}/);
-  assert.match(style, /data-panel-content="tasks"\] \.session-item\.selected[^}]*background:transparent/);
+  assert.match(style, /data-panel-content="library"\] \.session-item\.selected[^}]*background:transparent/);
   assert.match(main, /session\.taskId === task\.id/);
 });
 

@@ -10,7 +10,7 @@ import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLab
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
+import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -81,7 +81,7 @@ let mode: 'plan' | 'act' = 'act';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
-let activePanel: SidebarPanel | null = 'tasks';
+let activePanel: SidebarPanel | null = 'library';
 let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
@@ -469,12 +469,15 @@ function applyKindUi(): void {
     const panel = button.dataset.panel as SidebarPanel;
     button.hidden = !panelAvailableForKind(panel, activeKind);
   }
-  for (const panel of ['tasks', 'projects'] as const) {
-    const button = document.querySelector<HTMLButtonElement>(`[data-panel="${panel}"]`);
-    if (button) button.hidden = !panelAvailableForKind(panel, activeKind);
-  }
-  const explorerButton = document.querySelector<HTMLButtonElement>('[data-panel="workspace"]');
-  if (explorerButton) explorerButton.hidden = !panelAvailableForKind('workspace', activeKind);
+  // One container panel serves both modes; only its heading, actions and list change.
+  const libraryLabel = work ? 'Tasks' : 'Projects';
+  $('library-title').textContent = libraryLabel;
+  const libraryButton = document.querySelector<HTMLButtonElement>('[data-panel="library"]');
+  if (libraryButton) { libraryButton.title = libraryLabel; libraryButton.setAttribute('aria-label', libraryLabel); }
+  $('task-operations').toggleAttribute('hidden', !work);
+  $('project-operations').toggleAttribute('hidden', work);
+  $('task-list').toggleAttribute('hidden', !work);
+  $('project-list').toggleAttribute('hidden', work);
   document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
   $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
   $('approve-command-option').toggleAttribute('hidden', work);
@@ -489,13 +492,11 @@ function applyKindUi(): void {
       ? selectedWorkTaskId ? 'Ask a question or create a document. Files and editable attachment copies stay in this task’s managed folder.' : 'Create or select a task in the Tasks panel, then start a session here.'
       : (selectedProjectWorkspace ? 'Start a new session in this project. Existing project files are available in Explorer.' : 'Create a project folder or open an existing codebase to begin.');
   }
-  $('workspace-button').textContent = newActionLabel('tasks');
   $('new-project').textContent = 'New';
   $('new-session').toggleAttribute('hidden', false);
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
-  $('profile-work-content').toggleAttribute('hidden', !work);
-  $('profile-code-content').toggleAttribute('hidden', work);
-  if (activePanel && !panelAvailableForKind(activePanel, activeKind)) switchPanel(defaultPanelForKind(activeKind));
+  $('profile-github').toggleAttribute('hidden', work);
+  if (activePanel && !panelAvailableForKind(activePanel, activeKind)) switchPanel(defaultPanel());
 
 }
 
@@ -540,7 +541,7 @@ function enterDraft(kind: SessionKind, workspace: string | null = selectedProjec
   $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
-  if (activePanel === 'workspace') void refreshProjectTree();
+  if (activePanel === 'explorer') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
   void refreshCheckpoints(); void refreshSchedules();
   setStatus(kind === 'work' ? selectedWorkTaskId ? 'Start a session in this task.' : 'Create or select a task to begin.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
@@ -554,7 +555,7 @@ async function setKind(kind: SessionKind): Promise<void> {
   const remembered = kind === 'code' && workspace ? lastSessionByProject.get(workspace) : lastSessionByKind.get(kind);
   const next = sessionForMode(candidates, kind, remembered, kind === 'code' ? workspace : null);
   enterDraft(kind, kind === 'code' ? workspace ?? next?.workspace ?? null : workspace);
-  switchPanel(defaultPanelForKind(kind));
+  switchPanel(defaultPanel());
   if (kind === 'work') {
     const task = workTasks.find((item) => item.id === selectedWorkTaskId) ?? workTasks[0];
     if (task) await selectWorkTask(task.id, false);
@@ -617,7 +618,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
-    await Promise.all([refreshCheckpoints(), refreshSchedules(), activePanel === 'workspace' ? refreshProjectTree() : Promise.resolve(), activePanel === 'source-control' ? refreshSourceControl() : Promise.resolve()]);
+    await Promise.all([refreshCheckpoints(), refreshSchedules(), activePanel === 'explorer' ? refreshProjectTree() : Promise.resolve(), activePanel === 'source-control' ? refreshSourceControl() : Promise.resolve()]);
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
   finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
@@ -785,7 +786,7 @@ function closePanel(): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
 }
 function switchPanel(panel: SidebarPanel): void {
-  if (!panelAvailableForKind(panel, activeKind)) panel = defaultPanelForKind(activeKind);
+  if (!panelAvailableForKind(panel, activeKind)) panel = defaultPanel();
   activePanel = panel;
   document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
   document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
@@ -796,13 +797,13 @@ function switchPanel(panel: SidebarPanel): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
-  if (activePanel === 'workspace') void refreshProjectTree();
+  if (activePanel === 'explorer') void refreshProjectTree();
   if (activePanel === 'source-control') void refreshSourceControl();
 }
 
 async function selectProject(workspace: string): Promise<void> {
   if (!projects.some((project) => project.workspace === workspace)) { setStatus('Open this project first.'); return; }
-  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); switchPanel('projects');
+  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); switchPanel('library');
   const next = sessionForMode(summaries, 'code', lastSessionByProject.get(workspace), workspace);
   if (next) await selectSession(next.id, false);
   else renderSessions();
@@ -816,13 +817,13 @@ async function selectWorkTask(taskId: string, saveDraft = true): Promise<void> {
   const children = summaries.filter((session) => session.kind === 'work' && session.taskId === taskId);
   const remembered = lastSessionByTask.get(taskId) ?? (summaries.find((session) => session.id === lastSessionByKind.get('work') && session.taskId === taskId)?.id);
   const next = children.find((session) => session.id === remembered) ?? children[0];
-  switchPanel('tasks');
+  switchPanel('library');
   if (next) await selectSession(next.id, false);
   else {
     enterDraft('work');
     updateFolderContext();
     renderSessions();
-    if (activePanel === 'workspace') void refreshProjectTree();
+    if (activePanel === 'explorer') void refreshProjectTree();
   }
 }
 function browserArgs(): { sessionId: string | null; projectWorkspace: string | null; workTaskId: string | null } {
@@ -1188,7 +1189,7 @@ async function initialize(): Promise<void> {
     await refreshSummaries();
     restoreNavigation();
     await setKind(DEFAULT_SESSION_KIND);
-    switchPanel(defaultPanelForKind(DEFAULT_SESSION_KIND));
+    switchPanel(defaultPanel());
     const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
     if (restoredTask) await selectWorkTask(restoredTask.id, false);
     else {
@@ -1219,7 +1220,7 @@ attachButton.addEventListener('click', async () => {
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     const records = await invoke<AttachmentRecord[]>('add_attachments', { sessionId, paths });
-    if (activeSessionId === sessionId) { pendingAttachments = [...pendingAttachments, ...records]; renderChips(); setStatus(`${pendingAttachments.length} file(s) attached. Copies are in Explorer.`); if (activePanel === 'workspace') await refreshProjectTree(); }
+    if (activeSessionId === sessionId) { pendingAttachments = [...pendingAttachments, ...records]; renderChips(); setStatus(`${pendingAttachments.length} file(s) attached. Copies are in Explorer.`); if (activePanel === 'explorer') await refreshProjectTree(); }
     else { const draft = composerDrafts.get(sessionId) ?? { text: '', attachments: [] }; composerDrafts.set(sessionId, { ...draft, attachments: [...draft.attachments, ...records] }); }
   } catch (error) { if (activeSessionId === sessionId) setStatus(String(error)); }
 });
@@ -1482,7 +1483,7 @@ $('workspace-button').addEventListener('click', async () => {
   try {
     const task = await invoke<WorkTaskRecord>('create_work_task');
     await refreshSummaries(); selectedWorkTaskId = task.id; expandedWorkTasks.add(task.id); lastSessionByTask.delete(task.id); rememberNavigation();
-    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); switchPanel('tasks');
+    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); switchPanel('library');
     setStatus(`Task “${task.name}” created. Create a session in the workspace to begin.`);
   } catch (error) { setStatus(String(error)); }
   finally { creatingSession = false; renderSessions(); updateControls(); }
@@ -1536,7 +1537,7 @@ $('open-project').addEventListener('click', async () => {
 });
 async function newProjectSession(workspace: string): Promise<void> {
   if (creatingSession) return;
-  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); switchPanel('projects');
+  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); switchPanel('library');
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
 $('new-session').addEventListener('click', () => {
@@ -1707,7 +1708,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
       await refreshSummaries();
-      if (id === activeSessionId && activePanel === 'workspace') await refreshProjectTree();
+      if (id === activeSessionId && activePanel === 'explorer') await refreshProjectTree();
       if (id === activeSessionId && activePanel === 'source-control') await refreshSourceControl();
     }).catch((error) => setStatus(String(error)));
   }
