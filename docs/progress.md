@@ -164,3 +164,13 @@
 - Keys are keyed in the OS keychain by endpoint for Custom/SearXNG and by provider for the hosted APIs; `has_search_key` reports presence without revealing the key.
 - Settings gained a provider select, per-provider endpoint labels/placeholders, and a **Test search** button that runs one real query and reports the first hit.
 - Tests: mock servers assert each provider's method, headers, path, and body, plus error surfacing, missing-key handling, and the migration.
+
+## Keyless web search (0.4.8)
+
+- The 0.4.7 design was wrong: it made search a client-side call to Brave/Tavily/Serper, which all require an API key, so search only worked after the user obtained one. The Moderado CLI proves a key is unnecessary.
+- `search.rs` gained an `Automatic` provider, now the default: it calls the same keyless hosted MCP servers as the CLI (`mcp.exa.ai` with `web_search_exa`, then `search.parallel.ai` with `web_search`), accepting either a JSON or `text/event-stream` reply. Output is normalized and bounded to 8k characters.
+- No configuration is required. The Settings fields are hidden for Automatic; **Test search** still runs a real query.
+- Migration 9 moves sessions that never configured a custom endpoint (`provider='custom'`, empty endpoint) to `automatic`, so existing sessions start working without edits.
+- Brave/Tavily/Serper/SearXNG/Custom remain as optional providers for users who want them.
+- Also fixed: a turn failed with "Custom endpoint needs a search endpoint" when search was enabled but unconfigured. Missing settings now disable search instead of failing the turn (`search::turn_endpoint`), and search can be turned off without filling in an endpoint.
+- Tests: keyless SSE parsing, fallback when the first server fails, the all-servers-fail error, the migration, and an ignored `live_keyless_search` that performs a real network search on demand.

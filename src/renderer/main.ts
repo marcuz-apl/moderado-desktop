@@ -8,7 +8,7 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLabel, type ModelInfo } from './models';
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
-import { endpointField, searchStatus, toSearchProvider, validateSearchInput, type SearchProvider } from './search-config';
+import { endpointField, isKeyless, searchStatus, toSearchProvider, validateSearchInput, type SearchProvider } from './search-config';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
@@ -717,6 +717,15 @@ function applySearchProviderUi(): void {
   $('search-endpoint-label').textContent = field.label;
   $<HTMLInputElement>('search-endpoint').placeholder = field.placeholder;
   $('search-key-label').textContent = provider === 'searxng' || provider === 'custom' ? 'Optional API key' : 'API key';
+  // Keyless search has nothing to fill in, so hide the fields instead of
+  // asking for settings that would be ignored.
+  const keyless = isKeyless(provider);
+  for (const id of ['search-endpoint', 'search-endpoint-label', 'search-key', 'search-key-label']) {
+    $(id).hidden = keyless;
+  }
+  $('search-hint').textContent = keyless
+    ? 'No setup needed. Searches go to hosted search servers that require no key.'
+    : 'Brave, Tavily, and Serper need an API key; SearXNG and Custom need an endpoint URL.';
 }
 
 async function searchKeyExists(provider: SearchProvider, endpoint: string): Promise<boolean> {
@@ -1674,7 +1683,7 @@ $('save-search').addEventListener('click', async () => {
   const apiKey = $<HTMLInputElement>('search-key').value;
   const settings: SearchSettings = { enabled: $<HTMLInputElement>('search-enabled').checked, provider, endpoint };
   try {
-    const problem = validateSearchInput(provider, endpoint, apiKey);
+    const problem = validateSearchInput(provider, endpoint, apiKey, settings.enabled);
     if (problem) throw new Error(problem);
     if (apiKey) {
       await invoke('save_search_key', { provider, endpoint, apiKey });

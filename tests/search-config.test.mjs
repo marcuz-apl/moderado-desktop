@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { endpointField, isSearchConfigured, needsKey, requiresEndpoint, searchStatus, toSearchProvider, validateSearchInput } from '../src/renderer/search-config.ts';
+import { endpointField, isKeyless, isSearchConfigured, needsKey, requiresEndpoint, searchStatus, toSearchProvider, validateSearchInput } from '../src/renderer/search-config.ts';
 
-test('unknown providers fall back to the custom endpoint', () => {
+test('automatic search is the default and needs nothing', () => {
+  assert.equal(toSearchProvider(undefined), 'automatic');
+  assert.equal(toSearchProvider('duckduckgo'), 'automatic');
+  assert.equal(toSearchProvider('automatic'), 'automatic');
+  assert.equal(isKeyless('automatic'), true);
+  assert.equal(isSearchConfigured('automatic', '', false), true);
+  assert.equal(validateSearchInput('automatic', '', '', true), null);
+  assert.match(searchStatus('automatic', '', false), /no setup needed/);
+});
+
+test('unknown providers fall back to the default', () => {
   assert.equal(toSearchProvider('brave'), 'brave');
   assert.equal(toSearchProvider('searxng'), 'searxng');
-  assert.equal(toSearchProvider('duckduckgo'), 'custom');
-  assert.equal(toSearchProvider(undefined), 'custom');
+  assert.equal(toSearchProvider('nonsense'), 'automatic');
 });
 
 test('hosted providers need a key, custom and SearXNG need a URL', () => {
@@ -14,10 +23,12 @@ test('hosted providers need a key, custom and SearXNG need a URL', () => {
     assert.equal(needsKey(provider), true, provider);
     assert.equal(requiresEndpoint(provider), false, provider);
   }
-  for (const provider of ['custom', 'searxng']) {
+  for (const provider of ['custom', 'searxng', 'automatic']) {
     assert.equal(needsKey(provider), false, provider);
-    assert.equal(requiresEndpoint(provider), true, provider);
   }
+  assert.equal(requiresEndpoint('custom'), true);
+  assert.equal(requiresEndpoint('searxng'), true);
+  assert.equal(requiresEndpoint('automatic'), false);
 });
 
 test('configured matches what the agent can actually call', () => {
@@ -29,11 +40,16 @@ test('configured matches what the agent can actually call', () => {
 });
 
 test('invalid input is rejected before it reaches the backend', () => {
-  assert.match(validateSearchInput('custom', '', ''), /endpoint/);
-  assert.match(validateSearchInput('searxng', '', ''), /SearXNG URL/);
-  assert.match(validateSearchInput('brave', '', ''), /API key/);
-  assert.equal(validateSearchInput('brave', '', 'key'), null);
-  assert.equal(validateSearchInput('custom', 'https://search.example/api', ''), null);
+  assert.match(validateSearchInput('custom', '', '', true), /endpoint/);
+  assert.match(validateSearchInput('searxng', '', '', true), /SearXNG URL/);
+  assert.match(validateSearchInput('brave', '', '', true), /API key/);
+  assert.equal(validateSearchInput('brave', '', 'key', true), null);
+  assert.equal(validateSearchInput('custom', 'https://search.example/api', '', true), null);
+});
+
+test('search can be turned off without configuring it', () => {
+  assert.equal(validateSearchInput('custom', '', '', false), null);
+  assert.equal(validateSearchInput('brave', '', '', false), null);
 });
 
 test('status explains what is still missing', () => {

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -227,6 +227,19 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
         tx.commit().map_err(|error| error.to_string())?;
     }
 
+    if version < 9 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        // Keyless search needs no setup, so sessions that never configured a
+        // custom endpoint move to it instead of showing as unconfigured.
+        tx.execute(
+            "UPDATE search_settings SET provider='automatic' WHERE provider='custom' AND endpoint=''",
+            [],
+        )
+        .map_err(|error| format!("Could not migrate search providers: {error}"))?;
+        tx.pragma_update(None, "user_version", 9).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -412,7 +425,9 @@ mod tests {
                 CREATE TABLE IF NOT EXISTS work_tasks (id TEXT PRIMARY KEY,name TEXT NOT NULL,workspace TEXT NOT NULL UNIQUE,updated_at INTEGER NOT NULL);
                 ALTER TABLE sessions ADD COLUMN task_id TEXT;
                 INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES ('s1','Old','/tmp','{}','[]',1,'code','{}');
+                INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES ('s2','Blank','/tmp','{}','[]',2,'code','{}');
                 INSERT INTO search_settings (session_id,enabled,endpoint) VALUES ('s1',1,'https://search.example/api');
+                INSERT INTO search_settings (session_id,enabled,endpoint) VALUES ('s2',1,'');
                 PRAGMA user_version=7;").unwrap();
         }
         let db = open(&path).unwrap();
@@ -421,5 +436,10 @@ mod tests {
             .unwrap();
         assert_eq!(provider, "custom");
         assert_eq!(endpoint, "https://search.example/api");
+        // A session that never configured an endpoint now searches without setup.
+        let blank: String = db
+            .query_row("SELECT provider FROM search_settings WHERE session_id='s2'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(blank, "automatic");
     }
 }

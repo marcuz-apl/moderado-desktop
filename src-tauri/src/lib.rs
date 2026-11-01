@@ -616,6 +616,9 @@ async fn has_search_key(
     provider: search::SearchProvider,
     endpoint: String,
 ) -> Result<bool, String> {
+    if !search::is_ready(provider, &endpoint) {
+        return Ok(false);
+    }
     let endpoint = search::validate(provider, &endpoint)?;
     Ok(!search_key(provider, endpoint).await?.is_empty())
 }
@@ -1179,20 +1182,16 @@ async fn execute_turn(
     let base_url = settings.provider_id.base_url(&settings.base_url)?;
     let api_key = configured_key(settings.provider_id, &base_url).await?;
     let search_settings = expected_search.unwrap_or(live_search);
-    let search = if search_settings.enabled {
-        let endpoint = search::validate(search_settings.provider, &search_settings.endpoint)?;
-        let key = search_key(search_settings.provider, endpoint.clone()).await?;
-        if search::is_configured(search_settings.provider, &endpoint, &key) {
-            Some(SearchConfig {
+    let search = match search::turn_endpoint(&search_settings)? {
+        Some(endpoint) => {
+            let key = search_key(search_settings.provider, endpoint.clone()).await?;
+            search::is_configured(search_settings.provider, &endpoint, &key).then_some(SearchConfig {
                 provider: search_settings.provider,
                 endpoint,
                 key,
             })
-        } else {
-            None
         }
-    } else {
-        None
+        None => None,
     };
     let attachments_root = app
         .path()
