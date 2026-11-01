@@ -718,7 +718,15 @@ async function refreshCheckpoints(): Promise<void> {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'checkpoint-item';
-      button.textContent = `${checkpoint.path} · ${new Date(checkpoint.createdAt * 1000).toLocaleString()}`;
+      // Path and time are separate lines: the sidebar is too narrow for both on one.
+      const path = document.createElement('span');
+      path.className = 'checkpoint-path';
+      path.textContent = checkpoint.path;
+      const time = document.createElement('span');
+      time.className = 'checkpoint-time';
+      time.textContent = new Date(checkpoint.createdAt * 1000).toLocaleString();
+      button.append(path, time);
+      button.title = `${checkpoint.path} · ${time.textContent}`;
       button.addEventListener('click', () => { void previewCheckpoint(id, checkpoint.id); });
       return button;
     }));
