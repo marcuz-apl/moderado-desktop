@@ -77,3 +77,6 @@
 - The ABI is probed first; if Landlock is unavailable the command is refused rather than run unsandboxed. This is the "fail closed" rule from the PRD.
 - Unlike the Windows backend, the Linux command runs in the workspace directly rather than in a disposable copy, so changes are in place; `changed_files` is derived from a metadata snapshot before and after the run.
 - The Linux backend is verified by the new CI job, not locally: WSL is blocked and only the Windows Rust target is installed here.
+- Every mainstream search API uses its own auth header and result shape (Brave `X-Subscription-Token` with `web.results[].description`, Tavily `Authorization: Bearer` with `results[].content`, Serper `X-API-KEY` with `organic[].link`), so a single generic `GET ?q=` contract could never work against a real provider. Normalizing in `search.rs` is what makes web search usable without a proxy.
+- Public SearXNG instances disable `format=json` and answer with bot-protection HTML, so keyless web search is not dependable; a hosted provider key is the practical default.
+- Live verification used invalid keys on purpose: the APIs answer with credential errors (`SUBSCRIPTION_TOKEN_INVALID`, `invalid API key`, `Unauthorized`) rather than parameter errors, which proves the URL, query parameters, and header names are correct without a real key.

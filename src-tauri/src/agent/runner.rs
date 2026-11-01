@@ -339,7 +339,7 @@ mod tests {
         run_turn(
             RunConfig {
                 workspace: root.path(), base_url: &base, model: "test-model", api_key: "", mode: Mode::Act,
-                search: Some(&SearchConfig { endpoint: "http://127.0.0.1:1/search".into(), key: String::new() }),
+                search: Some(&SearchConfig { provider: crate::search::SearchProvider::Custom, endpoint: "http://127.0.0.1:1/search".into(), key: String::new() }),
                 kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval", mcp: None, lsp: None,
             },
             &mut history,

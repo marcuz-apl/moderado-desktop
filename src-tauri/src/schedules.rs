@@ -305,6 +305,7 @@ mod tests {
         let store = ScheduleStore::open(path.clone()).unwrap();
         let search = SearchSettings {
             enabled: true,
+            provider: crate::search::SearchProvider::Custom,
             endpoint: "https://search.example/api".into(),
         };
         let schedule = store

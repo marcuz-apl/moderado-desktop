@@ -60,7 +60,17 @@ Each approved file write or edit creates a checkpoint of the workspace before ap
 
 To schedule a task, save the session's provider and models by sending a task, then choose **Schedule task**. Set the first run time, optionally enter a repeat interval in minutes, and select Plan or Act mode. **Ask me** is the default write policy; choose **Auto-approve writes** explicitly for unattended Act work. If the app is closed at a due time, it claims the overdue occurrence on the next launch. A repeating schedule skips missed intervals and advances to its next future time. Interrupted runs pause for review and can be retried. A schedule pauses if its provider, models, or web search settings change; recreate it to authorize the new settings. Delete a schedule to stop future runs.
 
-Web search is enabled by default per session, but unavailable until you save a search API endpoint. In **Web search**, enter an HTTPS endpoint (or a loopback HTTP endpoint) and optionally an API key, which stays in the OS keychain. The API must accept `GET endpoint?q=term` and return JSON such as `{"results":[{"title":"Result","url":"https://example.com","snippet":"Summary"}]}`. Disable the checkbox to remove web search from that session's agent tools. Search requests go only to the configured endpoint.
+Web search is enabled by default per session, but unavailable until it is configured. In **Web search**, choose a provider:
+
+| Provider | Needs | Notes |
+| --- | --- | --- |
+| Brave Search | API key | `X-Subscription-Token` against `api.search.brave.com` |
+| Tavily | API key | JSON `POST` to `api.tavily.com/search` |
+| Serper | API key | JSON `POST` to `google.serper.dev/search` |
+| SearXNG | URL | Self-hosted instance that serves `format=json` |
+| Custom endpoint | URL | `GET endpoint?q=term` returning `{"results":[{"title":"Result","url":"https://example.com","snippet":"Summary"}]}` |
+
+Keys stay in the OS keychain, never in config or transcripts. The endpoint field is an optional override for hosted providers and required for SearXNG and Custom; only HTTPS (or loopback HTTP) is accepted. **Test search** runs one real query and reports the first hit, so a provider can be verified before a session relies on it. Disable the checkbox to remove web search from that session's agent tools. Search requests go only to the configured provider.
 
 To import an existing conversation, select a session for the workspace, choose **Import transcript**, and select a Codex or Claude Code JSONL file. Moderado creates a new session containing user and assistant text. Tool outputs, thinking blocks, and metadata are excluded. Imported text becomes context for the selected provider when you send the next task.
 

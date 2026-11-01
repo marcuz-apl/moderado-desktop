@@ -155,3 +155,12 @@
 - CI now runs on Ubuntu, Windows, and macOS, and executes `npm run lint` (including Clippy, which compiles the Linux Landlock module) before `npm test`.
 - Added `docs/release.md`: version/tag flow, artifacts, and the signing, auto-update, and GitHub App work that is blocked on external credentials.
 - Code signing, the Tauri updater, and GitHub sign-in remain blocked on certificates, a signing keypair/endpoint, and a GitHub App client ID respectively.
+
+## Web search providers (0.4.7)
+
+- Web search previously required an endpoint that already returned `{"results":[{title,url,snippet}]}`. No off-the-shelf search API does, so search only worked behind a hand-written proxy.
+- `search.rs` now has per-provider adapters: Brave (`X-Subscription-Token`, `web.results[].description`), Tavily (`Authorization: Bearer`, JSON body, `results[].content`), Serper (`X-API-KEY`, JSON body, `organic[].link`), SearXNG (`<base>/search?q=&format=json`, `results[].content`), and the original Custom shape. Response size, timeout, and redirect limits are unchanged.
+- Migration 8 adds `search_settings.provider` defaulting to `custom`, so existing sessions keep their configured endpoint.
+- Keys are keyed in the OS keychain by endpoint for Custom/SearXNG and by provider for the hosted APIs; `has_search_key` reports presence without revealing the key.
+- Settings gained a provider select, per-provider endpoint labels/placeholders, and a **Test search** button that runs one real query and reports the first hit.
+- Tests: mock servers assert each provider's method, headers, path, and body, plus error surfacing, missing-key handling, and the migration.

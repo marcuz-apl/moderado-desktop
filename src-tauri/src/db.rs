@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -211,6 +211,20 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
             .map_err(|error| format!("Could not migrate Work Tasks: {error}"))?;
         tx.pragma_update(None, "user_version", 7).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
+        version = 7;
+    }
+
+    if version < 8 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        // Existing sessions searched a custom endpoint, so they keep that provider.
+        add_column_if_missing(
+            &tx,
+            "search_settings",
+            "provider",
+            "TEXT NOT NULL DEFAULT 'custom'",
+        )?;
+        tx.pragma_update(None, "user_version", 8).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -284,7 +298,7 @@ mod tests {
         let (task_name, session_name): (String, String) = db.query_row("SELECT work_tasks.name,sessions.name FROM work_tasks JOIN sessions ON sessions.task_id=work_tasks.id WHERE sessions.id='w1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(task_name, "Task");
         assert_eq!(session_name, "Session 1");
-        assert_eq!(schema_version(&db).unwrap(), 7);
+        assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
@@ -384,5 +398,28 @@ mod tests {
         let custom: serde_json::Value = serde_json::from_str(&custom).unwrap();
         assert_eq!(custom["readFiles"], false);
         assert_eq!(custom["useMcpServers"], true);
+    }
+
+    #[test]
+    fn version_seven_search_settings_gain_the_custom_provider() {
+        let (_root, path) = temporary();
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(V1).unwrap();
+            add_column_if_missing(&db, "sessions", "kind", "TEXT NOT NULL DEFAULT 'code'").unwrap();
+            add_column_if_missing(&db, "sessions", "auto_approve_json", "TEXT NOT NULL DEFAULT '{}'").unwrap();
+            db.execute_batch("CREATE TABLE IF NOT EXISTS projects (workspace TEXT PRIMARY KEY,name TEXT NOT NULL,updated_at INTEGER NOT NULL,archived INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS work_tasks (id TEXT PRIMARY KEY,name TEXT NOT NULL,workspace TEXT NOT NULL UNIQUE,updated_at INTEGER NOT NULL);
+                ALTER TABLE sessions ADD COLUMN task_id TEXT;
+                INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES ('s1','Old','/tmp','{}','[]',1,'code','{}');
+                INSERT INTO search_settings (session_id,enabled,endpoint) VALUES ('s1',1,'https://search.example/api');
+                PRAGMA user_version=7;").unwrap();
+        }
+        let db = open(&path).unwrap();
+        let (provider, endpoint): (String, String) = db
+            .query_row("SELECT provider,endpoint FROM search_settings WHERE session_id='s1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(provider, "custom");
+        assert_eq!(endpoint, "https://search.example/api");
     }
 }

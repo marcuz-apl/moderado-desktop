@@ -571,13 +571,18 @@ fn save_search_settings(
 }
 
 #[tauri::command]
-async fn save_search_key(endpoint: String, api_key: String) -> Result<(), String> {
-    let endpoint = search::validate_endpoint(&endpoint)?;
+async fn save_search_key(
+    provider: search::SearchProvider,
+    endpoint: String,
+    api_key: String,
+) -> Result<(), String> {
+    let endpoint = search::validate(provider, &endpoint)?;
     if api_key.is_empty() {
         return Err("Search API key cannot be empty".into());
     }
+    let account = search::key_account(provider, &endpoint);
     tauri::async_runtime::spawn_blocking(move || {
-        let entry = keyring::Entry::new("com.moderado.desktop.search", &endpoint)
+        let entry = keyring::Entry::new("com.moderado.desktop.search", &account)
             .map_err(|_| "Could not access OS keychain")?;
         entry
             .set_password(&api_key)
@@ -587,9 +592,13 @@ async fn save_search_key(endpoint: String, api_key: String) -> Result<(), String
     .map_err(|_| "Keychain task failed")?
 }
 
-async fn search_key(endpoint: String) -> Result<String, String> {
+async fn search_key(
+    provider: search::SearchProvider,
+    endpoint: String,
+) -> Result<String, String> {
+    let account = search::key_account(provider, &endpoint);
     tauri::async_runtime::spawn_blocking(move || {
-        let entry = keyring::Entry::new("com.moderado.desktop.search", &endpoint)
+        let entry = keyring::Entry::new("com.moderado.desktop.search", &account)
             .map_err(|_| "Could not access OS keychain")?;
         match entry.get_password() {
             Ok(key) => Ok(key),
@@ -599,6 +608,47 @@ async fn search_key(endpoint: String) -> Result<String, String> {
     })
     .await
     .map_err(|_| "Keychain task failed")?
+}
+
+/// Lets Settings report whether a saved key exists without revealing it.
+#[tauri::command]
+async fn has_search_key(
+    provider: search::SearchProvider,
+    endpoint: String,
+) -> Result<bool, String> {
+    let endpoint = search::validate(provider, &endpoint)?;
+    Ok(!search_key(provider, endpoint).await?.is_empty())
+}
+
+/// Runs a real search so the user can confirm a provider works before relying
+/// on it. Uses the typed key when given, otherwise the saved one.
+#[tauri::command]
+async fn test_search(
+    provider: search::SearchProvider,
+    endpoint: String,
+    api_key: String,
+) -> Result<String, String> {
+    let endpoint = search::validate(provider, &endpoint)?;
+    let key = if api_key.is_empty() {
+        search_key(provider, endpoint.clone()).await?
+    } else {
+        api_key
+    };
+    if !search::is_configured(provider, &endpoint, &key) {
+        return Err(format!(
+            "{} is not configured yet; add the missing settings and save first",
+            provider.label()
+        ));
+    }
+    search::query(
+        &SearchConfig {
+            provider,
+            endpoint,
+            key,
+        },
+        "tauri",
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1129,12 +1179,18 @@ async fn execute_turn(
     let base_url = settings.provider_id.base_url(&settings.base_url)?;
     let api_key = configured_key(settings.provider_id, &base_url).await?;
     let search_settings = expected_search.unwrap_or(live_search);
-    let search = if search_settings.enabled && !search_settings.endpoint.is_empty() {
-        let endpoint = search::validate_endpoint(&search_settings.endpoint)?;
-        Some(SearchConfig {
-            key: search_key(endpoint.clone()).await?,
-            endpoint,
-        })
+    let search = if search_settings.enabled {
+        let endpoint = search::validate(search_settings.provider, &search_settings.endpoint)?;
+        let key = search_key(search_settings.provider, endpoint.clone()).await?;
+        if search::is_configured(search_settings.provider, &endpoint, &key) {
+            Some(SearchConfig {
+                provider: search_settings.provider,
+                endpoint,
+                key,
+            })
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -1475,6 +1531,8 @@ pub fn run() {
             get_search_settings,
             save_search_settings,
             save_search_key,
+            has_search_key,
+            test_search,
             import_transcript,
             list_checkpoints,
             preview_checkpoint,
