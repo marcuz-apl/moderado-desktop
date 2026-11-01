@@ -8,6 +8,7 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLabel, type ModelInfo } from './models';
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
+import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
@@ -97,6 +98,9 @@ const lastSessionByKind = new Map<SessionKind, string>();
 const lastSessionByProject = new Map<string, string>();
 const lastSessionByTask = new Map<string, string>();
 const composerDrafts = new Map<string, { text: string; attachments: AttachmentRecord[] }>();
+const promptHistory = new Map<string, string[]>();
+const PROMPT_HISTORY_LIMIT = 100;
+let recallState: RecallState = { ...EMPTY_RECALL };
 let selectionRevision = 0;
 let selectingContext = false;
 let autoApproveSaveRevision = 0;
@@ -518,9 +522,45 @@ function restoreNavigation(): void {
   } catch (error) { setStatus(`Navigation preference could not be loaded: ${String(error)}`); }
 }
 function draftKey(): string { return activeSessionId ?? `${activeKind}:${activeKind === 'code' ? selectedProjectWorkspace ?? '' : selectedWorkTaskId ?? ''}`; }
-function saveComposerDraft(): void { composerDrafts.set(draftKey(), { text: prompt.value, attachments: [...pendingAttachments] }); }
+function saveComposerDraft(): void {
+  // While browsing history the box shows a recalled prompt, not what the user
+  // typed, so their real draft stays untouched.
+  if (recallState.index !== null) return;
+  composerDrafts.set(draftKey(), { text: prompt.value, attachments: [...pendingAttachments] });
+}
 function restoreComposerDraft(): void {
   const draft = composerDrafts.get(draftKey()); prompt.value = draft?.text ?? ''; pendingAttachments = draft?.attachments ?? []; renderChips();
+  recallState = { ...EMPTY_RECALL };
+}
+/** The prompts this session already sent, seeded from its transcript on first use. */
+function historyFor(sessionId: string): string[] {
+  const cached = promptHistory.get(sessionId);
+  if (cached) return cached;
+  const seeded = (views.get(sessionId) ?? [])
+    .filter((message) => message.role === 'You')
+    .map((message) => message.content.replace(/\n\n\[[^\]]*\]$/, '').trim())
+    .filter(Boolean)
+    .slice(-PROMPT_HISTORY_LIMIT);
+  promptHistory.set(sessionId, seeded);
+  return seeded;
+}
+function rememberPrompt(sessionId: string, text: string): void {
+  const history = historyFor(sessionId);
+  if (history.at(-1) !== text) history.push(text);
+  if (history.length > PROMPT_HISTORY_LIMIT) history.splice(0, history.length - PROMPT_HISTORY_LIMIT);
+  recallState = { ...EMPTY_RECALL };
+}
+/** Up/Down recall for the composer, keeping multi-line editing intact. */
+function recallPrompt(direction: -1 | 1): boolean {
+  const sessionId = activeSessionId;
+  if (!sessionId) return false;
+  if (!canRecall(prompt.value, prompt.selectionStart, prompt.selectionEnd, direction)) return false;
+  const next = recall(historyFor(sessionId), recallState, direction, prompt.value);
+  if (!next) return false;
+  recallState = next.state;
+  prompt.value = next.text;
+  prompt.setSelectionRange(next.text.length, next.text.length);
+  return true;
 }
 function currentFolder(): string | null {
   return activeKind === 'code' ? selectedProjectWorkspace : workTasks.find((task) => task.id === selectedWorkTaskId)?.workspace ?? activeSession()?.workspace ?? null;
@@ -1806,7 +1846,11 @@ prompt.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     $<HTMLFormElement>('composer').requestSubmit();
+    return;
   }
+  if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  if (recallPrompt(event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault();
 });
 
 $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
@@ -1825,6 +1869,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     $('btw-content').textContent = content;
     $<HTMLDialogElement>('btw-dialog').showModal();
     prompt.value = '';
+    recallState = { ...EMPTY_RECALL };
     return;
   }
   const settings = currentSettings();
@@ -1835,6 +1880,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   let id: string;
   try { id = await sessionForSubmit(activeSessionId, () => createSession(settings)); }
   catch (error) { setStatus(String(error) === 'No workspace selected' ? 'Choose a workspace to send your message.' : String(error)); return; }
+  rememberPrompt(id, text);
   running.add(id);
   updateControls();
   renderSessions();

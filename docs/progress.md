@@ -192,3 +192,11 @@
 - `applyKindUi` hid rail buttons in three overlapping passes; one pass now does it.
 - Profile is one block with a conditional GitHub row instead of two mutually exclusive blocks.
 - Tests: the rail is asserted to be the same seven panels in both modes, and the merged panel is asserted to hold both action groups and both lists.
+
+## Composer history (0.4.14)
+
+- Up and Down in the composer walk through the prompts this session has sent, and stepping Down past the newest entry restores whatever was being typed.
+- The arrows are only taken over on the first and last line, so moving the caret through multi-line text is unchanged, and a selection is left alone.
+- History is per session and seeded from the transcript on first use, so recall works after a restart without a new table or column. Sends append to the end, cap at 100, and skip a consecutive duplicate.
+- While browsing history the draft map is not overwritten, so switching sessions keeps the text the user actually typed.
+- The step logic lives in `src/renderer/prompt-history.ts` (`canRecall`, `recall`) with `tests/prompt-history.test.mjs`; `main.ts` only supplies the caret position and applies the result.
