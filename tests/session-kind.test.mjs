@@ -135,6 +135,20 @@ test('Auto-Approve controls sit directly above the message composer', async () =
   assert.doesNotMatch(html.slice(0, html.indexOf('<main class="main">')), /id="auto-approve-group"/);
 });
 
+test('composer footer pairs the model with the shortcut hint and always shows stop', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const bottom = html.match(/<div class="composer-bottom">([\s\S]*?)<\/form>/)?.[1] ?? '';
+  assert.match(bottom, /id="selected-model"/);
+  assert.match(bottom, /class="composer-shortcuts"/);
+  assert.ok(bottom.indexOf('id="selected-model"') < bottom.indexOf('class="composer-shortcuts"'), 'model leads the row');
+  assert.ok(bottom.indexOf('id="send"') < bottom.indexOf('id="stop"'), 'stop sits right of send');
+  assert.doesNotMatch(html, /id="stop"[^>]*\bhidden\b/);
+  assert.match(style, /#send span\{display:none\}/);
+  assert.match(style, /\.composer-stop\.running \.stop-square\{display:block\}/);
+  assert.match(style, /\.composer-stop \.stop-square\{display:none;fill:#e2564a\}/);
+});
+
 test('token usage sits beside Auto-approve, outside the composer box', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');

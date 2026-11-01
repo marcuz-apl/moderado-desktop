@@ -666,8 +666,13 @@ function updateControls(): void {
   applyKindUi();
   const busy = activeSessionId ? running.has(activeSessionId) : false;
   send.disabled = !canSend(initialized, busy || creatingSession || selectingContext) || (activeKind === 'code' && !selectedProjectWorkspace) || (activeKind === 'work' && !selectedWorkTaskId);
-  stop.hidden = !busy;
+  // The stop button is always present so the action row never shifts; it shows a
+  // grey play triangle while idle and a red square while a turn is running.
   stop.disabled = !busy;
+  stop.classList.toggle('running', busy);
+  const stopLabel = busy ? 'Stop the task' : 'Idle';
+  stop.title = stopLabel;
+  stop.setAttribute('aria-label', stopLabel);
   providerSelect.disabled = busy;
   endpoint.disabled = busy;
   keyField.disabled = busy || (providers.find((item) => item.id === activeProvider)?.local ?? false);
@@ -1259,7 +1264,7 @@ stop.addEventListener('click', async () => {
   stop.disabled = true;
   setStatus('Stopping task…');
   try { await invoke('stop_turn', { sessionId: id }); }
-  catch (error) { setStatus(String(error)); stop.disabled = false; }
+  catch (error) { setStatus(String(error)); updateControls(); }
 });
 
 $('load-models').addEventListener('click', async () => {
