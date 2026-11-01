@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -217,12 +217,14 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
     if version < 8 {
         let tx = db.transaction().map_err(|error| error.to_string())?;
         // Existing sessions searched a custom endpoint, so they keep that provider.
-        add_column_if_missing(
-            &tx,
-            "search_settings",
-            "provider",
-            "TEXT NOT NULL DEFAULT 'custom'",
-        )?;
+        if table_exists(&tx, "search_settings")? {
+            add_column_if_missing(
+                &tx,
+                "search_settings",
+                "provider",
+                "TEXT NOT NULL DEFAULT 'custom'",
+            )?;
+        }
         tx.pragma_update(None, "user_version", 8).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
     }
@@ -231,16 +233,46 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
         let tx = db.transaction().map_err(|error| error.to_string())?;
         // Keyless search needs no setup, so sessions that never configured a
         // custom endpoint move to it instead of showing as unconfigured.
-        tx.execute(
-            "UPDATE search_settings SET provider='automatic' WHERE provider='custom' AND endpoint=''",
-            [],
-        )
-        .map_err(|error| format!("Could not migrate search providers: {error}"))?;
+        if table_exists(&tx, "search_settings")? {
+            tx.execute(
+                "UPDATE search_settings SET provider='automatic' WHERE provider='custom' AND endpoint=''",
+                [],
+            )
+            .map_err(|error| format!("Could not migrate search providers: {error}"))?;
+        }
         tx.pragma_update(None, "user_version", 9).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
     }
 
+    if version < 10 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        // Search is built in, so per-session search settings and the schedule
+        // binding that guarded them are no longer part of the schema.
+        tx.execute_batch("DROP TABLE IF EXISTS search_settings;")
+            .map_err(|error| format!("Could not drop search settings: {error}"))?;
+        if columns(&tx, "schedules")?
+            .iter()
+            .any(|column| column == "search_json")
+        {
+            tx.execute_batch("ALTER TABLE schedules DROP COLUMN search_json;")
+                .map_err(|error| format!("Could not drop schedules.search_json: {error}"))?;
+        }
+        tx.pragma_update(None, "user_version", 10).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+    }
+
     Ok(())
+}
+
+fn table_exists(db: &Connection, table: &str) -> Result<bool, String> {
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Could not look up the {table} table: {error}"))?;
+    Ok(count > 0)
 }
 
 fn columns(db: &Connection, table: &str) -> Result<Vec<String>, String> {
@@ -414,32 +446,33 @@ mod tests {
     }
 
     #[test]
-    fn version_seven_search_settings_gain_the_custom_provider() {
+    fn version_nine_search_settings_are_removed() {
         let (_root, path) = temporary();
         {
             let db = Connection::open(&path).unwrap();
             db.execute_batch(V1).unwrap();
-            add_column_if_missing(&db, "sessions", "kind", "TEXT NOT NULL DEFAULT 'code'").unwrap();
-            add_column_if_missing(&db, "sessions", "auto_approve_json", "TEXT NOT NULL DEFAULT '{}'").unwrap();
-            db.execute_batch("CREATE TABLE IF NOT EXISTS projects (workspace TEXT PRIMARY KEY,name TEXT NOT NULL,updated_at INTEGER NOT NULL,archived INTEGER NOT NULL DEFAULT 0);
-                CREATE TABLE IF NOT EXISTS work_tasks (id TEXT PRIMARY KEY,name TEXT NOT NULL,workspace TEXT NOT NULL UNIQUE,updated_at INTEGER NOT NULL);
-                ALTER TABLE sessions ADD COLUMN task_id TEXT;
-                INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES ('s1','Old','/tmp','{}','[]',1,'code','{}');
-                INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json) VALUES ('s2','Blank','/tmp','{}','[]',2,'code','{}');
-                INSERT INTO search_settings (session_id,enabled,endpoint) VALUES ('s1',1,'https://search.example/api');
-                INSERT INTO search_settings (session_id,enabled,endpoint) VALUES ('s2',1,'');
-                PRAGMA user_version=7;").unwrap();
+            db.execute_batch(
+                "INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at) VALUES ('s1','Old','/tmp','{}','[]',1);
+                 INSERT INTO search_settings (session_id,enabled,endpoint) VALUES ('s1',1,'https://search.example/api');
+                 PRAGMA user_version=9;",
+            )
+            .unwrap();
         }
         let db = open(&path).unwrap();
-        let (provider, endpoint): (String, String) = db
-            .query_row("SELECT provider,endpoint FROM search_settings WHERE session_id='s1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        // Search is built in, so the per-session table and the schedule binding
+        // that guarded it are gone.
+        let tables: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='search_settings'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(provider, "custom");
-        assert_eq!(endpoint, "https://search.example/api");
-        // A session that never configured an endpoint now searches without setup.
-        let blank: String = db
-            .query_row("SELECT provider FROM search_settings WHERE session_id='s2'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(blank, "automatic");
+        assert_eq!(tables, 0);
+        assert!(!columns(&db, "schedules")
+            .unwrap()
+            .iter()
+            .any(|column| column == "search_json"));
+        assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
     }
 }

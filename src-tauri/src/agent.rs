@@ -23,26 +23,19 @@ pub struct Approval {
     pub after: String,
 }
 
-pub fn tool_definitions(kind: SessionKind, mode: Mode, web_search: bool) -> Vec<Value> {
-    tool_definitions_with_mcp(kind, mode, web_search, &[])
+pub fn tool_definitions(kind: SessionKind, mode: Mode) -> Vec<Value> {
+    tool_definitions_with_mcp(kind, mode, &[])
 }
 
 /// The built-in tools plus any MCP tools the caller discovered for this turn.
 /// MCP tools are only ever passed in for Code/Act sessions.
-pub fn tool_definitions_with_mcp(
-    kind: SessionKind,
-    mode: Mode,
-    web_search: bool,
-    mcp_tools: &[Value],
-) -> Vec<Value> {
+pub fn tool_definitions_with_mcp(kind: SessionKind, mode: Mode, mcp_tools: &[Value]) -> Vec<Value> {
     let mut tools = vec![
         json!({"type":"function","function":{"name":"list_files","description":"List direct children of a workspace directory","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a UTF-8 file in the workspace","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"search_files","description":"Search UTF-8 workspace files for a literal text query","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
+        json!({"type":"function","function":{"name":"web_search","description":"Search the web and return result titles, URLs, and excerpts","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
         ];
-    if web_search {
-        tools.push(json!({"type":"function","function":{"name":"web_search","description":"Search the configured web search API","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}));
-    }
     if matches!(kind, SessionKind::Code) {
         tools.push(json!({"type":"function","function":{"name":"git_diff","description":"Show the workspace Git diff (working tree against HEAD, or the plain working-tree diff before the first commit)","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Optional workspace-relative path"}}}}}));
         tools.push(json!({"type":"function","function":{"name":"find_references","description":"Find textual occurrences of a symbol in workspace files","parameters":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}}}));
@@ -311,7 +304,7 @@ mod tests {
     #[test]
     fn mcp_tools_are_appended_to_the_tool_list() {
         let mcp = vec![json!({"type":"function","function":{"name":"mcp__srv__echo","description":"Echo","parameters":{"type":"object"}}})];
-        let tools = tool_definitions_with_mcp(SessionKind::Code, Mode::Act, false, &mcp);
+        let tools = tool_definitions_with_mcp(SessionKind::Code, Mode::Act, &mcp);
         assert!(tools
             .iter()
             .any(|tool| tool["function"]["name"] == "mcp__srv__echo"));
@@ -321,20 +314,25 @@ mod tests {
     }
 
     #[test]
-    fn web_search_is_advertised_only_when_configured() {
-        let has_search = |enabled| {
-            tool_definitions(SessionKind::Code, Mode::Plan, enabled)
+    fn web_search_needs_no_configuration() {
+        for (kind, mode) in [
+            (SessionKind::Code, Mode::Plan),
+            (SessionKind::Code, Mode::Act),
+            (SessionKind::Work, Mode::Act),
+        ] {
+            let tools = tool_definitions(kind, mode);
+            let names: Vec<&str> = tools
                 .iter()
-                .any(|tool| tool["function"]["name"] == "web_search")
-        };
-        assert!(!has_search(false));
-        assert!(has_search(true));
+                .filter_map(|tool| tool["function"]["name"].as_str())
+                .collect();
+            assert!(names.contains(&"web_search"), "{kind:?} {mode:?}");
+        }
     }
 
     #[test]
     #[cfg(windows)]
     fn command_tool_is_available_only_in_code_act_mode() {
-        let has_command = |kind, mode| tool_definitions(kind, mode, false).iter().any(|tool| tool["function"]["name"] == "execute_command");
+        let has_command = |kind, mode| tool_definitions(kind, mode).iter().any(|tool| tool["function"]["name"] == "execute_command");
         assert!(has_command(SessionKind::Code, Mode::Act));
         assert!(!has_command(SessionKind::Code, Mode::Plan));
         assert!(!has_command(SessionKind::Work, Mode::Act));
@@ -536,7 +534,7 @@ mod tests {
 
     #[test]
     fn work_tasks_get_document_tools_without_command_execution() {
-        let names: Vec<String> = tool_definitions(SessionKind::Work, Mode::Act, true)
+        let names: Vec<String> = tool_definitions(SessionKind::Work, Mode::Act)
             .iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
             .collect();

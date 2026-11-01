@@ -174,3 +174,11 @@
 - Brave/Tavily/Serper/SearXNG/Custom remain as optional providers for users who want them.
 - Also fixed: a turn failed with "Custom endpoint needs a search endpoint" when search was enabled but unconfigured. Missing settings now disable search instead of failing the turn (`search::turn_endpoint`), and search can be turned off without filling in an endpoint.
 - Tests: keyless SSE parsing, fallback when the first server fails, the all-servers-fail error, the migration, and an ignored `live_keyless_search` that performs a real network search on demand.
+
+## Web search needs no settings (0.4.9)
+
+- Removed the **Web search** group from Settings entirely: no provider picker, no endpoint, no API key, no enable toggle. Search is built in and always available to the agent, still gated by the **Fetch web content** permission.
+- `search.rs` is now only the keyless path (hosted MCP servers, Exa then Parallel). The Brave, Tavily, Serper, SearXNG, and Custom adapters, `SearchSettings`, `SearchStore`, endpoint validation, and the search keychain helpers are deleted.
+- `web_search` is advertised in every session instead of depending on configuration; the runner calls `search::query(query)` with no per-turn config.
+- Migration 10 drops the `search_settings` table and the `schedules.search_json` column. Schedules no longer pause when search settings change, because there are none.
+- Tests: keyless SSE parsing, server fallback, all-fail error, and the migration; the provider-adapter and renderer `search-config` tests were removed with the code they covered.

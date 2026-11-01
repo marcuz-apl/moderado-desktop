@@ -58,22 +58,9 @@ Create a session to choose its workspace folder, then select a provider in Setti
 
 Each approved file write or edit creates a checkpoint of the workspace before applying the change. Select a checkpoint to review file differences, then confirm restore. Restore creates a safety checkpoint of the current workspace first. Git is required for checkpoints; the app uses the workspace's Git repository when the workspace is its root, or a separate Git store in app data otherwise. Checkpoint snapshots include nonignored workspace files, so inspect the restore preview before confirming.
 
-To schedule a task, save the session's provider and models by sending a task, then choose **Schedule task**. Set the first run time, optionally enter a repeat interval in minutes, and select Plan or Act mode. **Ask me** is the default write policy; choose **Auto-approve writes** explicitly for unattended Act work. If the app is closed at a due time, it claims the overdue occurrence on the next launch. A repeating schedule skips missed intervals and advances to its next future time. Interrupted runs pause for review and can be retried. A schedule pauses if its provider, models, or web search settings change; recreate it to authorize the new settings. Delete a schedule to stop future runs.
+To schedule a task, save the session's provider and models by sending a task, then choose **Schedule task**. Set the first run time, optionally enter a repeat interval in minutes, and select Plan or Act mode. **Ask me** is the default write policy; choose **Auto-approve writes** explicitly for unattended Act work. If the app is closed at a due time, it claims the overdue occurrence on the next launch. A repeating schedule skips missed intervals and advances to its next future time. Interrupted runs pause for review and can be retried. A schedule pauses if its provider or models change; recreate it to authorize the new settings. Delete a schedule to stop future runs.
 
-Web search works out of the box. The default provider is **Automatic**, which calls hosted MCP search servers that require no credential — the same pair the Moderado CLI uses (`mcp.exa.ai`, then `search.parallel.ai` as fallback). There is nothing to configure and no API key to obtain.
-
-Other providers are optional, for people who want their own endpoint or key:
-
-| Provider | Needs | Notes |
-| --- | --- | --- |
-| Automatic (default) | nothing | Keyless hosted MCP search, tried in order |
-| Custom endpoint | URL | `GET endpoint?q=term` returning `{"results":[{"title":"Result","url":"https://example.com","snippet":"Summary"}]}` |
-| SearXNG | URL | Self-hosted instance that serves `format=json` |
-| Brave Search | API key | `X-Subscription-Token` against `api.search.brave.com` |
-| Tavily | API key | JSON `POST` to `api.tavily.com/search` |
-| Serper | API key | JSON `POST` to `google.serper.dev/search` |
-
-Keys stay in the OS keychain, never in config or transcripts. Only HTTPS (or loopback HTTP) is accepted. **Test search** runs one real query and reports the first hit. Disable the checkbox to remove web search from that session's agent tools. Search requests go only to the selected provider.
+Web search is built in and needs no setup. The `web_search` tool calls hosted MCP search servers that require no credential — the same pair the Moderado CLI uses (`mcp.exa.ai`, then `search.parallel.ai` as a fallback). There is no endpoint to enter, no provider to pick, and no API key to obtain. Searches use the **Fetch web content** permission, so you still see an approval prompt unless that category is auto-approved.
 
 To import an existing conversation, select a session for the workspace, choose **Import transcript**, and select a Codex or Claude Code JSONL file. Moderado creates a new session containing user and assistant text. Tool outputs, thinking blocks, and metadata are excluded. Imported text becomes context for the selected provider when you send the next task.
 
@@ -93,7 +80,7 @@ src-tauri/src/
   db.rs        # Schema ownership, numbered migrations, and connection setup
   sessions.rs  # SQLite sessions, histories, and checkpoint metadata
   schedules.rs # Persistent schedules and due-run claiming
-  search.rs    # Per-session search settings and configured API client
+  search.rs    # Keyless web search over hosted MCP servers
   transcript.rs # Codex and Claude Code JSONL text import
   checkpoints.rs # Git snapshots, diff preview, and restore
   workspace.rs # Workspace jail and file operations

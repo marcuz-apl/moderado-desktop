@@ -1,6 +1,5 @@
 use crate::agent::Mode;
 use crate::provider::settings::ProviderSettings;
-use crate::search::SearchSettings;
 use crate::sessions::new_id;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -33,8 +32,6 @@ pub struct Schedule {
     pub approval_policy: ApprovalPolicy,
     #[serde(skip_serializing)]
     pub settings: ProviderSettings,
-    #[serde(skip_serializing)]
-    pub search_settings: SearchSettings,
     pub next_run_at: i64,
     pub interval_seconds: Option<i64>,
     pub enabled: bool,
@@ -56,7 +53,7 @@ pub struct ScheduleSpec<'a> {
     pub interval_seconds: Option<i64>,
 }
 
-const SELECT_SCHEDULE: &str = "SELECT id,session_id,prompt,mode,approval_policy,settings_json,search_json,next_run_at,interval_seconds,enabled,in_flight,last_run_at,last_error FROM schedules";
+const SELECT_SCHEDULE: &str = "SELECT id,session_id,prompt,mode,approval_policy,settings_json,next_run_at,interval_seconds,enabled,in_flight,last_run_at,last_error FROM schedules";
 
 pub fn unix_now() -> i64 {
     SystemTime::now()
@@ -80,7 +77,6 @@ impl ScheduleStore {
         &self,
         session_id: &str,
         settings: &ProviderSettings,
-        search_settings: &SearchSettings,
         spec: ScheduleSpec<'_>,
     ) -> Result<Schedule, String> {
         let ScheduleSpec {
@@ -106,7 +102,6 @@ impl ScheduleStore {
             mode,
             approval_policy,
             settings: settings.clone(),
-            search_settings: search_settings.clone(),
             next_run_at,
             interval_seconds,
             enabled: true,
@@ -115,8 +110,8 @@ impl ScheduleStore {
             last_error: None,
         };
         self.connect()?.execute(
-            "INSERT INTO schedules (id,session_id,prompt,mode,approval_policy,settings_json,search_json,next_run_at,interval_seconds) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-            params![schedule.id,schedule.session_id,schedule.prompt,mode_str(mode),approval_policy.as_str(),serde_json::to_string(settings).map_err(|error| error.to_string())?,serde_json::to_string(search_settings).map_err(|error| error.to_string())?,next_run_at,interval_seconds]
+            "INSERT INTO schedules (id,session_id,prompt,mode,approval_policy,settings_json,next_run_at,interval_seconds) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![schedule.id,schedule.session_id,schedule.prompt,mode_str(mode),approval_policy.as_str(),serde_json::to_string(settings).map_err(|error| error.to_string())?,next_run_at,interval_seconds]
         ).map_err(|error| format!("Could not create schedule: {error}"))?;
         Ok(schedule)
     }
@@ -237,7 +232,6 @@ fn row_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<Schedule> {
     let mode: String = row.get(3)?;
     let policy: String = row.get(4)?;
     let settings_json: String = row.get(5)?;
-    let search_json: String = row.get(6)?;
     Ok(Schedule {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -267,15 +261,12 @@ fn row_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<Schedule> {
         settings: serde_json::from_str(&settings_json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(5, Type::Text, Box::new(error))
         })?,
-        search_settings: serde_json::from_str(&search_json).map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(6, Type::Text, Box::new(error))
-        })?,
-        next_run_at: row.get(7)?,
-        interval_seconds: row.get(8)?,
-        enabled: row.get(9)?,
-        in_flight: row.get(10)?,
-        last_run_at: row.get(11)?,
-        last_error: row.get(12)?,
+        next_run_at: row.get(6)?,
+        interval_seconds: row.get(7)?,
+        enabled: row.get(8)?,
+        in_flight: row.get(9)?,
+        last_run_at: row.get(10)?,
+        last_error: row.get(11)?,
     })
 }
 
@@ -303,16 +294,10 @@ mod tests {
             )
             .unwrap();
         let store = ScheduleStore::open(path.clone()).unwrap();
-        let search = SearchSettings {
-            enabled: true,
-            provider: crate::search::SearchProvider::Custom,
-            endpoint: "https://search.example/api".into(),
-        };
         let schedule = store
             .create(
                 &session.id,
                 &session.settings,
-                &search,
                 ScheduleSpec {
                     prompt: "Do work",
                     mode: Mode::Act,
@@ -327,10 +312,6 @@ mod tests {
         drop(store);
         let reopened = ScheduleStore::open(path).unwrap();
         assert_eq!(reopened.list(&session.id).unwrap()[0].next_run_at, 100);
-        assert_eq!(
-            reopened.list(&session.id).unwrap()[0].search_settings,
-            search
-        );
         reopened.recover_interrupted().unwrap();
         assert!(!reopened.list(&session.id).unwrap()[0].enabled);
         reopened.retry(&session.id, &schedule.id, 160).unwrap();
@@ -365,7 +346,6 @@ mod tests {
             .create(
                 &session.id,
                 &session.settings,
-                &SearchSettings::default(),
                 ScheduleSpec {
                     prompt: "One time",
                     mode: Mode::Plan,
@@ -386,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_schedule_table_gains_search_binding_and_pauses() {
+    fn pre_versioning_schedule_table_is_paused_for_review() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("sessions.sqlite");
         let sessions = SessionStore::open(path.clone()).unwrap();
@@ -400,15 +380,13 @@ mod tests {
             .create(root.path(), "Test", settings.clone())
             .unwrap();
         let db = Connection::open(&path).unwrap();
-        // Rewind to the pre-versioning schema: a schedules table without
-        // search_json and no recorded schema version.
+        // Rewind to the pre-versioning schema: no recorded schema version.
         db.execute_batch("DROP TABLE schedules; CREATE TABLE schedules (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,prompt TEXT NOT NULL,mode TEXT NOT NULL,approval_policy TEXT NOT NULL,settings_json TEXT NOT NULL,next_run_at INTEGER NOT NULL,interval_seconds INTEGER,enabled INTEGER NOT NULL,in_flight INTEGER NOT NULL,last_run_at INTEGER,last_error TEXT); DROP INDEX IF EXISTS sessions_task; ALTER TABLE sessions DROP COLUMN task_id; DROP TABLE work_tasks; PRAGMA user_version = 0;").unwrap();
         db.execute("INSERT INTO schedules(id,session_id,prompt,mode,approval_policy,settings_json,next_run_at,interval_seconds,enabled,in_flight) VALUES('old',?1,'Task','act','auto_write',?2,100,60,1,0)", params![session.id,serde_json::to_string(&settings).unwrap()]).unwrap();
         drop(db);
         let store = ScheduleStore::open(path).unwrap();
         let migrated = &store.list(&session.id).unwrap()[0];
         assert!(!migrated.enabled);
-        assert_eq!(migrated.search_settings, SearchSettings::default());
         assert!(migrated.last_error.is_some());
     }
 }

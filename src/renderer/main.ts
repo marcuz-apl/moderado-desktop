@@ -8,7 +8,6 @@ import { lineDiff } from './diff';
 import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from './composer';
 import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLabel, type ModelInfo } from './models';
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
-import { endpointField, isKeyless, searchStatus, toSearchProvider, validateSearchInput, type SearchProvider } from './search-config';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanelForKind, newActionLabel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
@@ -30,7 +29,6 @@ type ApprovalExpired = { sessionId: string; id: number };
 type Checkpoint = { id: string; sessionId: string; gitRef: string; path: string; createdAt: number };
 type CheckpointPreview = { checkpointId: string; currentTree: string; changes: { path: string; before: string; after: string }[] };
 type Schedule = { id: string; sessionId: string; prompt: string; mode: 'plan' | 'act'; approvalPolicy: 'prompt' | 'auto_write'; nextRunAt: number; intervalSeconds: number | null; enabled: boolean; inFlight: boolean; lastRunAt: number | null; lastError: string | null };
-type SearchSettings = { enabled: boolean; provider: SearchProvider; endpoint: string };
 type ScheduleStarted = { sessionId: string; scheduleId: string; prompt: string };
 type ScheduleRun = { sessionId: string; scheduleId: string; error: string | null };
 type ProjectRecord = { workspace: string; name: string; updatedAt: number };
@@ -77,7 +75,6 @@ let creatingSession = false;
 let activeProvider: ProviderId = 'moderado';
 let gatewayMode: GatewayMode = 'prod';
 let activeSessionId: string | null = null;
-let searchKeyPresent = false;
 let scheduleSessionId: string | null = null;
 let importSessionId: string | null = null;
 let mode: 'plan' | 'act' = 'act';
@@ -621,14 +618,6 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
     await Promise.all([refreshCheckpoints(), refreshSchedules(), activePanel === 'workspace' ? refreshProjectTree() : Promise.resolve(), activePanel === 'source-control' ? refreshSourceControl() : Promise.resolve()]);
-    if (revision !== selectionRevision) return;
-    const searchSettings = await invoke<SearchSettings>('get_search_settings', { sessionId: id });
-    if (revision !== selectionRevision) return;
-    $<HTMLInputElement>('search-enabled').checked = searchSettings.enabled;
-    $<HTMLSelectElement>('search-provider').value = toSearchProvider(searchSettings.provider);
-    $<HTMLInputElement>('search-endpoint').value = searchSettings.endpoint; $<HTMLInputElement>('search-key').value = '';
-    applySearchProviderUi();
-    searchKeyPresent = await searchKeyExists(searchSettings.provider, searchSettings.endpoint);
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
   finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
@@ -703,33 +692,6 @@ function updateControls(): void {
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;
   $<HTMLButtonElement>('new-schedule').disabled = !activeSessionId;
   $<HTMLButtonElement>('import-transcript').disabled = !activeSessionId;
-  $<HTMLButtonElement>('save-search').disabled = !activeSessionId || busy;
-  $<HTMLButtonElement>('test-search').disabled = busy;
-  $<HTMLInputElement>('search-enabled').disabled = !activeSessionId || busy;
-  $<HTMLSelectElement>('search-provider').disabled = !activeSessionId || busy;
-  $<HTMLInputElement>('search-endpoint').disabled = !activeSessionId || busy;
-  $<HTMLInputElement>('search-key').disabled = !activeSessionId || busy;
-}
-
-function applySearchProviderUi(): void {
-  const provider = toSearchProvider($<HTMLSelectElement>('search-provider').value);
-  const field = endpointField(provider);
-  $('search-endpoint-label').textContent = field.label;
-  $<HTMLInputElement>('search-endpoint').placeholder = field.placeholder;
-  $('search-key-label').textContent = provider === 'searxng' || provider === 'custom' ? 'Optional API key' : 'API key';
-  // Keyless search has nothing to fill in, so hide the fields instead of
-  // asking for settings that would be ignored.
-  const keyless = isKeyless(provider);
-  for (const id of ['search-endpoint', 'search-endpoint-label', 'search-key', 'search-key-label']) {
-    $(id).hidden = keyless;
-  }
-  $('search-hint').textContent = keyless
-    ? 'No setup needed. Searches go to hosted search servers that require no key.'
-    : 'Brave, Tavily, and Serper need an API key; SearXNG and Custom need an endpoint URL.';
-}
-
-async function searchKeyExists(provider: SearchProvider, endpoint: string): Promise<boolean> {
-  try { return await invoke<boolean>('has_search_key', { provider, endpoint }); } catch { return false; }
 }
 
 function setMode(next: 'plan' | 'act'): void {
@@ -1658,42 +1620,6 @@ $('import-transcript').addEventListener('click', () => {
   importDialog.showModal();
 });
 $('cancel-import').addEventListener('click', () => importDialog.close());
-$('search-provider').addEventListener('change', () => {
-  applySearchProviderUi();
-  searchKeyPresent = false;
-  void searchKeyExists(toSearchProvider($<HTMLSelectElement>('search-provider').value), $<HTMLInputElement>('search-endpoint').value.trim())
-    .then((present) => { searchKeyPresent = present; });
-});
-$('test-search').addEventListener('click', async () => {
-  const provider = toSearchProvider($<HTMLSelectElement>('search-provider').value);
-  const endpoint = $<HTMLInputElement>('search-endpoint').value.trim();
-  const apiKey = $<HTMLInputElement>('search-key').value;
-  setStatus('Searching…');
-  try {
-    const result = await invoke<string>('test_search', { provider, endpoint, apiKey });
-    const first = result.split('\n\n')[0]?.split('\n')[0] || result;
-    setStatus(`Search works. First result: ${first}`);
-  } catch (error) { setStatus(`Search failed: ${String(error)}`); }
-});
-$('save-search').addEventListener('click', async () => {
-  const sessionId = activeSessionId;
-  if (!sessionId) return;
-  const provider = toSearchProvider($<HTMLSelectElement>('search-provider').value);
-  const endpoint = $<HTMLInputElement>('search-endpoint').value.trim();
-  const apiKey = $<HTMLInputElement>('search-key').value;
-  const settings: SearchSettings = { enabled: $<HTMLInputElement>('search-enabled').checked, provider, endpoint };
-  try {
-    const problem = validateSearchInput(provider, endpoint, apiKey, settings.enabled);
-    if (problem) throw new Error(problem);
-    if (apiKey) {
-      await invoke('save_search_key', { provider, endpoint, apiKey });
-      $<HTMLInputElement>('search-key').value = '';
-      searchKeyPresent = true;
-    }
-    await invoke('save_search_settings', { sessionId, settings });
-    setStatus(settings.enabled ? searchStatus(provider, endpoint, searchKeyPresent) : 'Search settings saved.');
-  } catch (error) { setStatus(String(error)); }
-});
 $<HTMLFormElement>('import-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const sourceSessionId = importSessionId;

@@ -3,7 +3,7 @@ use crate::approval_policy::AutoApprovePolicy;
 use crate::attachments;
 use crate::provider;
 use crate::sessions::SessionKind;
-use crate::search::{self, SearchConfig};
+use crate::search;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::future::Future;
@@ -15,7 +15,6 @@ pub struct RunConfig<'a> {
     pub model: &'a str,
     pub api_key: &'a str,
     pub mode: Mode,
-    pub search: Option<&'a SearchConfig>,
     pub kind: SessionKind,
     pub auto_approve: AutoApprovePolicy,
     /// Attachment references for the message being sent, stored in history.
@@ -108,12 +107,7 @@ where
         (SessionKind::Code, Mode::Act, Some(registry)) => registry.tool_definitions(),
         _ => Vec::new(),
     };
-    let tools = tool_definitions_with_mcp(
-        config.kind,
-        config.mode,
-        config.search.is_some(),
-        &mcp_tools,
-    );
+    let tools = tool_definitions_with_mcp(config.kind, config.mode, &mcp_tools);
     let mode_instruction = match config.kind {
         SessionKind::Work => {
             "Help the user complete their task. You may read, create, and edit UTF-8 documents \
@@ -191,21 +185,18 @@ where
         for call in calls {
             emit(AgentEvent::ToolStarted { id: call.id.clone(), name: call.name.clone() });
             let result = if call.name == "web_search" {
-                match config.search {
-                    Some(search) => match serde_json::from_str::<Value>(&call.arguments) {
-                        Ok(args) => match args.get("query").and_then(Value::as_str) {
-                            Some(query) => {
-                                if !config.auto_approve.fetch_web_content {
-                                    let request = ApprovalRequest { category: crate::approval_policy::ApprovalCategory::FetchWebContent, title: "Fetch web content".into(), detail: format!("Search the web for: {query}"), preview: None };
-                                    if approve(request).await.is_none() { Err("Web search rejected by user".into()) }
-                                    else { search::query(search, query).await }
-                                } else { search::query(search, query).await }
-                            },
-                            None => Err("Search query is required".into()),
+                match serde_json::from_str::<Value>(&call.arguments) {
+                    Ok(args) => match args.get("query").and_then(Value::as_str) {
+                        Some(query) => {
+                            if !config.auto_approve.fetch_web_content {
+                                let request = ApprovalRequest { category: crate::approval_policy::ApprovalCategory::FetchWebContent, title: "Fetch web content".into(), detail: format!("Search the web for: {query}"), preview: None };
+                                if approve(request).await.is_none() { Err("Web search rejected by user".into()) }
+                                else { search::query(query).await }
+                            } else { search::query(query).await }
                         },
-                        Err(_) => Err("Invalid tool arguments".into()),
+                        None => Err("Search query is required".into()),
                     },
-                    None => Err("Web search is unavailable for this session".into()),
+                    Err(_) => Err("Invalid tool arguments".into()),
                 }
             } else if call.name == "diagnostics" {
                 if matches!(config.kind, SessionKind::Work) {
@@ -339,7 +330,6 @@ mod tests {
         run_turn(
             RunConfig {
                 workspace: root.path(), base_url: &base, model: "test-model", api_key: "", mode: Mode::Act,
-                search: Some(&SearchConfig { provider: crate::search::SearchProvider::Custom, endpoint: "http://127.0.0.1:1/search".into(), key: String::new() }),
                 kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval", mcp: None, lsp: None,
             },
             &mut history,
@@ -391,7 +381,6 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
-                search: None,
                 kind,
                 auto_approve: AutoApprovePolicy::prompt_all(),
                 attachments: &[],
@@ -453,7 +442,6 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
-                search: None,
                 kind: SessionKind::Code,
                 auto_approve: AutoApprovePolicy::prompt_all(),
                 attachments: &[],
@@ -505,7 +493,6 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Plan,
-                search: None,
                 kind: SessionKind::Code,
                 auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                 attachments: &[],
@@ -580,8 +567,7 @@ mod tests {
                     model: "test-model",
                     api_key: "",
                     mode: Mode::Act,
-                    search: None,
-                    kind: SessionKind::Code,
+                        kind: SessionKind::Code,
                     auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                     attachments: &[],
                     attachments_root: root.path(),
@@ -653,7 +639,6 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
-                search: None,
                 kind: SessionKind::Code,
                 auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                 attachments: &[],
@@ -707,7 +692,6 @@ mod tests {
         use crate::provider::settings::ProviderSettings;
         use crate::provider::ProviderId;
         use crate::schedules::{ApprovalPolicy, ScheduleSpec, ScheduleStore};
-        use crate::search::SearchSettings;
         use crate::sessions::SessionStore;
         let root = tempfile::tempdir().unwrap();
         let workspace = root.path().join("workspace");
@@ -729,7 +713,6 @@ mod tests {
             .create(
                 &session.id,
                 &settings,
-                &SearchSettings::default(),
                 ScheduleSpec {
                     prompt: "Update file",
                     mode: Mode::Act,
@@ -767,7 +750,6 @@ mod tests {
                 model: "model",
                 api_key: "",
                 mode: Mode::Act,
-                search: None,
                 kind: SessionKind::Code,
                 auto_approve: AutoApprovePolicy::legacy_default(SessionKind::Code),
                 attachments: &[],
@@ -847,7 +829,6 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Act,
-                search: None,
                 kind: SessionKind::Code,
                 auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
                 attachments: &[],
@@ -896,7 +877,6 @@ mod tests {
                 model: "test-model",
                 api_key: "",
                 mode: Mode::Plan,
-                search: None,
                 kind: SessionKind::Code,
                 auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
                 attachments: &[],
