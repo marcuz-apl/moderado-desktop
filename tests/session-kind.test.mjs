@@ -135,6 +135,19 @@ test('Auto-Approve controls sit directly above the message composer', async () =
   assert.doesNotMatch(html.slice(0, html.indexOf('<main class="main">')), /id="auto-approve-group"/);
 });
 
+test('token usage sits beside Auto-approve, outside the composer box', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<\/div>\s*<\/main>/)?.[1] ?? '';
+  const topbar = composer.match(/<div class="composer-topbar">([\s\S]*?)<form id="composer">/)?.[1] ?? '';
+  assert.match(topbar, /id="auto-approve-group"/);
+  assert.match(topbar, /id="model-usage"/);
+  assert.ok(topbar.indexOf('id="auto-approve-group"') < topbar.indexOf('id="model-usage"'));
+  const form = composer.match(/<form id="composer">([\s\S]*?)<\/form>/)?.[1] ?? '';
+  assert.doesNotMatch(form, /id="model-usage"/);
+  assert.match(style, /\.model-usage\{[^}]*font-size:11px/);
+});
+
 test('Work profile does not require a GitHub account', () => {
   assert.match(profileModeDescription('work'), /not required/i);
   assert.match(profileModeDescription('code'), /optional GitHub account/i);
