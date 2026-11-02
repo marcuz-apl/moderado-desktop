@@ -101,6 +101,9 @@ const rightViewKey = 'moderado-right-view';
 const rightOpenKey = 'moderado-right-open';
 let rightView: RightView = parseRightView(localStorage.getItem(rightViewKey));
 let rightOpen = localStorage.getItem(rightOpenKey) === 'true';
+// Declared with the rest of the state: applyTheme() runs at load and reads pty.
+let pty: Pty | null = null;
+let terminalEventsBound = false;
 let activePage: AppPage | null = null;
 let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
@@ -1309,9 +1312,6 @@ $<HTMLFormElement>('project-entry-form').addEventListener('submit', async (event
 
 /** Git identity and credential readiness. Code only: a Work task folder is not a repo. */
 type Pty = { terminal: Terminal; fit: FitAddon; key: string; started: boolean };
-let pty: Pty | null = null;
-let terminalEventsBound = false;
-
 /** The value the backend also keys write/resize/close with. */
 function terminalKey(): string {
   return activeSessionId ?? selectedProjectWorkspace ?? '';
