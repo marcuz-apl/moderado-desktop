@@ -247,3 +247,12 @@
 - The rail keeps six panels; Settings and the manual are page buttons (`data-page`), with the manual above the gear so Settings stays the bottom item. Clicking any panel returns to the conversation, and each page has a "Back to conversation" button.
 - `SidebarPanel` no longer contains `settings`; `AppPage` is a separate type. Rail buttons branch on `data-page` first, and the Work/Code visibility loop skips page buttons.
 - Tests: `tests/pages.test.mjs` covers the page markup, the raw-Markdown wiring, the page-mode layout rules and the rail branching; the composer extraction in `session-kind.test.mjs` now stops at the first page section.
+
+## Light theme catches up with the new surfaces (0.4.21)
+
+- The Settings page cards kept the dark fill (`#14283c`) in light mode, because `theme.css` had no rule for `.page .settings-group` and the dark background had nothing to override it.
+- The same gap applied to everything added since the light pass: the composer `+`, `@` and Stop buttons, the `@` menu, attachment chips, the Work/Code segment, the page heading and Back button, and the model-usage readout (whose light rule still targeted the removed `.model-usage-row`).
+- Each now has a `:root[data-theme="light"]` counterpart using the existing `--light-*` variables, so the light palette stays defined in one place.
+- Overrides are written at a specificity that actually wins: the card rule is `:root[data-theme="light"] .page .settings-group`, not `.page .settings-group`, which would have lost to the dark rule.
+- Contrast of the new pairs was computed rather than eyeballed: every text pair clears 4.5:1 (lowest 4.72:1 for the usage readout) and every icon clears 3:1.
+- Tests: the light theme must contain a rule for each new surface, and the override must out-specify the dark rule it replaces.

@@ -45,3 +45,52 @@ test('auto re-checks while the window stays open', async () => {
   assert.match(main, /setInterval\(\(\) => \{ if \(themePreference === 'auto'\) applyTheme\(\); \}, 60_000\)/);
   assert.match(main, /visibilitychange/);
 });
+
+const readTheme = () => readFile(new URL('../src/renderer/theme.css', import.meta.url), 'utf8');
+
+/** [ids, classes+attributes, elements] so an override can be compared. */
+function specificity(selector) {
+  const body = selector.replace(/:root/g, '').trim();
+  const ids = (body.match(/#[\w-]+/g) ?? []).length;
+  const classes = (body.match(/\.[\w-]+|\[[^\]]+\]|:(?!root)[\w-]+/g) ?? []).length;
+  const elements = (body.match(/(^|[\s>+~])[a-z][\w-]*/g) ?? []).length;
+  return [ids, classes, elements];
+}
+
+function outranks(candidate, target) {
+  const [a, b] = [specificity(candidate), specificity(target)];
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return true;
+}
+
+test('the light theme covers the pages and the newer composer controls', async () => {
+  const theme = await readTheme();
+  // Surfaces added after the light theme was first written. Each one is a dark
+  // fill or a dark border in style.css, so without a counterpart it would show
+  // as a heavy block on the light page.
+  for (const selector of [
+    ':root[data-theme="light"] .page .settings-group',
+    ':root[data-theme="light"] .page-head .text-button',
+    ':root[data-theme="light"] .composer-attach',
+    ':root[data-theme="light"] .composer-stop .stop-play',
+    ':root[data-theme="light"] .mention-menu',
+    ':root[data-theme="light"] .mention-item',
+    ':root[data-theme="light"] .attachment-chip',
+    ':root[data-theme="light"] .kind-segment',
+    ':root[data-theme="light"] .model-usage',
+  ]) {
+    assert.ok(theme.includes(selector), `missing light rule: ${selector}`);
+  }
+});
+
+test('a light override out-specifies the dark rule it replaces', async () => {
+  const theme = await readTheme();
+  const card = ':root[data-theme="light"] .page .settings-group';
+  assert.ok(theme.includes(card), 'the settings card has a light fill');
+  // .page .settings-group is the dark rule; an id-less class pair would lose.
+  assert.ok(outranks(card, '.page .settings-group'), 'card override must win the cascade');
+  assert.ok(outranks(':root[data-theme="light"] .composer-stop .stop-play', '.composer-stop .stop-play'));
+  assert.ok(outranks(':root[data-theme="light"] .mention-item:hover', '.mention-item:hover'));
+});
