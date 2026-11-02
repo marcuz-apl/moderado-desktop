@@ -1028,7 +1028,10 @@ function switchPanel(panel: SidebarPanel): void {
   activePanel = panel;
   document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
   document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
-    const selected = button.dataset.panel === activePanel;
+    // A button with data-view points at one tab of a panel, so it only reads as
+    // selected when that tab is the one showing.
+    const selected = button.dataset.panel === activePanel
+      && (!button.dataset.view || button.dataset.view === workspaceView);
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-pressed', String(selected));
   });
@@ -1606,12 +1609,55 @@ document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((but
 document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
   button.addEventListener('click', () => {
     const page = button.dataset.page as AppPage | undefined;
-    if (page) switchPage(page);
-    else switchPanel(button.dataset.panel as SidebarPanel);
+    if (page) { switchPage(page); return; }
+    const view = button.dataset.view;
+    // Switch the tab first so the rail's selected state is computed against it.
+    if (view) switchWorkspaceView(parseWorkspaceView(view));
+    switchPanel(button.dataset.panel as SidebarPanel);
   });
 });
 document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
   tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
+});
+const sidebarWidthKey = 'moderado-sidebar-width';
+let sidebarWidth = 260;
+function applySidebarWidth(px: number): number {
+  const clamped = Math.max(200, Math.min(560, Math.round(px)));
+  document.querySelector<HTMLElement>('.app')?.style.setProperty('--sidebar-width', `${clamped}px`);
+  return clamped;
+}
+function saveSidebarWidth(): void {
+  try { localStorage.setItem(sidebarWidthKey, String(sidebarWidth)); } catch { /* applies for this run */ }
+}
+const storedSidebarWidth = Number(localStorage.getItem(sidebarWidthKey));
+if (Number.isFinite(storedSidebarWidth) && storedSidebarWidth > 0) sidebarWidth = applySidebarWidth(storedSidebarWidth);
+const resizer = $<HTMLElement>('sidebar-resizer');
+resizer.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  resizer.setPointerCapture(event.pointerId);
+  resizer.classList.add('dragging');
+  document.body.classList.add('resizing');
+});
+resizer.addEventListener('pointermove', (event) => {
+  if (!resizer.hasPointerCapture(event.pointerId)) return;
+  const left = document.querySelector<HTMLElement>('.sidebar')?.getBoundingClientRect().left ?? 0;
+  sidebarWidth = applySidebarWidth(event.clientX - left);
+});
+const endResize = (event: PointerEvent): void => {
+  if (!resizer.hasPointerCapture(event.pointerId)) return;
+  resizer.releasePointerCapture(event.pointerId);
+  resizer.classList.remove('dragging');
+  document.body.classList.remove('resizing');
+  saveSidebarWidth();
+};
+resizer.addEventListener('pointerup', endResize);
+resizer.addEventListener('pointercancel', endResize);
+resizer.addEventListener('dblclick', () => { sidebarWidth = applySidebarWidth(260); saveSidebarWidth(); });
+resizer.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  event.preventDefault();
+  sidebarWidth = applySidebarWidth(sidebarWidth + (event.key === 'ArrowRight' ? 16 : -16));
+  saveSidebarWidth();
 });
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
 $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });

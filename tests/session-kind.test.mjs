@@ -61,8 +61,8 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
 
 test('both modes share one activity rail', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const rail = [...html.matchAll(/class="activity-button" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rail, ['library', 'workspace', 'preview', 'terminal', 'schedules', 'profile'], 'six panels, identical in both modes');
+  const rail = [...html.matchAll(/class="activity-button" data-panel="[a-z-]+"(?: data-view="[a-z]+")? type="button" aria-label="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(rail, ['Tasks and projects', 'Workspace', 'Git', 'Preview', 'Terminal', 'Schedules', 'Profile'], 'the same rail in both modes');
   assert.doesNotMatch(html, /data-panel="explorer"|data-panel="checkpoints"|data-panel="source-control"/);
   const pages = [...html.matchAll(/class="activity-button" data-page="([a-z]+)"/g)].map((match) => match[1]);
   assert.deepEqual(pages, ['docs', 'settings'], 'the manual sits above settings, which stays at the bottom');

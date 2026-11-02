@@ -53,6 +53,10 @@ Two icons in the left rail open their own panels:
 - **Preview** shows the file you selected in Workspace files, read-only.
 - **Terminal** is a real shell in the project folder (Code only).
 
+**Git** has its own rail button too: it opens the Workspace panel on its Changes tab, without hunting for the tab first.
+
+Any panel can be widened: drag the panel's right edge, or focus the edge and press the arrow keys. Double-click the edge to go back to the default width. The width is remembered.
+
 The terminal is your own shell — the Windows PowerShell, or `$SHELL` elsewhere — running as your user, outside the agent's sandbox. That is the point of it: the agent's commands stay sandboxed and approval-gated, while the terminal is you typing. It keeps running when you switch views or close the panel, and restarts when you open a different project.
 
 ### Keyboard

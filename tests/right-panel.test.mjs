@@ -6,13 +6,25 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('every view lives in the left rail; nothing floats on the right', async () => {
   const html = await read('index.html');
-  const rail = [...html.matchAll(/class="activity-button" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rail, ['library', 'workspace', 'preview', 'terminal', 'schedules', 'profile']);
   const panels = [...html.matchAll(/data-panel-content="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(panels, rail, 'each rail icon owns a panel');
+  assert.deepEqual(panels, ['library', 'workspace', 'preview', 'terminal', 'schedules', 'profile']);
+  // Git is its own button that opens the Workspace panel on its Changes tab.
+  assert.match(html, /data-panel="workspace" data-view="changes"[^>]*aria-label="Git"/);
   assert.doesNotMatch(html, /class="right-panel"|right-launcher|topbar-icon/, 'no right-hand surface');
   assert.match(html, /<section class="sidebar-panel" data-panel-content="preview">/);
   assert.match(html, /<section class="sidebar-panel" data-panel-content="terminal">/);
+});
+
+test('the side panel can be widened by dragging its edge', async () => {
+  const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src/renderer/style.css')]);
+  assert.match(html, /id="sidebar-resizer"[^>]*role="separator"/);
+  // The width is a variable so a drag is one property write, not a layout rewrite.
+  assert.match(style, /\.app\{grid-template-columns:52px var\(--sidebar-width,260px\) minmax\(0,1fr\)/);
+  assert.match(style, /\.sidebar-resizer\{position:absolute;[^}]*cursor:col-resize/);
+  assert.match(main, /--sidebar-width/);
+  assert.match(main, /localStorage\.setItem\(sidebarWidthKey/, 'the width is remembered');
+  assert.match(main, /Math\.max\(200, Math\.min\(560/, 'clamped so it cannot swallow the window');
+  assert.match(main, /ArrowRight/, 'keyboard resizing');
 });
 
 test('the terminal is a real PTY, not a command runner', async () => {

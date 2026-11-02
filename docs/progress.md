@@ -351,3 +351,11 @@
 - Selecting a file in Workspace files calls `switchPanel('preview')` instead of opening a modal.
 - **Regression fixed in the same session:** `applyTheme()` runs at module load and read `pty`, which was declared with `let` far below it. Reading a `let` before its declaration throws, which aborted module evaluation before any listener was attached — every button in the window was dead. `pty` and `terminalEventsBound` now sit with the rest of the state.
 - Verification that would have caught it: build the frontend with `--base ./`, load `dist/index.html` in headless Chrome and check the html element carries `data-theme`, `zoom` and `color-scheme` — all set by `applyTheme`, so their presence proves evaluation reached the end. A file:// stylesheet with `crossorigin` is blocked by CORS, so the harness strips that attribute.
+
+## Git rail button and a resizable side panel (0.4.32)
+
+- Answering "where is the Git icon": there wasn't one. The 0.4.26 merge folded Explorer, Changes and Checkpoints into the Workspace panel, so Git became a tab two clicks deep. There is now a **Git rail button** that opens Workspace on the Changes tab in one click.
+- A rail button may carry `data-view`, and `switchPanel` treats it as selected only when that tab is showing, so the Git and Workspace buttons do not both light up.
+- The side panel is **resizable**: the grid uses `var(--sidebar-width, 260px)`, and a 7px handle on the panel's right edge drags it between 200 and 560px. Double-click resets to 260, arrow keys step by 16 when the handle is focused, and the width persists in `moderado-sidebar-width`.
+- The terminal's ResizeObserver already refits on host size, so widening the panel widens the shell automatically.
+- Tests: the rail is asserted by aria-label (so a duplicate `data-panel` for the Git button is not ambiguous), and the resizer's variable, clamping, persistence and keyboard path are asserted.

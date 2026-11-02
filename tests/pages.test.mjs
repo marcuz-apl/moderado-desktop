@@ -83,6 +83,6 @@ test('settings cards stack in three tight columns', async () => {
 test('rail buttons open pages and panels respectively', async () => {
   const main = await readMain();
   assert.match(main, /const page = button\.dataset\.page as AppPage \| undefined;/);
-  assert.match(main, /if \(page\) switchPage\(page\);/);
+  assert.match(main, /if \(page\) \{ switchPage\(page\); return; \}/);
   assert.match(main, /setPageMode\(null\);/);
 });

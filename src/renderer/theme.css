@@ -156,4 +156,4 @@
 :root[data-theme="light"] .panel-tabs{background:#e3eff1}:root[data-theme="light"] .panel-tab{color:#45616c}:root[data-theme="light"] .panel-tab:hover{color:#123f42}:root[data-theme="light"] .panel-tab.selected{background:var(--light-accent);color:#fff}
 :root[data-theme="light"] .library-badge{background:#e3eff1;color:#45616c}
 :root[data-theme="light"] .git-actions input{background:var(--light-surface);border-color:#a9bec5;color:#203744}
-
+:root[data-theme="light"] .sidebar-resizer:hover,:root[data-theme="light"] .sidebar-resizer:focus-visible,:root[data-theme="light"] .sidebar-resizer.dragging{background:#08766d44}
