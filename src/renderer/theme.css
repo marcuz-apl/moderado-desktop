@@ -132,6 +132,8 @@
 :root[data-theme="light"] .page-head h1{color:#183441}
 :root[data-theme="light"] .page-head .text-button{color:var(--light-accent);border-color:var(--light-border)}
 :root[data-theme="light"] .page .settings-group{background:var(--light-surface);border-color:var(--light-border)}
+:root[data-theme="light"] .muted{color:#536b77}
+:root[data-theme="light"] #lsp-config{background:var(--light-surface);border-color:#a9bec5;color:#203744}
 :root[data-theme="light"] .markdown-body blockquote{border-color:#a9bec5;color:#45616c}
 :root[data-theme="light"] .markdown-body a{color:var(--light-accent)}
 :root[data-theme="light"] .composer-attach,

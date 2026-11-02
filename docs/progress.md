@@ -256,3 +256,9 @@
 - Overrides are written at a specificity that actually wins: the card rule is `:root[data-theme="light"] .page .settings-group`, not `.page .settings-group`, which would have lost to the dark rule.
 - Contrast of the new pairs was computed rather than eyeballed: every text pair clears 4.5:1 (lowest 4.72:1 for the usage readout) and every icon clears 3:1.
 - Tests: the light theme must contain a rule for each new surface, and the override must out-specify the dark rule it replaces.
+
+## Settings page fully themed (0.4.22)
+
+- Verified the page visually instead of by inspection: rendered the Settings markup and both stylesheets standalone in Chrome at 1280x900 in each theme. Light shows white cards, white inputs and a white LSP editor on the light background; dark is unchanged.
+- Two surfaces were still dark-only and would have looked broken in light mode: `#lsp-config` (the Language Servers JSON editor, `background:#102236` with `#e9f4f7` text) and `.muted` (`#8199a9`, 2.97:1 on a white card). Both now have light rules.
+- Replaced the hand-maintained list of "surfaces that need a light rule" with an audit: the test walks every rule in `style.css` that touches an element on the Settings page and fails if a dark fill or sub-4.5:1 text colour has no light counterpart. It reports the exact offending declarations, and was confirmed to fail when the two fixes are removed.

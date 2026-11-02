@@ -65,24 +65,50 @@ function outranks(candidate, target) {
   return true;
 }
 
-test('the light theme covers the pages and the newer composer controls', async () => {
-  const theme = await readTheme();
-  // Surfaces added after the light theme was first written. Each one is a dark
-  // fill or a dark border in style.css, so without a counterpart it would show
-  // as a heavy block on the light page.
-  for (const selector of [
-    ':root[data-theme="light"] .page .settings-group',
-    ':root[data-theme="light"] .page-head .text-button',
-    ':root[data-theme="light"] .composer-attach',
-    ':root[data-theme="light"] .composer-stop .stop-play',
-    ':root[data-theme="light"] .mention-menu',
-    ':root[data-theme="light"] .mention-item',
-    ':root[data-theme="light"] .attachment-chip',
-    ':root[data-theme="light"] .kind-segment',
-    ':root[data-theme="light"] .model-usage',
-  ]) {
-    assert.ok(theme.includes(selector), `missing light rule: ${selector}`);
+test('every dark surface on the settings page has a light counterpart', async () => {
+  const [theme, style, html] = await Promise.all([
+    readTheme(),
+    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  ]);
+  const page = html.slice(html.indexOf('id="page-settings"'), html.indexOf('id="page-docs"'));
+  const ids = new Set([...page.matchAll(/id="([a-z0-9-]+)"/g)].map((match) => match[1]));
+  const classes = new Set([...page.matchAll(/class="([^"]+)"/g)].flatMap((match) => match[1].split(' ')));
+
+  const luminance = (hex) => {
+    const value = hex.replace('#', '');
+    const full = value.length === 3 ? [...value].map((char) => char + char).join('') : value;
+    const [r, g, b] = [0, 2, 4].map((index) => {
+      const channel = Number.parseInt(full.slice(index, index + 2), 16) / 255;
+      return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrastOnWhite = (hex) => 1.05 / (luminance(hex) + 0.05);
+  // A rule is covered when the light theme names the same id or class.
+  const covered = (selector) => {
+    const tokens = [...selector.matchAll(/([.#])([\w-]+)/g)].map((match) => match[1] + match[2]);
+    return tokens.some((token) => new RegExp(`${token.replace('.', '\\.')}(?![\\w-])`).test(theme));
+  };
+
+  const gaps = [];
+  for (const [, rawSelector, declarations] of style.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = rawSelector.replace(/^\s*@media[^{]*\{/, '').trim();
+    if (!selector || selector.includes('data-theme')) continue;
+    const touchesPage = [...selector.matchAll(/#([\w-]+)|\.([\w-]+)/g)].some((match) =>
+      match[1] ? ids.has(match[1]) : classes.has(match[2]));
+    if (!touchesPage || covered(selector)) continue;
+    for (const declaration of declarations.split(';')) {
+      const [property, value = ''] = declaration.split(':').map((part) => part.trim());
+      const hex = value.match(/#([0-9a-fA-F]{3,6})\b/)?.[1];
+      if (!hex) continue;
+      // A dark fill, or text that would be unreadable on the light card.
+      const darkFill = /^background(-color)?$/.test(property) && luminance(hex) < 0.3;
+      const faintText = property === 'color' && contrastOnWhite(hex) < 4.5;
+      if (darkFill || faintText) gaps.push(`${selector} { ${property}: ${value} }`);
+    }
   }
+  assert.deepEqual(gaps, [], `settings page surfaces with no light rule:\n${gaps.join('\n')}`);
 });
 
 test('a light override out-specifies the dark rule it replaces', async () => {
