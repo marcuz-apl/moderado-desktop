@@ -60,6 +60,7 @@ const endpoint = $<HTMLInputElement>('endpoint');
 const keyField = $<HTMLInputElement>('api-key');
 const keyApplyLink = $<HTMLAnchorElement>('apply-key-link');
 const themeToggle = $<HTMLButtonElement>('theme-toggle');
+const themeSelect = $<HTMLSelectElement>('theme-mode');
 const attachButton = $<HTMLButtonElement>('attach-files');
 const mentionButton = $<HTMLButtonElement>('mention-files');
 const attachmentChips = $<HTMLDivElement>('attachment-chips');
@@ -137,6 +138,7 @@ catch (error) { setStatus(`Theme preference could not be loaded: ${String(error)
 
 function applyTheme(): void {
   const theme = resolveTheme(themePreference, new Date());
+  themeSelect.value = themePreference;
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   const next = oppositeTheme(theme);
@@ -150,6 +152,12 @@ $('display-size').addEventListener('change', () => {
   displaySize = parseDisplaySize($<HTMLSelectElement>('display-size').value);
   try { localStorage.setItem(displaySizeKey, String(displaySize)); } catch { /* the setting still applies for this run */ }
   applyDisplaySize();
+});
+themeSelect.addEventListener('change', () => {
+  themePreference = parseThemePreference(themeSelect.value);
+  applyTheme();
+  try { localStorage.setItem(themeStorageKey, themePreference); }
+  catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
 });
 themeToggle.addEventListener('click', () => {
   themePreference = oppositeTheme(resolveTheme(themePreference, new Date()));

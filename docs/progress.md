@@ -232,3 +232,10 @@
 - `#send.composer-send` sets the square layout; the plain class rule lost to the `#send` id rule, which kept the old 9/16px padding and would have squeezed the 16px glyph.
 - The `#send span{display:none}` rule is gone with the arrow glyph it hid; the shortcut hint in the same row was already restored earlier.
 - `aria-label` and `title` keep the control named for screen readers and hover.
+
+## Theme can return to Auto (0.4.19)
+
+- Auto already followed local time: `resolveTheme` is light from 07:00 inclusive to 19:00 exclusive, and the renderer re-applies it every minute plus on `visibilitychange`. Boundary tests already covered 06:59, 07:00, 18:59 and 19:00.
+- The gap was that clicking the sun/moon button wrote a fixed `light`/`dark` preference with no way back, so the app stopped following the clock for good.
+- Settings → Appearance gained a **Theme** control (Auto / Light / Dark). `applyTheme` now also syncs that control, so the button and the select always agree, and choosing Auto resumes the clock.
+- Tests: the select offers all three modes, the change handler applies them, and the minute re-check plus visibility handler are asserted so they cannot be dropped silently.

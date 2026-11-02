@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { oppositeTheme, parseThemePreference, resolveTheme } from '../src/renderer/theme.ts';
 
@@ -26,4 +27,21 @@ test('the icon toggle flips between light and dark', () => {
   assert.equal(oppositeTheme('light'), 'dark');
   assert.equal(oppositeTheme('dark'), 'light');
   assert.equal(oppositeTheme(oppositeTheme('light')), 'light');
+});
+
+test('auto is selectable again after a manual choice', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const select = html.match(/<select id="theme-mode">([\s\S]*?)<\/select>/)?.[1] ?? '';
+  for (const value of ['auto', 'light', 'dark']) {
+    assert.match(select, new RegExp(`<option value="${value}"`), value);
+  }
+  assert.match(main, /themeSelect\.value = themePreference/, 'the control reflects the stored preference');
+  assert.match(main, /themeSelect\.addEventListener\('change'/, 'choosing a mode applies it');
+});
+
+test('auto re-checks while the window stays open', async () => {
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /setInterval\(\(\) => \{ if \(themePreference === 'auto'\) applyTheme\(\); \}, 60_000\)/);
+  assert.match(main, /visibilitychange/);
 });
