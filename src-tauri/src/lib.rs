@@ -455,6 +455,30 @@ async fn add_attachments(
     Ok(records)
 }
 
+/// Files the composer can reference with `@`. A draft has no session yet, so a
+/// registered project is accepted as well; anything else is rejected.
+#[tauri::command]
+fn list_project_files(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    workspace: Option<String>,
+) -> Result<Vec<String>, String> {
+    let root = match session_id {
+        Some(id) => {
+            let record = state.store.get(&id)?;
+            if !matches!(record.kind, SessionKind::Code) {
+                return Err("File references are only available in Code sessions".into());
+            }
+            PathBuf::from(record.workspace)
+        }
+        None => {
+            let workspace = workspace.ok_or("Choose a project first")?;
+            PathBuf::from(state.store.get_project(&workspace)?.workspace)
+        }
+    };
+    workspace::list_workspace_files(&root)
+}
+
 #[tauri::command]
 fn delete_session(
     app: tauri::AppHandle,
@@ -1403,6 +1427,7 @@ pub fn run() {
             save_provider_settings,
             start_turn,
             add_attachments,
+            list_project_files,
             stop_turn,
             ask_btw
         ])

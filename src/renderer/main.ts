@@ -9,6 +9,7 @@ import { canSend, selectedModelLabel, sessionForSubmit, shouldAutoScroll } from 
 import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLabel, type ModelInfo } from './models';
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
+import { applyMention, filterFiles, mentionQuery } from './mention';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
@@ -99,6 +100,10 @@ const lastSessionByProject = new Map<string, string>();
 const lastSessionByTask = new Map<string, string>();
 const composerDrafts = new Map<string, { text: string; attachments: AttachmentRecord[] }>();
 const promptHistory = new Map<string, string[]>();
+const mentionFiles = new Map<string, string[]>();
+const mentionMenu = $<HTMLDivElement>('mention-menu');
+let mentionState: { start: number; end: number; items: string[]; index: number } | null = null;
+let mentionRequest = 0;
 const PROMPT_HISTORY_LIMIT = 100;
 let recallState: RecallState = { ...EMPTY_RECALL };
 let selectionRevision = 0;
@@ -486,8 +491,11 @@ function applyKindUi(): void {
   $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
   $('approve-command-option').toggleAttribute('hidden', work);
   $('approve-mcp-option').toggleAttribute('hidden', work);
-  attachButton.toggleAttribute('hidden', !work);
-  attachButton.disabled = !work || !activeSessionId || selectingContext;
+  // One "+" in both modes: Work copies files in, Code references project files.
+  attachButton.disabled = selectingContext || (work ? !activeSessionId : !activeSessionId && !selectedProjectWorkspace);
+  const attachLabel = work ? 'Attach files' : 'Reference a project file';
+  attachButton.title = attachLabel;
+  attachButton.setAttribute('aria-label', attachLabel);
   document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
   prompt.placeholder = work ? 'Describe the task or document you need…' : 'What should the agent work on in this project?';
   const emptyCopy = document.getElementById('empty-state-copy');
@@ -531,6 +539,7 @@ function saveComposerDraft(): void {
 function restoreComposerDraft(): void {
   const draft = composerDrafts.get(draftKey()); prompt.value = draft?.text ?? ''; pendingAttachments = draft?.attachments ?? []; renderChips();
   recallState = { ...EMPTY_RECALL };
+  mentionFiles.clear();
 }
 /** The prompts this session already sent, seeded from its transcript on first use. */
 function historyFor(sessionId: string): string[] {
@@ -562,6 +571,63 @@ function recallPrompt(direction: -1 | 1): boolean {
   prompt.setSelectionRange(next.text.length, next.text.length);
   return true;
 }
+/** Project files the composer can reference, cached per session or project. */
+async function projectFiles(): Promise<string[]> {
+  const key = activeSessionId ?? `project:${selectedProjectWorkspace ?? ''}`;
+  const cached = mentionFiles.get(key);
+  if (cached) return cached;
+  const files = await invoke<string[]>('list_project_files', {
+    sessionId: activeSessionId,
+    workspace: selectedProjectWorkspace,
+  });
+  mentionFiles.set(key, files);
+  return files;
+}
+
+function closeMention(): void {
+  mentionState = null;
+  mentionMenu.hidden = true;
+  mentionMenu.replaceChildren();
+}
+
+function renderMention(): void {
+  if (!mentionState || !mentionState.items.length) { closeMention(); return; }
+  const { items, index } = mentionState;
+  mentionMenu.replaceChildren(...items.map((path, position) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mention-item';
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(position === index));
+    button.textContent = path;
+    // mousedown keeps focus in the textarea, so the caret survives the click.
+    button.addEventListener('mousedown', (event) => { event.preventDefault(); acceptMention(position); });
+    return button;
+  }));
+  mentionMenu.hidden = false;
+}
+
+async function openMentions(start: number, end: number, query: string): Promise<void> {
+  const request = ++mentionRequest;
+  try {
+    const files = await projectFiles();
+    if (request !== mentionRequest) return;
+    mentionState = { start, end, items: filterFiles(files, query), index: 0 };
+    renderMention();
+  } catch (error) { if (request === mentionRequest) { closeMention(); setStatus(String(error)); } }
+}
+
+function acceptMention(position: number): void {
+  const state = mentionState;
+  const path = state?.items[position];
+  if (!state || !path) return;
+  const next = applyMention(prompt.value, state.start, state.end, path);
+  prompt.value = next.text;
+  prompt.setSelectionRange(next.caret, next.caret);
+  closeMention();
+  prompt.focus();
+}
+
 function currentFolder(): string | null {
   return activeKind === 'code' ? selectedProjectWorkspace : workTasks.find((task) => task.id === selectedWorkTaskId)?.workspace ?? activeSession()?.workspace ?? null;
 }
@@ -574,7 +640,7 @@ function updateFolderContext(): void {
   $('project-root-name').textContent = activeKind === 'work' ? task?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No task selected') : project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Project files') : 'No project selected');
 }
 function enterDraft(kind: SessionKind, workspace: string | null = selectedProjectWorkspace): void {
-  selectionRevision++; selectingContext = false; activeSessionId = null; activeKind = kind;
+  selectionRevision++; selectingContext = false; activeSessionId = null; activeKind = kind; closeMention();
   if (kind === 'code') selectedProjectWorkspace = workspace;
   rememberNavigation();
   $('session-title').textContent = kind === 'work' && !selectedWorkTaskId ? 'Select a task' : 'New Session';
@@ -1267,6 +1333,12 @@ $<HTMLElement>('about-version').textContent = appVersion.trim().split('+')[0] ||
 
 attachButton.addEventListener('click', async () => {
   const sessionId = activeSessionId;
+  if (activeKind === 'code') {
+    if (!sessionId && !selectedProjectWorkspace) { setStatus('Open a project before referencing files.'); return; }
+    await openMentions(prompt.selectionStart, prompt.selectionStart, '');
+    prompt.focus();
+    return;
+  }
   if (!sessionId) { setStatus('Create a task before attaching files.'); return; }
   try {
     const picked = await open({ multiple: true, title: 'Attach files (editable copies go into the task folder)' });
@@ -1758,6 +1830,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
       }
     }
     if (!scheduledPending.has(id)) running.delete(id);
+    mentionFiles.clear();
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
       await refreshSummaries();
@@ -1843,6 +1916,25 @@ $('confirm-restore').addEventListener('click', async () => {
 });
 
 prompt.addEventListener('keydown', (event) => {
+  if (mentionState && mentionState.items.length && !event.isComposing) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      mentionState.index = (mentionState.index + step + mentionState.items.length) % mentionState.items.length;
+      renderMention();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
+      acceptMention(mentionState.index);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMention();
+      return;
+    }
+  }
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     $<HTMLFormElement>('composer').requestSubmit();
@@ -1852,6 +1944,14 @@ prompt.addEventListener('keydown', (event) => {
   if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
   if (recallPrompt(event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault();
 });
+
+prompt.addEventListener('input', () => {
+  if (activeKind !== 'code') { closeMention(); return; }
+  const found = mentionQuery(prompt.value, prompt.selectionStart);
+  if (!found) { closeMention(); return; }
+  void openMentions(found.start, prompt.selectionStart, found.query);
+});
+prompt.addEventListener('blur', () => closeMention());
 
 $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   event.preventDefault();

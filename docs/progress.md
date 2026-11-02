@@ -200,3 +200,13 @@
 - History is per session and seeded from the transcript on first use, so recall works after a restart without a new table or column. Sends append to the end, cap at 100, and skip a consecutive duplicate.
 - While browsing history the draft map is not overwritten, so switching sessions keeps the text the user actually typed.
 - The step logic lives in `src/renderer/prompt-history.ts` (`canRecall`, `recall`) with `tests/prompt-history.test.mjs`; `main.ts` only supplies the caret position and applies the result.
+
+## Composer plus button and file references (0.4.15)
+
+- The Work "Attach" button is now a **+** icon button that matches the Stop button, and it is visible in both modes.
+- In Code, **+** opens a browsable list of project files and `@` opens the same list filtered as you type. Choosing an entry inserts `@relative/path` into the prompt; arrow keys move the highlight, Enter/Tab accept, Escape dismisses.
+- Code "+" references files rather than copying them. A Code session already reads its own project, and copying attachments would write into the user's repository, which `add_attachments` correctly refuses. Work keeps the copy flow because its sessions are jailed to the task folder.
+- `workspace::list_workspace_files` walks the workspace with the same bounds and skips as `search_files` (no `.git`, `node_modules`, `target`, `dist`; depth 8; 2,000 files; sorted). The `list_project_files` command accepts either a Code session or a registered project, so `@` also works in a project draft with no session yet.
+- The file list is cached per session/project and cleared when a turn ends or the composer switches context.
+- Stop icon glyph is 18px (was 13px).
+- Tests: `tests/mention.test.mjs` for token detection, insertion and ranking; a Rust test for the listing bounds; UI assertions for the + button, the menu and the icon size.

@@ -135,6 +135,18 @@ test('Auto-Approve controls sit directly above the message composer', async () =
   assert.doesNotMatch(html.slice(0, html.indexOf('<main class="main">')), /id="auto-approve-group"/);
 });
 
+test('the composer offers a plus in both modes and a file menu in Code', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  assert.match(html, /id="attach-files" class="composer-attach"[^>]*aria-label="Attach files"[^>]*><svg/);
+  assert.doesNotMatch(html, /id="attach-files"[^>]*\bhidden\b/, 'the plus is present in both modes');
+  assert.match(html, /id="mention-menu"[^>]*role="listbox"[^>]*hidden/);
+  assert.match(main, /invoke<string\[\]>/);
+  assert.match(main, /mentionQuery\(prompt\.value/);
+  assert.match(style, /\.composer-stop svg\{width:18px;height:18px\}/);
+});
+
 test('composer footer pairs the model with the shortcut hint and always shows stop', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');

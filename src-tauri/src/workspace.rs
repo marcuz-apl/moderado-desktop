@@ -372,10 +372,63 @@ pub fn search_files(root: &Path, query: &str) -> Result<Vec<String>, String> {
     Ok(results)
 }
 
+/// Relative paths the composer can reference with `@`. Bounded and sorted so
+/// the menu is stable, and it skips the same heavy folders as search.
+pub fn list_workspace_files(root: &Path) -> Result<Vec<String>, String> {
+    const LIMIT: usize = 2_000;
+    let dir =
+        Dir::open_ambient_dir(root, ambient_authority()).map_err(|error| error.to_string())?;
+    let mut queue = vec![(PathBuf::from("."), 0usize)];
+    let mut files = Vec::new();
+    while let Some((folder, depth)) = queue.pop() {
+        for entry in dir.read_dir(&folder).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if kind.is_symlink() {
+                continue;
+            }
+            let name = entry.file_name();
+            if name == ".git" || name == "node_modules" || name == "target" || name == "dist" {
+                continue;
+            }
+            let relative = folder.join(name);
+            if kind.is_dir() {
+                if depth < 8 {
+                    queue.push((relative, depth + 1));
+                }
+            } else if kind.is_file() {
+                let display = relative.strip_prefix(".").unwrap_or(&relative);
+                files.push(display.to_string_lossy().replace('\\', "/"));
+                if files.len() >= LIMIT {
+                    files.sort();
+                    return Ok(files);
+                }
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn workspace_files_skip_heavy_folders_and_sort() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("src/deep")).unwrap();
+        std::fs::create_dir_all(root.path().join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(root.path().join(".git")).unwrap();
+        std::fs::write(root.path().join("README.md"), "x").unwrap();
+        std::fs::write(root.path().join("src/main.rs"), "x").unwrap();
+        std::fs::write(root.path().join("src/deep/lib.rs"), "x").unwrap();
+        std::fs::write(root.path().join("node_modules/pkg/index.js"), "x").unwrap();
+        std::fs::write(root.path().join(".git/config"), "x").unwrap();
+        let files = list_workspace_files(root.path()).unwrap();
+        assert_eq!(files, vec!["README.md", "src/deep/lib.rs", "src/main.rs"]);
+    }
 
     #[test]
     fn project_entries_sort_folders_first_and_hide_git_metadata() {
