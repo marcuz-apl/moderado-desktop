@@ -423,6 +423,61 @@ fn get_source_control(
     source_control::get_source_control(&root)
 }
 
+/// Git write operations are Code-only: a Work task folder is never a repository,
+/// because Work checkpoints use a separate shadow store in app data.
+fn code_workspace(
+    state: &AppState,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+) -> Result<PathBuf, String> {
+    const CODE_ONLY: &str =
+        "Commit and push are available in Code sessions; a Work task folder has no repository.";
+    if work_task_id.is_some() {
+        return Err(CODE_ONLY.into());
+    }
+    if let Some(id) = session_id.as_deref() {
+        if matches!(state.store.get(id)?.kind, SessionKind::Work) {
+            return Err(CODE_ONLY.into());
+        }
+    }
+    browser_workspace(state, session_id, project_workspace, work_task_id)
+}
+
+#[tauri::command]
+fn git_identity(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+) -> Result<source_control::GitIdentity, String> {
+    let root = code_workspace(&state, session_id, project_workspace, work_task_id)?;
+    source_control::identity(&root)
+}
+
+#[tauri::command]
+fn git_commit(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+    message: String,
+) -> Result<String, String> {
+    let root = code_workspace(&state, session_id, project_workspace, work_task_id)?;
+    source_control::commit(&root, &message)
+}
+
+#[tauri::command]
+fn git_push(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+) -> Result<String, String> {
+    let root = code_workspace(&state, session_id, project_workspace, work_task_id)?;
+    source_control::push(&root)
+}
+
 #[tauri::command]
 fn rename_session(
     state: tauri::State<'_, AppState>,
@@ -1401,6 +1456,9 @@ pub fn run() {
             rename_project_entry,
             delete_project_entry,
             get_source_control,
+            git_identity,
+            git_commit,
+            git_push,
             rename_session,
             delete_session,
             create_schedule,

@@ -303,3 +303,15 @@
 - `renderSessions` had two near-identical renderers; it is now one that builds `{kind, key, name, workspace, updatedAt}` entries and renders them with a shared row builder. Row order is unified (expander first) — Work rows previously put the expander last.
 - Tag placement was measured, not guessed: at a 260px sidebar the row is 201px and the name gets 94px after the expander (18), the tag (30) and the radio (15). The tag started at the left, which pushed every name 40px right; it now sits at the row's right end so names read from the left edge. Padding-left, row gaps and the expander width were tightened to recover another 12px.
 - Tests: one list element, no `task-list`/`project-list`, both action rows present, the badge text and the recency sort asserted, and the shared row builder pinned.
+
+## Git commit and push, Code only (0.4.28)
+
+- Answered "how does WorkBuddy push without a GitHub login": it doesn't have one. `git commit` is local and needs no auth; `git push` uses the machine's own credentials (SSH key, Git Credential Manager, or `gh auth login`). WorkBuddy's own GitHub guide is entirely about installing git and registering an SSH key. The app only runs git.
+- `source_control` gained `commit`, `push` and `identity`, plus `explain_git_error`, which maps the failures that actually happen (publickey denied, no credential helper, unknown remote, nothing to commit) into the fix the user needs.
+- `git()` now sets `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and empty `GIT_ASKPASS`/`SSH_ASKPASS` so a credential prompt can never hang the app.
+- All three commands go through `code_workspace`, which refuses a Work session: Work task folders are not repositories (their checkpoints use a separate shadow store), so the rule holds even if the UI is bypassed.
+- Bug found by a test: `git commit` prints "nothing to commit" on **stdout**, so reading only stderr produced "Git failed without reporting a reason". Failures are now read from both streams.
+- Changes tab: commit message field, Commit all changes, Push, and a credential line; the controls stay hidden without an origin remote, and Push is disabled unless the credential probe succeeded. The identity probe is one `ls-remote`, shown in Profile as GIT IDENTITY.
+- Profile's "GITHUB ACCOUNT — sign-in has not been configured" placeholder is gone, replaced by the real git identity: name · email, remote, and push readiness.
+- Workspace tab labels fit at 10px; "Checkpoints" previously clipped to "Checkpoi…".
+- Tests: commit + push against a local bare remote, empty message, nothing-to-commit, identity before/after adding a remote, all error mappings, the Work guard, and the prompt-disabling environment.

@@ -33,6 +33,9 @@ fn git(root: &Path, args: &[&str]) -> Result<Output, String> {
         .arg(root)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
         .env("GIT_PAGER", "cat")
         .env("PAGER", "cat")
         .output()
@@ -175,10 +178,186 @@ pub fn get_source_control(workspace: &Path) -> Result<SourceControlSnapshot, Str
     })
 }
 
+/// What the app knows about this workspace's Git identity and credentials.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentity {
+    pub name: String,
+    pub email: String,
+    pub branch: String,
+    pub remote: Option<String>,
+    /// "ready", "missing", "none" (no remote) or "unknown".
+    pub credential: String,
+    pub detail: String,
+}
+
+/// Git's own wording is accurate and useless to most people. Map the failures
+/// that actually happen into the fix the user needs.
+pub fn explain_git_error(stderr: &str) -> String {
+    let text = stderr.to_lowercase();
+    if text.contains("permission denied (publickey)") || text.contains("host key verification failed")
+    {
+        return "GitHub rejected the SSH key. Add this machine's public key at \
+                https://github.com/settings/keys, then try again."
+            .into();
+    }
+    if text.contains("could not read username")
+        || text.contains("could not read password")
+        || text.contains("terminal prompts disabled")
+        || text.contains("authentication failed")
+        || text.contains("invalid username or password")
+    {
+        return "No credentials for this remote. Install Git Credential Manager, run \
+                `gh auth login`, or switch the remote to an SSH URL."
+            .into();
+    }
+    if text.contains("repository not found") || text.contains("does not appear to be a git repository")
+    {
+        return "The remote was not found, or this account cannot see it. Check the remote URL.".into();
+    }
+    if text.contains("nothing to commit") || text.contains("no changes added to commit") {
+        return "Nothing to commit — the working tree is clean.".into();
+    }
+    if text.contains("no upstream branch") || text.contains("has no upstream branch") {
+        return "This branch has no upstream yet; push it to create one.".into();
+    }
+    let trimmed = stderr.trim();
+    if trimmed.is_empty() {
+        return "Git failed without reporting a reason.".into();
+    }
+    trimmed.chars().take(300).collect()
+}
+
+/// `git commit` writes its "nothing to commit" explanation to stdout, not stderr,
+/// so a failure must be read from both streams or the reason is lost.
+fn output_text(output: &Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+fn first_line(output: &[u8]) -> String {
+    String::from_utf8_lossy(output)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
+
+fn config_value(root: &Path, key: &str) -> String {
+    match git(root, &["config", "--get", key]) {
+        Ok(output) if output.status.success() => first_line(&output.stdout),
+        _ => String::new(),
+    }
+}
+
+/// Commit every change in the workspace. Staging is explicit (`add -A`) so new
+/// files are included, which is what a one-click commit implies.
+pub fn commit(root: &Path, message: &str) -> Result<String, String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Enter a commit message first.".into());
+    }
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Workspace unavailable: {error}"))?;
+    let added = git(&root, &["add", "-A"])?;
+    if !added.status.success() {
+        return Err(explain_git_error(&output_text(&added)));
+    }
+    let committed = git(&root, &["commit", "-m", message])?;
+    if !committed.status.success() {
+        return Err(explain_git_error(&output_text(&committed)));
+    }
+    let head = git(&root, &["log", "-1", "--format=%h %s"])?;
+    Ok(first_line(&head.stdout))
+}
+
+/// Push the current branch, creating an upstream on the first push.
+pub fn push(root: &Path) -> Result<String, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Workspace unavailable: {error}"))?;
+    let upstream = git(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])?;
+    let args: &[&str] = if upstream.status.success() {
+        &["push"]
+    } else {
+        &["push", "-u", "origin", "HEAD"]
+    };
+    let pushed = git(&root, args)?;
+    if !pushed.status.success() {
+        return Err(explain_git_error(&output_text(&pushed)));
+    }
+    Ok(first_line(&pushed.stderr))
+}
+
+/// Report the identity git will commit as, plus whether this machine can talk
+/// to the remote. The credential check is a network round trip, so it is kept
+/// to one `ls-remote` and treated as advisory.
+pub fn identity(root: &Path) -> Result<GitIdentity, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Workspace unavailable: {error}"))?;
+    let name = config_value(&root, "user.name");
+    let email = config_value(&root, "user.email");
+    let branch = first_line(&git(&root, &["rev-parse", "--abbrev-ref", "HEAD"])?.stdout);
+    let remote = match git(&root, &["remote", "get-url", "origin"]) {
+        Ok(output) if output.status.success() => Some(first_line(&output.stdout)),
+        _ => None,
+    };
+    let Some(url) = remote.clone() else {
+        return Ok(GitIdentity {
+            name,
+            email,
+            branch,
+            remote: None,
+            credential: "none".into(),
+            detail: "This repository has no origin remote, so there is nothing to push to.".into(),
+        });
+    };
+    let probe = git(&root, &["ls-remote", "origin"])?;
+    let (credential, detail) = if probe.status.success() {
+        ("ready".to_owned(), format!("Push ready — {url}"))
+    } else {
+        let text = output_text(&probe);
+        let explained = explain_git_error(&text);
+        let lower = text.to_lowercase();
+        let missing = lower.contains("permission denied")
+            || lower.contains("could not read")
+            || lower.contains("authentication failed")
+            || lower.contains("terminal prompts disabled");
+        (
+            if missing { "missing" } else { "unknown" }.to_owned(),
+            explained,
+        )
+    };
+    Ok(GitIdentity {
+        name,
+        email,
+        branch,
+        remote,
+        credential,
+        detail,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    fn git_output(root: &std::path::Path, args: &[&str]) -> String {
+        let result = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&result.stdout).into_owned()
+    }
 
     fn git(root: &std::path::Path, args: &[&str]) {
         let result = Command::new("git")
@@ -271,6 +450,75 @@ mod tests {
             std::fs::read(root.path().join(".git/HEAD")).unwrap(),
             before
         );
+    }
+
+    fn init_repo(dir: &Path) {
+        git(dir, &["init", "--quiet"]);
+        git(dir, &["config", "user.email", "test@example.com"]);
+        git(dir, &["config", "user.name", "Test"]);
+    }
+
+    #[test]
+    fn commits_and_pushes_to_a_local_remote() {
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare", "--quiet"]);
+        let work = tempfile::tempdir().unwrap();
+        init_repo(work.path());
+        fs::write(work.path().join("a.txt"), "one\n").unwrap();
+        let head = commit(work.path(), "First commit").unwrap();
+        assert!(head.contains("First commit"), "{head}");
+        git(
+            work.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        push(work.path()).unwrap();
+        let log = git_output(origin.path(), &["log", "--all", "--oneline"]);
+        assert!(log.contains("First commit"), "{log}");
+    }
+
+    #[test]
+    fn commit_requires_a_message_and_changes() {
+        let work = tempfile::tempdir().unwrap();
+        init_repo(work.path());
+        assert!(commit(work.path(), "   ").unwrap_err().contains("commit message"));
+        fs::write(work.path().join("a.txt"), "one\n").unwrap();
+        commit(work.path(), "First commit").unwrap();
+        // Nothing staged the second time: the error must say so in plain words.
+        let second = commit(work.path(), "Second commit").unwrap_err();
+        assert!(second.contains("Nothing to commit"), "got: {second}");
+    }
+
+    #[test]
+    fn identity_reports_missing_remote_then_ready() {
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare", "--quiet"]);
+        let work = tempfile::tempdir().unwrap();
+        init_repo(work.path());
+        fs::write(work.path().join("a.txt"), "one\n").unwrap();
+        commit(work.path(), "First commit").unwrap();
+
+        let before = identity(work.path()).unwrap();
+        assert_eq!(before.credential, "none");
+        assert_eq!(before.email, "test@example.com");
+        assert!(before.remote.is_none());
+
+        git(
+            work.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        let after = identity(work.path()).unwrap();
+        assert_eq!(after.credential, "ready", "{}", after.detail);
+        assert!(after.detail.contains("Push ready"));
+    }
+
+    #[test]
+    fn git_errors_are_translated_into_fixes() {
+        assert!(explain_git_error("git@github.com: Permission denied (publickey).").contains("github.com/settings/keys"));
+        assert!(explain_git_error("fatal: could not read Username for 'https://github.com'").contains("Git Credential Manager"));
+        assert!(explain_git_error("fatal: repository 'x' not found").contains("not found"));
+        assert!(explain_git_error("nothing to commit, working tree clean").contains("Nothing to commit"));
+        assert!(explain_git_error("something odd").contains("something odd"));
+        assert!(explain_git_error("").contains("without reporting a reason"));
     }
 
     #[test]

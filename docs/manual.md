@@ -67,6 +67,16 @@ The agent works in steps. Each step that changes files waits for your approval u
 | **MCP servers** | Stdio or Streamable HTTP servers exposed as tools in Code/Act sessions. |
 | **Language servers** | LSP entries that power the `diagnostics` tool. |
 
+### Git
+
+Commit and Push live in the **Changes** tab and are available in **Code** sessions only — a Work task folder is a managed directory, not a repository.
+
+- **Commit all changes** stages everything (`git add -A`) and commits with your message. It uses the identity in your git config.
+- **Push** pushes the current branch, creating an upstream on the first push.
+- The panel tells you before you try: *Push ready* when this machine can reach the remote, or what to fix when it cannot.
+
+There is no GitHub sign-in inside the app. Push uses the credentials your machine already has — an SSH key registered with GitHub, Git Credential Manager, or `gh auth login`. The app never asks for a GitHub password and never stores a GitHub token.
+
 ### Where your data lives
 
 - Sessions, checkpoints, and schedules: a SQLite file in the app data directory.

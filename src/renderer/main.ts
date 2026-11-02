@@ -41,6 +41,7 @@ type ProjectEntry = { name: string; path: string; isDir: boolean };
 type ExplorerOperation = { action: 'new-file' | 'new-folder' | 'rename'; projectWorkspace: string; entry: ProjectEntry | null; parentPath: string };
 type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
 type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
+type GitIdentity = { name: string; email: string; branch: string; remote: string | null; credential: 'ready' | 'missing' | 'none' | 'unknown'; detail: string };
 type GatewayMode = 'prod' | 'dev';
 
 const GATEWAY_URLS: Record<GatewayMode, string> = {
@@ -565,7 +566,7 @@ function applyKindUi(): void {
   $('new-project').textContent = 'New';
   $('new-session').toggleAttribute('hidden', false);
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
-  $('profile-github').toggleAttribute('hidden', work);
+  $('profile-git').toggleAttribute('hidden', work);
 
 }
 
@@ -1266,6 +1267,35 @@ $<HTMLFormElement>('project-entry-form').addEventListener('submit', async (event
   } finally { save.disabled = false; }
 });
 
+/** Git identity and credential readiness. Code only: a Work task folder is not a repo. */
+async function refreshGitIdentity(): Promise<void> {
+  const block = $('profile-git');
+  const actions = $('git-actions');
+  if (activeKind !== 'code' || !selectedProjectWorkspace) {
+    block.toggleAttribute('hidden', true);
+    actions.toggleAttribute('hidden', true);
+    return;
+  }
+  block.toggleAttribute('hidden', false);
+  try {
+    const identity = await invoke<GitIdentity>('git_identity', browserArgs());
+    $('profile-git-name').textContent = identity.name ? `${identity.name} · ${identity.email || 'no email set'}` : 'No git user.name set';
+    $('profile-git-remote').textContent = identity.remote ?? 'No origin remote';
+    $('profile-git-credential').textContent = identity.detail;
+    // Without a remote there is nothing to commit for, and without credentials
+    // Push cannot succeed, so only offer what can actually work.
+    actions.toggleAttribute('hidden', !identity.remote);
+    $('git-credential').textContent = identity.credential === 'ready' ? '' : identity.detail;
+    $<HTMLButtonElement>('git-push').disabled = identity.credential !== 'ready';
+  } catch (error) {
+    block.toggleAttribute('hidden', false);
+    $('profile-git-name').textContent = 'Not a repository';
+    $('profile-git-remote').textContent = '';
+    $('profile-git-credential').textContent = String(error);
+    actions.toggleAttribute('hidden', true);
+  }
+}
+
 async function refreshSourceControl(): Promise<void> {
   const folder = currentFolder();
   const branch = $('source-branch');
@@ -1295,6 +1325,7 @@ async function refreshSourceControl(): Promise<void> {
       row.title = path;
       return row;
     }));
+    void refreshGitIdentity();
     if (!snapshot.commits.length) history.textContent = 'No commits yet.';
     else history.replaceChildren(...snapshot.commits.map((commit) => {
       const row = document.createElement('article');
@@ -1494,6 +1525,29 @@ document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
 });
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
 $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });
+$<HTMLButtonElement>('git-commit').addEventListener('click', async () => {
+  const message = $<HTMLInputElement>('git-commit-message').value.trim();
+  if (!message) { setStatus('Enter a commit message first.'); return; }
+  const commitButton = $<HTMLButtonElement>('git-commit');
+  commitButton.disabled = true;
+  try {
+    const head = await invoke<string>('git_commit', { ...browserArgs(), message });
+    $<HTMLInputElement>('git-commit-message').value = '';
+    setStatus(`Committed ${head}.`);
+    await refreshSourceControl();
+  } catch (error) { setStatus(String(error)); }
+  finally { commitButton.disabled = false; }
+});
+$<HTMLButtonElement>('git-push').addEventListener('click', async () => {
+  const pushButton = $<HTMLButtonElement>('git-push');
+  pushButton.disabled = true;
+  try {
+    const result = await invoke<string>('git_push', browserArgs());
+    setStatus(result ? `Pushed — ${result}` : 'Pushed.');
+    await refreshSourceControl();
+  } catch (error) { setStatus(String(error)); }
+  finally { pushButton.disabled = false; }
+});
 $<HTMLButtonElement>('close-file-preview').addEventListener('click', () => $<HTMLDialogElement>('file-preview-dialog').close());
 $('plan-mode').addEventListener('click', () => setMode('plan'));
 $('act-mode').addEventListener('click', () => setMode('act'));
