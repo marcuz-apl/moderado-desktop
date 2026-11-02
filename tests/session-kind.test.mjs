@@ -59,8 +59,11 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
 test('both modes share one activity rail', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const rail = [...html.matchAll(/class="activity-button" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rail, ['library', 'explorer', 'checkpoints', 'schedules', 'source-control', 'profile', 'settings']);
+  assert.deepEqual(rail, ['library', 'explorer', 'checkpoints', 'schedules', 'source-control', 'profile']);
+  const pages = [...html.matchAll(/class="activity-button" data-page="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(pages, ['docs', 'settings'], 'the manual sits above settings, which stays at the bottom');
   assert.doesNotMatch(html, /data-panel="tasks"|data-panel="projects"/);
+  assert.doesNotMatch(html, /data-panel-content="settings"/, 'settings no longer lives in the sidebar');
   assert.match(html, /data-panel-content="library"><header class="panel-heading"><h2 id="library-title">/);
 });
 
@@ -125,7 +128,7 @@ test('all five Auto-Approve options default on and MCP is marked as a placeholde
 test('Auto-Approve controls sit directly above the message composer', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<\/div>\s*<\/main>/)?.[1] ?? '';
+  const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<section class="page"/)?.[1] ?? '';
   assert.match(composer, /id="auto-approve-group"/);
   assert.ok(composer.indexOf('id="auto-approve-group"') < composer.indexOf('id="composer"'));
   assert.match(composer, /class="auto-approve-bar"/);
@@ -166,7 +169,7 @@ test('composer footer pairs the model with the shortcut hint and always shows st
 test('token usage sits beside Auto-approve, outside the composer box', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<\/div>\s*<\/main>/)?.[1] ?? '';
+  const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<section class="page"/)?.[1] ?? '';
   const topbar = composer.match(/<div class="composer-topbar">([\s\S]*?)<form id="composer">/)?.[1] ?? '';
   assert.match(topbar, /id="auto-approve-group"/);
   assert.match(topbar, /id="model-usage"/);

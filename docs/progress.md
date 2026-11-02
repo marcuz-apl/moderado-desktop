@@ -239,3 +239,11 @@
 - The gap was that clicking the sun/moon button wrote a fixed `light`/`dark` preference with no way back, so the app stopped following the clock for good.
 - Settings → Appearance gained a **Theme** control (Auto / Light / Dark). `applyTheme` now also syncs that control, so the button and the select always agree, and choosing Auto resumes the clock.
 - Tests: the select offers all three modes, the change handler applies them, and the minute re-check plus visibility handler are asserted so they cannot be dropped silently.
+
+## Settings and manual as pages (0.4.20)
+
+- Settings held five groups, eight inputs and eight buttons in a 260px sidebar column; the connection form alone needs two model dropdowns. It is now a full-width **page** in the main column, laid out as cards (`repeat(auto-fit, minmax(320px, 1fr))`), with the sidebar hidden while a page is open (`.app.page-mode` becomes `52px + main`).
+- A second page, **Getting started**, renders `docs/getting-started.md` through the existing MarkdownIt instance via a Vite `?raw` import — no new dependency, and the manual is a normal reviewable Markdown file.
+- The rail keeps six panels; Settings and the manual are page buttons (`data-page`), with the manual above the gear so Settings stays the bottom item. Clicking any panel returns to the conversation, and each page has a "Back to conversation" button.
+- `SidebarPanel` no longer contains `settings`; `AppPage` is a separate type. Rail buttons branch on `data-page` first, and the Work/Code visibility loop skips page buttons.
+- Tests: `tests/pages.test.mjs` covers the page markup, the raw-Markdown wiring, the page-mode layout rules and the rail branching; the composer extraction in `session-kind.test.mjs` now stops at the first page section.

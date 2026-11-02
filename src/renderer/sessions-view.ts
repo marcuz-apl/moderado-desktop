@@ -1,6 +1,8 @@
 export type SessionKind = 'work' | 'code';
 /** One rail for both modes. `library` lists tasks in Work and projects in Code. */
-export type SidebarPanel = 'library' | 'explorer' | 'checkpoints' | 'schedules' | 'source-control' | 'profile' | 'settings';
+export type SidebarPanel = 'library' | 'explorer' | 'checkpoints' | 'schedules' | 'source-control' | 'profile';
+/** Full-width views that replace the conversation instead of opening a panel. */
+export type AppPage = 'settings' | 'docs';
 
 export type ProjectSessionLike = {
   id: string;

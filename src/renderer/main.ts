@@ -13,7 +13,8 @@ import { applyMention, filterFiles, mentionQuery } from './mention';
 import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
+import gettingStarted from '../../docs/getting-started.md?raw';
+import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type AppPage } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -87,6 +88,7 @@ let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
 let activePanel: SidebarPanel | null = 'library';
+let activePage: AppPage | null = null;
 let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
@@ -159,6 +161,10 @@ themeSelect.addEventListener('change', () => {
   try { localStorage.setItem(themeStorageKey, themePreference); }
   catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
 });
+$('docs-content').innerHTML = markdown.render(gettingStarted);
+for (const id of ['close-page', 'close-docs']) {
+  $(id).addEventListener('click', () => { if (activePage) switchPanel(activePanel ?? defaultPanel()); });
+}
 themeToggle.addEventListener('click', () => {
   themePreference = oppositeTheme(resolveTheme(themePreference, new Date()));
   applyTheme();
@@ -498,8 +504,8 @@ function applyKindUi(): void {
     button.setAttribute('aria-pressed', String(selected));
   }
   for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.activity-button'))) {
-    const panel = button.dataset.panel as SidebarPanel;
-    button.hidden = !panelAvailableForKind(panel, activeKind);
+    if (button.dataset.page) continue;
+    button.hidden = !panelAvailableForKind(button.dataset.panel as SidebarPanel, activeKind);
   }
   // One container panel serves both modes; only its heading, actions and list change.
   const libraryLabel = work ? 'Tasks' : 'Projects';
@@ -928,8 +934,32 @@ function closePanel(): void {
   });
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
 }
+function setPageMode(page: AppPage | null): void {
+  activePage = page;
+  const open = page !== null;
+  document.querySelector<HTMLElement>('.app')?.classList.toggle('page-mode', open);
+  document.querySelector<HTMLElement>('.main')?.classList.toggle('page-mode', open);
+  document.querySelectorAll<HTMLElement>('.page').forEach((section) => {
+    section.classList.toggle('active', section.dataset.page === page);
+  });
+  document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
+    const selected = open ? button.dataset.page === page : button.dataset.panel === activePanel;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  if (open) {
+    document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
+    closeMention();
+  }
+}
+
+function switchPage(page: AppPage): void {
+  setPageMode(page);
+}
+
 function switchPanel(panel: SidebarPanel): void {
   if (!panelAvailableForKind(panel, activeKind)) panel = defaultPanel();
+  setPageMode(null);
   activePanel = panel;
   document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
   document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
@@ -1390,7 +1420,11 @@ document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((but
   button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
 });
 document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
-  button.addEventListener('click', () => switchPanel(button.dataset.panel as SidebarPanel));
+  button.addEventListener('click', () => {
+    const page = button.dataset.page as AppPage | undefined;
+    if (page) switchPage(page);
+    else switchPanel(button.dataset.panel as SidebarPanel);
+  });
 });
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
 $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });
@@ -1821,7 +1855,7 @@ $('delete-session').addEventListener('click', async () => {
 
 
 
-$('selected-model').addEventListener('click', () => switchPanel('settings'));
+$('selected-model').addEventListener('click', () => switchPage('settings'));
 $('selected-model').style.cursor = 'pointer';
 document.querySelectorAll<HTMLElement>('.panel-heading').forEach((heading) => {
   const btn = document.createElement('button');
