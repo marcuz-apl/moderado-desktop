@@ -13,7 +13,7 @@ import { applyMention, filterFiles, mentionQuery } from './mention';
 import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
-import gettingStarted from '../../docs/getting-started.md?raw';
+import manual from '../../docs/manual.md?raw';
 import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type AppPage } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
@@ -161,7 +161,7 @@ themeSelect.addEventListener('change', () => {
   try { localStorage.setItem(themeStorageKey, themePreference); }
   catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
 });
-$('docs-content').innerHTML = markdown.render(gettingStarted);
+$('docs-content').innerHTML = markdown.render(manual);
 for (const id of ['close-page', 'close-docs']) {
   $(id).addEventListener('click', () => { if (activePage) switchPanel(activePanel ?? defaultPanel()); });
 }

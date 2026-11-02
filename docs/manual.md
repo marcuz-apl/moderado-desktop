@@ -1,8 +1,8 @@
-# Getting started
+## Getting started
 
 Moderado Desktop runs coding and document sessions against the model provider you choose. Everything stays on this machine except the calls you configure.
 
-## 1. Connect a model
+### 1. Connect a model
 
 Open **Settings** from the gear icon.
 
@@ -12,7 +12,7 @@ Open **Settings** from the gear icon.
 
 Ollama and LM Studio need no key and work offline.
 
-## 2. Choose a mode
+### 2. Choose a mode
 
 The Work/Code switch sits in the top bar.
 
@@ -23,28 +23,30 @@ The Work/Code switch sits in the top bar.
 
 Work tasks and Code projects both appear in the **Library** panel on the left.
 
-## 3. Send a task
+### 3. Send a task
 
 Type in the composer and press **Enter**. Use **Shift+Enter** for a new line, and the **↑** / **↓** arrows to walk back through what you already sent.
 
 The agent works in steps. Each step that changes files waits for your approval unless that category is auto-approved.
 
-## 4. Review what it did
+### 4. Review what it did
 
 - **Checkpoints** lists every snapshot taken before a change; open one to see a diff and roll back.
 - **Explorer** shows the files in the current task or project.
 - **Git** (Code only) shows the branch, changed files, and recent commits.
 
-## 5. Bring files into the conversation
+### 5. Bring files into the conversation
 
 - **+** attaches a file. In Work the file is copied into the task folder so the agent can edit it; in Code its content is sent without touching your repository.
 - **@** references a project file by path. Type `@` and keep typing to filter, or press the **@** button.
 
-## 6. Run something later
+### 6. Run something later
 
 **Schedule task** runs a prompt at a set time or on a repeat interval. Choose **Auto-approve writes** only for unattended Act work; the agent then edits without asking. A schedule pauses if the session's provider or models change.
 
-## Keyboard
+## Reference
+
+### Keyboard
 
 | Key | Action |
 | --- | --- |
@@ -52,8 +54,20 @@ The agent works in steps. Each step that changes files waits for your approval u
 | `Shift+Enter` | New line |
 | `↑` / `↓` | Previous / next sent prompt |
 | `Esc` | Dismiss the file picker |
+| `/btw` | Ask a side question without derailing the task |
 
-## Where your data lives
+### Settings fields
+
+| Field | What it does |
+| --- | --- |
+| **Provider** | Chooses the preset or local runtime; **Base URL** overrides the endpoint. |
+| **Plan model** / **Act model** | The model used to plan, and the one that executes. |
+| **Theme** | Auto follows local time (light 07:00–18:59); Light and Dark pin it. |
+| **Display size** | Zooms the whole window from 90% to 150%. |
+| **MCP servers** | Stdio or Streamable HTTP servers exposed as tools in Code/Act sessions. |
+| **Language servers** | LSP entries that power the `diagnostics` tool. |
+
+### Where your data lives
 
 - Sessions, checkpoints, and schedules: a SQLite file in the app data directory.
 - API keys: the OS keychain.
@@ -61,8 +75,15 @@ The agent works in steps. Each step that changes files waits for your approval u
 
 No telemetry is sent anywhere.
 
-## If something looks wrong
+### If something looks wrong
 
 - **"Enter an endpoint, choose a model"** — Settings is missing a provider URL or model.
 - **A turn stops early** — the agent hit its step limit; send `continue` to keep going from where it stopped.
 - **A tool was refused** — check the Auto-approve row above the composer; that category is set to ask first.
+- **A page of the manual looks wrong** — this file is `docs/manual.md`; edit it and rebuild.
+
+## License
+
+This repository carries no license file, so all rights are reserved by the author: nothing here grants permission to copy, modify, or redistribute the application or its source.
+
+Moderado Desktop builds on third-party components that keep their own licenses — Tauri and the Rust crates listed in `src-tauri/Cargo.toml`, and MarkdownIt, which renders this page, listed in `package.json`. Each dependency ships with its own license text in its package.

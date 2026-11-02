@@ -17,13 +17,28 @@ test('settings and the manual are full-width pages, not sidebar panels', async (
   assert.doesNotMatch(html, /data-panel-content="settings"/);
 });
 
-test('the manual renders docs/getting-started.md through the existing Markdown renderer', async () => {
+test('the Docs page renders docs/manual.md through the existing Markdown renderer', async () => {
   const main = await readMain();
-  const manual = await read('docs/getting-started.md');
-  assert.match(main, /import gettingStarted from '\.\.\/\.\.\/docs\/getting-started\.md\?raw'/);
-  assert.match(main, /markdown\.render\(gettingStarted\)/);
-  assert.match(manual, /^# Getting started/);
+  const manual = await read('docs/manual.md');
+  assert.match(main, /import manual from '\.\.\/\.\.\/docs\/manual\.md\?raw'/);
+  assert.match(main, /markdown\.render\(manual\)/);
   assert.ok(manual.length > 800, 'the manual carries real content');
+});
+
+test('the manual is Getting started, then Reference, then License', async () => {
+  const manual = await read('docs/manual.md');
+  const sections = [...manual.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(sections, ['Getting started', 'Reference', 'License']);
+  // The page heading already says "Docs", so the body must not repeat a title.
+  assert.doesNotMatch(manual, /^# /m);
+});
+
+test('the rail names the page Docs', async () => {
+  const html = await readHtml();
+  const button = html.match(/<button class="activity-button" data-page="docs"[^>]*>/)?.[0] ?? '';
+  assert.match(button, /aria-label="Docs"/);
+  assert.match(button, /title="Docs"/);
+  assert.match(html, /<h1>Docs<\/h1>/);
 });
 
 test('page mode drops the sidebar and the conversation', async () => {

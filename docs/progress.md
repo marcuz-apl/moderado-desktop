@@ -269,3 +269,10 @@
 - The body is now three independent column stacks — Connection | MCP Servers + Appearance | Language Servers + About — so each column packs to its own content. Measured at 1280px: body height 782px → 481px, and Appearance sits directly under MCP Servers while About sits directly under Language Servers.
 - Below 1000px the columns flatten into a single list (`flex-direction:column` + `.page-col{display:contents}`), with `align-items:stretch` so cards stay full width.
 - Verified by measuring the rendered boxes headlessly and screenshotting both themes; the arrangement is asserted in `tests/pages.test.mjs`.
+
+## Docs page: renamed, restructured, table fixed (0.4.24)
+
+- The rail button said "Getting started", which described one section rather than the page. It is now **Docs** (`aria-label`/`title`), and the page heading says Docs too.
+- The manual is `docs/manual.md` and is organised as **Getting started → Reference → License**. Reference holds the keyboard table, a settings-fields table, where data lives, and troubleshooting; License states the licence position.
+- The duplicated title is gone: the page heading supplies "Docs", so the markdown starts at `## Getting started` instead of repeating an H1.
+- Fixed the squeezed "Mode" column. `.markdown-body` sets `overflow-wrap:anywhere`, which lets the table's auto layout shrink a column below the width of one word — the first column came out 58px and could not hold "Mode". Cells now use `overflow-wrap:break-word`, which keeps wrapping available without changing min-content sizing; the column measures 63px and the header sits on one line. Verified with the real MarkdownIt output, measuring column widths and checking that no cell overflows.
