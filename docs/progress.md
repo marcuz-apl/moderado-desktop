@@ -218,3 +218,10 @@
 - Attach copy in Code now says "Attach files to this message" and no longer claims copies are in Explorer.
 - Fixed the "Agent stopped after 8 tool rounds" failure: a normal coding task can exceed 8 model/tool rounds. The cap is now `MAX_TOOL_ROUNDS` (40) and running out ends the turn with a visible note ("send continue to keep going") instead of failing it as an error. The work already done stays in history.
 - Test: a model that only ever calls tools ends with the notice and an `Ok` turn, rather than an error.
+
+## Display size setting (0.4.17)
+
+- Settings gained an **Appearance → Display size** control (90%, 100%, 110%, 125%, 150%). It sets a zoom on the document root, so text, controls and layout scale together; a font-size-only rule would not reach the many fixed-px sizes in the stylesheet.
+- The choice persists in `localStorage` under `moderado-display-size` and is applied at startup, the same way the theme is.
+- `parseDisplaySize` rejects anything outside the offered list and falls back to 100%, so a hand-edited or stale value cannot produce a broken layout.
+- Tests: `tests/display-size.test.mjs` covers parsing, the zoom value, and the Settings markup.

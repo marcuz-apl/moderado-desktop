@@ -10,6 +10,7 @@ import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLab
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
 import { applyMention, filterFiles, mentionQuery } from './mention';
+import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel } from './sessions-view';
@@ -122,6 +123,13 @@ const conversationBindings = new Map<string, string>();
 const btwHistory = new Map<string, Array<{ question: string; answer: string }>>();
 
 function setStatus(message: string): void { status.textContent = message; }
+const displaySizeKey = 'moderado-display-size';
+let displaySize: DisplaySize = parseDisplaySize(localStorage.getItem(displaySizeKey));
+/** One zoom on the root scales the whole window: text, controls and layout. */
+function applyDisplaySize(): void {
+  document.documentElement.style.zoom = zoomFor(displaySize);
+}
+applyDisplaySize();
 const themeStorageKey = 'moderado-theme';
 let themePreference: ThemePreference = 'auto';
 try { themePreference = parseThemePreference(localStorage.getItem(themeStorageKey)); }
@@ -137,6 +145,12 @@ function applyTheme(): void {
   themeToggle.title = `${theme === 'light' ? 'Light' : 'Dark'}${themePreference === 'auto' ? ', follows local time' : ''} — switch to ${next}`;
 }
 
+$<HTMLSelectElement>('display-size').value = String(displaySize);
+$('display-size').addEventListener('change', () => {
+  displaySize = parseDisplaySize($<HTMLSelectElement>('display-size').value);
+  try { localStorage.setItem(displaySizeKey, String(displaySize)); } catch { /* the setting still applies for this run */ }
+  applyDisplaySize();
+});
 themeToggle.addEventListener('click', () => {
   themePreference = oppositeTheme(resolveTheme(themePreference, new Date()));
   applyTheme();
