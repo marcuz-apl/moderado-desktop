@@ -17,7 +17,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { defaultPanel, parseRightView, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type RightView, type AppPage } from './sessions-view';
+import { defaultPanel, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type AppPage } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -97,10 +97,6 @@ let activePanel: SidebarPanel | null = 'library';
 /** The workspace panel's tab, remembered the way the mode is. */
 const workspaceViewKey = 'moderado-workspace-view';
 let workspaceView: WorkspaceView = parseWorkspaceView(localStorage.getItem(workspaceViewKey));
-const rightViewKey = 'moderado-right-view';
-const rightOpenKey = 'moderado-right-open';
-let rightView: RightView = parseRightView(localStorage.getItem(rightViewKey));
-let rightOpen = localStorage.getItem(rightOpenKey) === 'true';
 // Declared with the rest of the state: applyTheme() runs at load and reads pty.
 let pty: Pty | null = null;
 let terminalEventsBound = false;
@@ -1021,35 +1017,6 @@ function applyWorkspaceView(): void {
   if (workspaceView === 'checkpoints') void refreshCheckpoints();
 }
 
-/** Opens or closes the context panel and shows one view in it. */
-function setRightPanel(open: boolean, view?: RightView): void {
-  rightOpen = open;
-  if (view) rightView = view;
-  try { localStorage.setItem(rightOpenKey, String(open)); localStorage.setItem(rightViewKey, rightView); }
-  catch { /* the panel still works for this run */ }
-  $('right-panel').toggleAttribute('hidden', !open);
-  document.querySelector('.app')?.classList.toggle('right-open', open);
-  for (const id of ['open-preview', 'open-terminal']) {
-    document.getElementById(id)?.setAttribute('aria-pressed', String(open && id === `open-${rightView}`));
-  }
-  if (open) applyRightView();
-}
-
-/** Shows one right-panel view. Both are cheap, so nothing needs prefetching. */
-function applyRightView(): void {
-  document.querySelectorAll<HTMLElement>('.right-view').forEach((section) => {
-    const active = section.dataset.rightView === rightView;
-    section.classList.toggle('active', active);
-    section.toggleAttribute('hidden', !active);
-  });
-  document.querySelectorAll<HTMLButtonElement>('.right-tab').forEach((tab) => {
-    const active = tab.dataset.rightTab === rightView;
-    tab.classList.toggle('selected', active);
-    tab.setAttribute('aria-selected', String(active));
-  });
-  if (rightView === 'terminal' && activeKind === 'code') void ensureTerminal();
-}
-
 function switchWorkspaceView(view: WorkspaceView): void {
   workspaceView = view;
   try { localStorage.setItem(workspaceViewKey, view); } catch { /* the tab still switches for this run */ }
@@ -1069,6 +1036,7 @@ function switchPanel(panel: SidebarPanel): void {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
   if (panel === 'workspace') applyWorkspaceView();
+  if (panel === 'terminal' && activeKind === 'code') void ensureTerminal();
 }
 
 async function selectProject(workspace: string): Promise<void> {
@@ -1174,7 +1142,7 @@ async function previewProjectFile(entry: ProjectEntry): Promise<void> {
   $('file-preview-title').textContent = entry.name;
   $('file-preview-path').textContent = entry.path;
   $('file-preview-content').textContent = 'Loading…';
-  setRightPanel(true, 'preview');
+  switchPanel('preview');
   try {
     const contents = await invoke<string>('read_project_file', { ...browserArgs(), path: entry.path });
     if (folder === currentFolder()) $('file-preview-content').textContent = contents;
@@ -1372,7 +1340,7 @@ async function ensureTerminal(): Promise<void> {
         }
       });
       new ResizeObserver(() => {
-        if (!pty || !rightOpen || rightView !== 'terminal') return;
+        if (!pty || activePanel !== 'terminal') return;
         fitTerminal();
         void invoke('terminal_resize', { sessionId: pty.key, cols: pty.terminal.cols, rows: pty.terminal.rows }).catch(() => {});
       }).observe(host);
@@ -1573,7 +1541,6 @@ async function initialize(): Promise<void> {
     await refreshSummaries();
     restoreNavigation();
     switchPanel(defaultPanel());
-    if (rightOpen) setRightPanel(true);
     if (activeKind === 'work') {
       const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
       if (restoredTask) await selectWorkTask(restoredTask.id, false);
@@ -1646,16 +1613,6 @@ document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button
 document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
   tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
 });
-document.querySelectorAll<HTMLButtonElement>('.right-tab').forEach((tab) => {
-  tab.addEventListener('click', () => setRightPanel(true, parseRightView(tab.dataset.rightTab ?? null)));
-});
-for (const view of ['preview', 'terminal'] as const) {
-  document.getElementById(`open-${view}`)?.addEventListener('click', () => {
-    // Pressing the active view again closes the panel, like a toggle button.
-    setRightPanel(!(rightOpen && rightView === view), view);
-  });
-}
-$('right-close').addEventListener('click', () => setRightPanel(false));
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
 $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });
 $<HTMLButtonElement>('git-commit').addEventListener('click', async () => {

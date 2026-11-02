@@ -342,3 +342,12 @@
 - Gotchas: clippy `too_many_arguments` on the Tauri command (allowed with a comment); `project_workspace` moved into `code_workspace` before being used for the terminal key (needed `.clone()`); `TerminalState`'s tuple field must not be `pub` or clippy warns about a private type in a public interface.
 - **Bash filter trap:** a heredoc naming the Windows shell binary tripped the "Invoking [it] from Bash" guard. Use the Edit/Write tools for docs text that names it.
 - 129 Rust + 79 node tests, clippy, tsc, eslint, release build green.
+
+## Preview and terminal moved into the rail (0.4.31)
+
+- The two launcher icons at the top right are gone; Preview and Terminal are rail panels like every other view, so the app has no floating right-hand surface. Rail order: Library, Workspace, Preview, Terminal, Schedules, Profile.
+- The grid is back to three columns, and every `.right-*` / `.topbar-icon` rule is deleted rather than left unused.
+- `setRightPanel` / `applyRightView` / `parseRightView` and their storage keys are gone; the terminal now starts from `switchPanel('terminal')`, and the ResizeObserver only refits while that panel is the active one.
+- Selecting a file in Workspace files calls `switchPanel('preview')` instead of opening a modal.
+- **Regression fixed in the same session:** `applyTheme()` runs at module load and read `pty`, which was declared with `let` far below it. Reading a `let` before its declaration throws, which aborted module evaluation before any listener was attached — every button in the window was dead. `pty` and `terminalEventsBound` now sit with the rest of the state.
+- Verification that would have caught it: build the frontend with `--base ./`, load `dist/index.html` in headless Chrome and check the html element carries `data-theme`, `zoom` and `color-scheme` — all set by `applyTheme`, so their presence proves evaluation reached the end. A file:// stylesheet with `crossorigin` is blocked by CORS, so the harness strips that attribute.

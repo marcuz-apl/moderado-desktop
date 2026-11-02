@@ -48,7 +48,7 @@ The agent works in steps. Each step that changes files waits for your approval u
 
 ### Preview and terminal
 
-Two icons at the top right open a panel beside the conversation:
+Two icons in the left rail open their own panels:
 
 - **Preview** shows the file you selected in Workspace files, read-only.
 - **Terminal** is a real shell in the project folder (Code only).

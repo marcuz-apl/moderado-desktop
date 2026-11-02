@@ -1,6 +1,6 @@
 export type SessionKind = 'work' | 'code';
-/** One rail for both modes. `workspace` holds the file, change and checkpoint views. */
-export type SidebarPanel = 'library' | 'workspace' | 'schedules' | 'profile';
+/** One rail for both modes; every view lives here, nothing floats on the right. */
+export type SidebarPanel = 'library' | 'workspace' | 'preview' | 'terminal' | 'schedules' | 'profile';
 /** Tabs inside the workspace panel. Changes only has content in Code sessions. */
 export type WorkspaceView = 'explorer' | 'changes' | 'checkpoints';
 export const WORKSPACE_VIEWS: readonly WorkspaceView[] = ['explorer', 'changes', 'checkpoints'];
@@ -35,12 +35,6 @@ export function parseWorkspaceView(value: string | null): WorkspaceView {
   return value === 'changes' || value === 'checkpoints' ? value : 'explorer';
 }
 
-/** The right panel holds only what the left rail does not already own. */
-export type RightView = 'preview' | 'terminal';
-export const RIGHT_VIEWS: readonly RightView[] = ['preview', 'terminal'];
-export function parseRightView(value: string | null): RightView {
-  return value === 'terminal' ? 'terminal' : 'preview';
-}
 
 /// The rail remembers the mode you were last in, the way WorkBuddy does.
 export function parseSessionKind(value: string | null): SessionKind {
