@@ -51,9 +51,9 @@ The agent works in steps. Each step that changes files waits for your approval u
 Two icons at the top right open a panel beside the conversation:
 
 - **Preview** shows the file you selected in Workspace files, read-only.
-- **Terminal** runs one program per line in the sandbox (Code only).
+- **Terminal** is a real shell in the project folder (Code only).
 
-The terminal is not a shell: the line is split into a program and arguments, quotes group words, and nothing else is interpreted. Pipes, `$VARS` and globs reach the program as literal text.
+The terminal is your own shell — the Windows PowerShell, or `$SHELL` elsewhere — running as your user, outside the agent's sandbox. That is the point of it: the agent's commands stay sandboxed and approval-gated, while the terminal is you typing. It keeps running when you switch views or close the panel, and restarts when you open a different project.
 
 ### Keyboard
 

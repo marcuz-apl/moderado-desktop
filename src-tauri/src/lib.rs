@@ -10,6 +10,7 @@ pub mod provider;
 pub mod schedules;
 pub mod search;
 pub mod sessions;
+pub mod terminal;
 pub mod source_control;
 pub mod transcript;
 pub mod workspace;
@@ -478,30 +479,51 @@ fn git_push(
     source_control::push(&root)
 }
 
-/// One command typed by the user, run through the same AppContainer sandbox and
-/// timeout the agent's `execute_command` uses. No shell is involved: the caller
-/// splits the line into a program and its arguments.
+/// Opens (or restarts) the terminal for this session, in its project folder.
+/// This is the user's own shell, not the agent's sandboxed command path.
+/// The signature mirrors the frontend payload, so it is wide on purpose.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
-async fn run_command(
+fn terminal_open(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    terminals: tauri::State<'_, terminal::TerminalState>,
     session_id: Option<String>,
     project_workspace: Option<String>,
     work_task_id: Option<String>,
-    program: String,
-    args: Vec<String>,
-    timeout_ms: Option<u64>,
-) -> Result<command::CommandResult, String> {
-    let root = code_workspace(&state, session_id, project_workspace, work_task_id)?;
-    command::execute_sandboxed(
-        &root,
-        command::CommandRequest {
-            program,
-            args,
-            working_directory: String::new(),
-            timeout_ms,
-        },
-    )
-    .await
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let root = code_workspace(&state, session_id.clone(), project_workspace.clone(), work_task_id)?;
+    // The frontend keys write/resize/close with the same value it sends here.
+    let key = session_id
+        .or(project_workspace)
+        .unwrap_or_else(|| root.to_string_lossy().into_owned());
+    terminal::open(&app, &terminals, &key, &root, cols, rows)
+}
+
+#[tauri::command]
+fn terminal_write(
+    terminals: tauri::State<'_, terminal::TerminalState>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    terminal::write(&terminals, &session_id, &data)
+}
+
+#[tauri::command]
+fn terminal_resize(
+    terminals: tauri::State<'_, terminal::TerminalState>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    terminal::resize(&terminals, &session_id, cols, rows)
+}
+
+#[tauri::command]
+fn terminal_close(terminals: tauri::State<'_, terminal::TerminalState>, session_id: String) {
+    terminal::close(&terminals, &session_id);
 }
 
 #[tauri::command]
@@ -1433,6 +1455,7 @@ pub fn run() {
             let checkpoints =
                 checkpoints::CheckpointStore::new(app.path().app_data_dir()?.join("checkpoints"))
                     .map_err(std::io::Error::other)?;
+            app.manage(terminal::TerminalState::default());
             app.manage(AppState {
                 store,
                 schedules,
@@ -1485,7 +1508,10 @@ pub fn run() {
             git_identity,
             git_commit,
             git_push,
-            run_command,
+            terminal_open,
+            terminal_write,
+            terminal_resize,
+            terminal_close,
             rename_session,
             delete_session,
             create_schedule,

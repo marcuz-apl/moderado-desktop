@@ -2,6 +2,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import MarkdownIt from 'markdown-it';
 import { lineDiff } from './diff';
@@ -10,7 +13,6 @@ import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLab
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
 import { applyMention, filterFiles, mentionQuery } from './mention';
-import { parseCommandLine } from './terminal';
 import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
@@ -42,7 +44,6 @@ type ProjectEntry = { name: string; path: string; isDir: boolean };
 type ExplorerOperation = { action: 'new-file' | 'new-folder' | 'rename'; projectWorkspace: string; entry: ProjectEntry | null; parentPath: string };
 type CommitSummary = { hash: string; subject: string; author: string; timestamp: number };
 type SourceControlSnapshot = { branch: string; changes: string[]; commits: CommitSummary[] };
-type CommandResult = { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; outputTruncated: boolean; changedFiles: string[] };
 type GitIdentity = { name: string; email: string; branch: string; remote: string | null; credential: 'ready' | 'missing' | 'none' | 'unknown'; detail: string };
 type GatewayMode = 'prod' | 'dev';
 
@@ -155,6 +156,7 @@ function applyTheme(): void {
   themeSelect.value = themePreference;
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  if (pty) pty.terminal.options.theme = terminalTheme();
   const next = oppositeTheme(theme);
   themeToggle.setAttribute('aria-label', `Switch to ${next} theme`);
   themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
@@ -573,10 +575,10 @@ function applyKindUi(): void {
   $('new-session').toggleAttribute('hidden', false);
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-git').toggleAttribute('hidden', work);
-  // Commands exist only in Code sessions, so say so instead of failing on run.
-  $<HTMLInputElement>('terminal-input').disabled = work;
-  $<HTMLInputElement>('terminal-input').placeholder = work ? 'Commands run in Code sessions only' : 'cargo test --quiet';
-  $<HTMLButtonElement>('terminal-run').disabled = work;
+  // The shell is Code-only, like every other command path.
+  $('terminal-note').textContent = work
+    ? 'Commands run in Code sessions only.'
+    : 'A real shell in the project folder. It runs as you, outside the agent sandbox.';
 
 }
 
@@ -1042,6 +1044,7 @@ function applyRightView(): void {
     tab.classList.toggle('selected', active);
     tab.setAttribute('aria-selected', String(active));
   });
+  if (rightView === 'terminal' && activeKind === 'code') void ensureTerminal();
 }
 
 function switchWorkspaceView(view: WorkspaceView): void {
@@ -1305,33 +1308,86 @@ $<HTMLFormElement>('project-entry-form').addEventListener('submit', async (event
 });
 
 /** Git identity and credential readiness. Code only: a Work task folder is not a repo. */
-/** One command through the same sandbox the agent's execute_command uses. */
-async function runTerminal(): Promise<void> {
-  const input = $<HTMLInputElement>('terminal-input');
-  const output = $('terminal-output');
-  const button = $<HTMLButtonElement>('terminal-run');
-  const parsed = parseCommandLine(input.value);
-  if (!parsed) { output.textContent = 'Type a program to run, for example: cargo test --quiet'; return; }
-  const line = input.value.trim();
-  button.disabled = true;
-  output.textContent = `$ ${line}\n\nRunning…`;
+type Pty = { terminal: Terminal; fit: FitAddon; key: string; started: boolean };
+let pty: Pty | null = null;
+let terminalEventsBound = false;
+
+/** The value the backend also keys write/resize/close with. */
+function terminalKey(): string {
+  return activeSessionId ?? selectedProjectWorkspace ?? '';
+}
+
+function terminalTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
+  return document.documentElement.dataset.theme === 'light'
+    ? { background: '#e7eff1', foreground: '#203744', cursor: '#08766d', selectionBackground: '#c9d9de' }
+    : { background: '#0c1d2d', foreground: '#b9cbd5', cursor: '#65cbbd', selectionBackground: '#2a4258' };
+}
+
+function fitTerminal(): void {
+  if (!pty) return;
+  try { pty.fit.fit(); } catch { /* the host has no size while the panel is hidden */ }
+}
+
+async function startShell(): Promise<void> {
+  if (!pty || !pty.key) return;
+  fitTerminal();
   try {
-    const result = await invoke<CommandResult>('run_command', {
-      ...browserArgs(), program: parsed.program, args: parsed.args, timeoutMs: 120_000,
-    });
-    const parts = [`$ ${line}`, ''];
-    if (result.stdout.trim()) parts.push(result.stdout.trimEnd());
-    if (result.stderr.trim()) parts.push(result.stderr.trimEnd());
-    const status = [`exit ${result.exitCode ?? '—'}`];
-    if (result.timedOut) status.push('timed out');
-    if (result.outputTruncated) status.push('output truncated');
-    parts.push('', status.join(' · '));
-    if (result.changedFiles.length) parts.push(`changed: ${result.changedFiles.join(', ')}`);
-    output.textContent = parts.join('\n');
-    if (result.changedFiles.length) await refreshSourceControl();
+    await invoke('terminal_open', { ...browserArgs(), cols: pty.terminal.cols, rows: pty.terminal.rows });
+    pty.started = true;
+    pty.terminal.focus();
   } catch (error) {
-    output.textContent = `$ ${line}\n\n${String(error)}`;
-  } finally { button.disabled = false; }
+    pty.terminal.write(`\r\n${String(error)}\r\n`);
+  }
+}
+
+/** Mounts the terminal once, then starts a shell for whichever project is open. */
+async function ensureTerminal(): Promise<void> {
+  const host = $('terminal-host');
+  if (!host) return;
+  if (!pty) {
+    const terminal = new Terminal({
+      fontFamily: '"Cascadia Code", Consolas, monospace',
+      fontSize: 12,
+      cursorBlink: true,
+      scrollback: 5000,
+      theme: terminalTheme(),
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(host);
+    pty = { terminal, fit, key: terminalKey(), started: false };
+    terminal.onData((data) => {
+      if (!pty) return;
+      void invoke('terminal_write', { sessionId: pty.key, data }).catch(() => {});
+    });
+    if (!terminalEventsBound) {
+      terminalEventsBound = true;
+      void listen<{ sessionId: string; data: string }>('terminal-output', (event) => {
+        if (pty && event.payload.sessionId === pty.key) pty.terminal.write(event.payload.data);
+      });
+      void listen<{ sessionId: string }>('terminal-exit', (event) => {
+        if (pty && event.payload.sessionId === pty.key) {
+          pty.terminal.write('\r\n[shell exited]\r\n');
+          pty.started = false;
+        }
+      });
+      new ResizeObserver(() => {
+        if (!pty || !rightOpen || rightView !== 'terminal') return;
+        fitTerminal();
+        void invoke('terminal_resize', { sessionId: pty.key, cols: pty.terminal.cols, rows: pty.terminal.rows }).catch(() => {});
+      }).observe(host);
+    }
+  }
+  const key = terminalKey();
+  if (pty.key !== key) {
+    // Another project: end the old shell rather than reusing it in a new folder.
+    await invoke('terminal_close', { sessionId: pty.key }).catch(() => {});
+    pty.terminal.reset();
+    pty.key = key;
+    pty.started = false;
+  }
+  if (!key) { pty.terminal.write('\r\nOpen a project to start a shell.\r\n'); return; }
+  if (!pty.started) await startShell();
 }
 
 async function refreshGitIdentity(): Promise<void> {
@@ -1600,10 +1656,6 @@ for (const view of ['preview', 'terminal'] as const) {
   });
 }
 $('right-close').addEventListener('click', () => setRightPanel(false));
-$<HTMLButtonElement>('terminal-run').addEventListener('click', () => { void runTerminal(); });
-$<HTMLInputElement>('terminal-input').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void runTerminal(); }
-});
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
 $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });
 $<HTMLButtonElement>('git-commit').addEventListener('click', async () => {

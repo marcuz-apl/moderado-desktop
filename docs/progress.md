@@ -321,3 +321,13 @@
 - 0.4.29 moved files, changes and checkpoints out of the left rail into the right panel. That was a reshuffle of the sidebar rather than the panel that was asked for, so it is reverted: the rail is back to Library, Workspace, Schedules, Profile, and the workspace panel again owns Files, Changes and Checkpoints with its remembered tab.
 - The right panel keeps only what the left rail does not already own: **Preview** (the file selected in Workspace files) and **Terminal**. Two launcher buttons replace the four, and the file-preview dialog stays gone because the panel is a better home for it.
 - Reverted with `git revert --no-commit` so the undo is explicit in history, then the two surviving views were re-applied on top.
+
+## A real terminal (0.4.31)
+
+- The command runner was honest but not a terminal: it split one line, ran a single program in the sandbox and printed the result. It is replaced by a real shell.
+- Backend: `terminal.rs` with `portable-pty`. One PTY per session keyed by session id or project folder; a reader thread streams `terminal-output` events and emits `terminal-exit`; `terminal_write`, `terminal_resize` and `terminal_close` complete the set. The Windows shell is used without a profile so startup is predictable; elsewhere it is `$SHELL`.
+- UTF-8 is decoded incrementally: a multi-byte character split across two reads is normal, so the tail is carried into the next chunk instead of being replaced with mojibake.
+- Frontend: xterm.js with the fit addon. The terminal mounts once, refits on panel resize through a ResizeObserver, restarts when the project changes, keeps running while the view is hidden, and repaints when the theme changes.
+- **Security note, deliberate:** the shell runs as the user, outside the AppContainer sandbox. The agent's `execute_command` keeps its sandbox and approval gate; the two paths are separate on purpose and the panel says so. Still Code-only, through the same `code_workspace` guard.
+- Removed with the runner: `parseCommandLine` and its tests, since nothing else split command lines.
+- Tests: PTY sizing never reports zero, the incremental UTF-8 decoder handles a split character, and the UI is asserted to mount an emulator rather than a one-shot input.
