@@ -142,6 +142,8 @@ test('the composer offers a plus in both modes and a file menu in Code', async (
   assert.match(html, /id="attach-files" class="composer-attach"[^>]*aria-label="Attach files"[^>]*><svg/);
   assert.doesNotMatch(html, /id="attach-files"[^>]*\bhidden\b/, 'the plus is present in both modes');
   assert.match(html, /id="mention-menu"[^>]*role="listbox"[^>]*hidden/);
+  assert.match(html, /id="mention-files" class="composer-attach composer-at"[^>]*aria-label="Reference a project file"/);
+  assert.match(main, /mentionButton\.toggleAttribute\('hidden', work\)/, 'the at button is Code only');
   assert.match(main, /invoke<string\[\]>/);
   assert.match(main, /mentionQuery\(prompt\.value/);
   assert.match(style, /\.composer-stop svg\{width:18px;height:18px\}/);

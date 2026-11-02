@@ -28,6 +28,11 @@ pub struct RunConfig<'a> {
     pub lsp: Option<&'a crate::lsp::LspRegistry>,
 }
 
+/// Safety net against a model that never stops calling tools. It is deliberately
+/// generous: an ordinary coding task needs many steps, and stopping early used
+/// to fail the whole turn.
+pub const MAX_TOOL_ROUNDS: usize = 40;
+
 #[derive(Debug)]
 pub enum AgentEvent {
     Text(String),
@@ -126,7 +131,7 @@ where
         SessionKind::Code => "You are Moderado, a coding agent. Use relative workspace paths with tools.",
     };
     let summary_instruction = "When the turn is complete, finish your final response with a concise Markdown section headed `## Turn summary`. Summarize the completed work and important results as bullets. If no files were changed, summarize the answer or guidance provided. Do not claim unfinished work as complete.";
-    for _ in 0..8 {
+    for _ in 0..MAX_TOOL_ROUNDS {
         let mut messages = vec![
             json!({"role":"system","content":format!("{persona} Report tool errors honestly. {mode_instruction} {summary_instruction}")}),
         ];
@@ -267,7 +272,15 @@ where
             persist(history)?;
         }
     }
-    Err("Agent stopped after 8 tool rounds".into())
+    // Out of rounds. Say so in the transcript and keep the turn's work, rather
+    // than failing the turn as if something went wrong.
+    let notice = format!(
+        "I stopped after {MAX_TOOL_ROUNDS} steps without finishing. The work so far is saved; send “continue” to keep going."
+    );
+    emit(AgentEvent::Text(notice.clone()));
+    history.push(json!({"role":"assistant","content":notice}));
+    persist(history)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -343,6 +356,41 @@ mod tests {
         ).await.unwrap();
         server.join().unwrap();
         assert_eq!(history.last().unwrap()["content"], "Search was not performed");
+    }
+
+    #[tokio::test]
+    async fn a_model_that_never_stops_is_cut_off_with_a_notice() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.txt"), "hello").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for _ in 0..MAX_TOOL_ROUNDS {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = read_request(&mut stream);
+                respond(&mut stream, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"list_files\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n");
+            }
+        });
+        let mut history = Vec::new();
+        let mut events = Vec::new();
+        run_turn(
+            RunConfig {
+                workspace: root.path(), base_url: &base, model: "m", api_key: "", mode: Mode::Act,
+                kind: SessionKind::Code, auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
+                attachments: &[], attachments_root: root.path(), session_id: "loop", mcp: None, lsp: None,
+            },
+            &mut history,
+            "go",
+            |_request| async { None },
+            |event| events.push(event),
+        ).await.unwrap();
+        server.join().unwrap();
+        let notice = events.iter().find_map(|event| match event {
+            AgentEvent::Text(text) if text.contains("stopped after") => Some(text.clone()),
+            _ => None,
+        }).expect("the turn ends with a notice");
+        assert!(notice.contains(&MAX_TOOL_ROUNDS.to_string()));
+        assert_eq!(history.last().unwrap()["content"], notice);
     }
 
     fn respond(socket: &mut TcpStream, body: &str) {

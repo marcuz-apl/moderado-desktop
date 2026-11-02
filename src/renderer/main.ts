@@ -60,6 +60,7 @@ const keyField = $<HTMLInputElement>('api-key');
 const keyApplyLink = $<HTMLAnchorElement>('apply-key-link');
 const themeToggle = $<HTMLButtonElement>('theme-toggle');
 const attachButton = $<HTMLButtonElement>('attach-files');
+const mentionButton = $<HTMLButtonElement>('mention-files');
 const attachmentChips = $<HTMLDivElement>('attachment-chips');
 const explorerContextMenu = $<HTMLDivElement>('explorer-context-menu');
 const approvalDialog = $<HTMLDialogElement>('approval-dialog');
@@ -491,11 +492,12 @@ function applyKindUi(): void {
   $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
   $('approve-command-option').toggleAttribute('hidden', work);
   $('approve-mcp-option').toggleAttribute('hidden', work);
-  // One "+" in both modes: Work copies files in, Code references project files.
-  attachButton.disabled = selectingContext || (work ? !activeSessionId : !activeSessionId && !selectedProjectWorkspace);
-  const attachLabel = work ? 'Attach files' : 'Reference a project file';
-  attachButton.title = attachLabel;
-  attachButton.setAttribute('aria-label', attachLabel);
+  // "+" attaches a file's content in both modes; "@" references a project file.
+  attachButton.disabled = selectingContext || !activeSessionId;
+  attachButton.title = 'Attach files';
+  attachButton.setAttribute('aria-label', 'Attach files');
+  mentionButton.toggleAttribute('hidden', work);
+  mentionButton.disabled = selectingContext || (!activeSessionId && !selectedProjectWorkspace);
   document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
   prompt.placeholder = work ? 'Describe the task or document you need…' : 'What should the agent work on in this project?';
   const emptyCopy = document.getElementById('empty-state-copy');
@@ -1331,21 +1333,25 @@ $<HTMLButtonElement>('kind-work').addEventListener('click', () => { void setKind
 $<HTMLButtonElement>('kind-code').addEventListener('click', () => { void setKind('code'); });
 $<HTMLElement>('about-version').textContent = appVersion.trim().split('+')[0] || appVersion.trim();
 
+mentionButton.addEventListener('click', async () => {
+  if (!activeSessionId && !selectedProjectWorkspace) { setStatus('Open a project before referencing files.'); return; }
+  await openMentions(prompt.selectionStart, prompt.selectionStart, '');
+  prompt.focus();
+});
 attachButton.addEventListener('click', async () => {
   const sessionId = activeSessionId;
-  if (activeKind === 'code') {
-    if (!sessionId && !selectedProjectWorkspace) { setStatus('Open a project before referencing files.'); return; }
-    await openMentions(prompt.selectionStart, prompt.selectionStart, '');
-    prompt.focus();
-    return;
-  }
-  if (!sessionId) { setStatus('Create a task before attaching files.'); return; }
+  if (!sessionId) { setStatus(activeKind === 'work' ? 'Create a task before attaching files.' : 'Start a session before attaching files.'); return; }
+  const work = activeKind === 'work';
   try {
-    const picked = await open({ multiple: true, title: 'Attach files (editable copies go into the task folder)' });
+    const picked = await open({ multiple: true, title: work ? 'Attach files (editable copies go into the task folder)' : 'Attach files to this message' });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     const records = await invoke<AttachmentRecord[]>('add_attachments', { sessionId, paths });
-    if (activeSessionId === sessionId) { pendingAttachments = [...pendingAttachments, ...records]; renderChips(); setStatus(`${pendingAttachments.length} file(s) attached. Copies are in Explorer.`); if (activePanel === 'explorer') await refreshProjectTree(); }
+    if (activeSessionId === sessionId) {
+      pendingAttachments = [...pendingAttachments, ...records]; renderChips();
+      setStatus(work ? `${pendingAttachments.length} file(s) attached. Copies are in Explorer.` : `${pendingAttachments.length} file(s) attached.`);
+      if (work && activePanel === 'explorer') await refreshProjectTree();
+    }
     else { const draft = composerDrafts.get(sessionId) ?? { text: '', attachments: [] }; composerDrafts.set(sessionId, { ...draft, attachments: [...draft.attachments, ...records] }); }
   } catch (error) { if (activeSessionId === sessionId) setStatus(String(error)); }
 });

@@ -19,7 +19,7 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 - **Command sandbox**: Windows commands receive only a disposable AppContainer copy of the project, have bounded output and runtime, and cannot access files outside that copy. The app checks for concurrent workspace changes before copying results back.
 - **Human-in-the-loop approval**: unchecked operations wait for approval; file changes include a diff preview. Scheduled Act tasks retain their explicit write-approval choice.
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.
-- **File references**: in Code mode type `@` in the composer to pick a project file, or press the **+** button to browse them; the chosen path is inserted as `@path` for the agent to read. In Work mode **+** attaches files instead, copying them into the task folder because Work sessions cannot browse the disk.
+- **Attach and reference**: the **+** button attaches files in both modes — Work copies them into the task folder so the agent can edit them, Code sends their content without writing into the repository. In Code, **@** (button or typed) picks a project file and inserts `@relative/path` for the agent to read.
 - **Composer history**: press Up in the composer to walk back through the prompts this session has sent and Down to walk forward; stepping past the newest entry restores what you were typing. Arrows still move the caret inside multi-line text.
 - **Local-first**: fully usable offline with Ollama or LM Studio; no accounts required at first launch.
 - **No telemetry**: data never leaves your machine except to explicitly configured remote providers.

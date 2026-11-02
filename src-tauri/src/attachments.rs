@@ -95,6 +95,14 @@ pub fn file_path(root: &Path, session_id: &str, id: &str, name: &str) -> PathBuf
     root.join(session_id).join(format!("{id}-{}", safe_name(name)))
 }
 
+/// A Work session is jailed to its task folder, so attachments are copied in
+/// for it to edit. A Code session already owns its project, and copying there
+/// would write into the user's repository, so the file is only sent as message
+/// content.
+pub fn needs_workspace_copy(kind: crate::sessions::SessionKind) -> bool {
+    matches!(kind, crate::sessions::SessionKind::Work)
+}
+
 pub fn copy_into_workspace(root: &Path, workspace: &Path, records: &[AttachmentRecord]) -> Result<(), String> {
     for record in records {
         let relative = format!("attachments/{}-{}", record.id, safe_name(&record.name));
@@ -294,6 +302,14 @@ fn base64(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::sessions::SessionKind;
+
+    #[test]
+    fn only_work_sessions_get_a_workspace_copy() {
+        assert!(super::needs_workspace_copy(SessionKind::Work));
+        assert!(!super::needs_workspace_copy(SessionKind::Code));
+    }
+
     use super::*;
 
     fn workspace() -> tempfile::TempDir {

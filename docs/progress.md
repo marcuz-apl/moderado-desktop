@@ -210,3 +210,11 @@
 - The file list is cached per session/project and cleared when a turn ends or the composer switches context.
 - Stop icon glyph is 18px (was 13px).
 - Tests: `tests/mention.test.mjs` for token detection, insertion and ranking; a Rust test for the listing bounds; UI assertions for the + button, the menu and the icon size.
+
+## Attach and reference split, longer agent turns (0.4.16)
+
+- Corrected 0.4.15: **+** is for attaching a file in both modes, as in Work, and **@** is the file reference. A new **@** button sits beside **+** (Code only) and opens the same picker as typing `@`; typing still filters as you go.
+- `add_attachments` no longer rejects Code sessions. A Code attachment is sent as message content and is **not** copied into the project, so the repository stays untouched; `attachments::needs_workspace_copy` encodes that rule and has a test.
+- Attach copy in Code now says "Attach files to this message" and no longer claims copies are in Explorer.
+- Fixed the "Agent stopped after 8 tool rounds" failure: a normal coding task can exceed 8 model/tool rounds. The cap is now `MAX_TOOL_ROUNDS` (40) and running out ends the turn with a visible note ("send continue to keep going") instead of failing it as an error. The work already done stays in history.
+- Test: a model that only ever calls tools ends with the notice and an `Ok` turn, rather than an error.

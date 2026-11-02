@@ -440,9 +440,6 @@ async fn add_attachments(
     paths: Vec<String>,
 ) -> Result<Vec<attachments::AttachmentRecord>, String> {
     let record = state.store.get(&session_id)?;
-    if !matches!(record.kind, SessionKind::Work) {
-        return Err("Attachments are only available in Work sessions".into());
-    }
     let root = app
         .path()
         .app_data_dir()
@@ -450,7 +447,10 @@ async fn add_attachments(
         .join("attachments");
     let sources: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     let records = attachments::store(&root, &session_id, &sources)?;
-    attachments::copy_into_workspace(&root, PathBuf::from(record.workspace).as_path(), &records)?;
+    // A Code session keeps its repository untouched; only Work needs the copy.
+    if attachments::needs_workspace_copy(record.kind) {
+        attachments::copy_into_workspace(&root, PathBuf::from(record.workspace).as_path(), &records)?;
+    }
     state.store.add_attachments(&records)?;
     Ok(records)
 }
