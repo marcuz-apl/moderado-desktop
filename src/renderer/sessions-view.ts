@@ -1,9 +1,9 @@
 export type SessionKind = 'work' | 'code';
-/** The left rail is navigation only; context lives in the right panel. */
-export type SidebarPanel = 'library' | 'schedules' | 'profile';
-/** Views in the right panel. Terminal and Changes are Code-only in practice. */
-export type RightView = 'files' | 'changes' | 'checkpoints' | 'preview' | 'terminal';
-export const RIGHT_VIEWS: readonly RightView[] = ['files', 'changes', 'checkpoints', 'preview', 'terminal'];
+/** One rail for both modes. `workspace` holds the file, change and checkpoint views. */
+export type SidebarPanel = 'library' | 'workspace' | 'schedules' | 'profile';
+/** Tabs inside the workspace panel. Changes only has content in Code sessions. */
+export type WorkspaceView = 'explorer' | 'changes' | 'checkpoints';
+export const WORKSPACE_VIEWS: readonly WorkspaceView[] = ['explorer', 'changes', 'checkpoints'];
 /** Full-width views that replace the conversation instead of opening a panel. */
 export type AppPage = 'settings' | 'docs';
 
@@ -31,8 +31,15 @@ export function defaultPanel(): SidebarPanel {
 }
 
 /// No panel is mode-specific any more: switching Work/Code must not move the rail.
+export function parseWorkspaceView(value: string | null): WorkspaceView {
+  return value === 'changes' || value === 'checkpoints' ? value : 'explorer';
+}
+
+/** The right panel holds only what the left rail does not already own. */
+export type RightView = 'preview' | 'terminal';
+export const RIGHT_VIEWS: readonly RightView[] = ['preview', 'terminal'];
 export function parseRightView(value: string | null): RightView {
-  return (RIGHT_VIEWS as readonly string[]).includes(value ?? '') ? (value as RightView) : 'files';
+  return value === 'terminal' ? 'terminal' : 'preview';
 }
 
 /// The rail remembers the mode you were last in, the way WorkBuddy does.

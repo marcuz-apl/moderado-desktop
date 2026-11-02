@@ -15,7 +15,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { defaultPanel, parseSessionKind, parseRightView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type RightView, type AppPage } from './sessions-view';
+import { defaultPanel, parseRightView, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type RightView, type AppPage } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -94,6 +94,8 @@ let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = n
 let approvalBefore = '';
 let activePanel: SidebarPanel | null = 'library';
 /** The workspace panel's tab, remembered the way the mode is. */
+const workspaceViewKey = 'moderado-workspace-view';
+let workspaceView: WorkspaceView = parseWorkspaceView(localStorage.getItem(workspaceViewKey));
 const rightViewKey = 'moderado-right-view';
 const rightOpenKey = 'moderado-right-open';
 let rightView: RightView = parseRightView(localStorage.getItem(rightViewKey));
@@ -573,9 +575,7 @@ function applyKindUi(): void {
   $('profile-git').toggleAttribute('hidden', work);
   // Commands exist only in Code sessions, so say so instead of failing on run.
   $<HTMLInputElement>('terminal-input').disabled = work;
-  $<HTMLInputElement>('terminal-input').placeholder = work
-    ? 'Commands run in Code sessions only'
-    : 'cargo test --quiet';
+  $<HTMLInputElement>('terminal-input').placeholder = work ? 'Commands run in Code sessions only' : 'cargo test --quiet';
   $<HTMLButtonElement>('terminal-run').disabled = work;
 
 }
@@ -715,7 +715,7 @@ function enterDraft(kind: SessionKind, workspace: string | null = selectedProjec
   $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
-  if (viewingFiles()) void refreshProjectTree();
+  if (viewingExplorer()) void refreshProjectTree();
   if (viewingChanges()) void refreshSourceControl();
   void refreshCheckpoints(); void refreshSchedules();
   setStatus(kind === 'work' ? selectedWorkTaskId ? 'Start a session in this task.' : 'Create or select a task to begin.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
@@ -793,7 +793,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
-    await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingFiles() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
+    await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingExplorer() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
   finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
@@ -996,8 +996,25 @@ function switchPage(page: AppPage): void {
   setPageMode(page);
 }
 
-const viewingFiles = (): boolean => rightOpen && rightView === 'files';
-const viewingChanges = (): boolean => rightOpen && rightView === 'changes';
+const viewingExplorer = (): boolean => activePanel === 'workspace' && workspaceView === 'explorer';
+const viewingChanges = (): boolean => activePanel === 'workspace' && workspaceView === 'changes';
+
+/** Shows one workspace tab and loads the data it needs. */
+function applyWorkspaceView(): void {
+  document.querySelectorAll<HTMLElement>('.workspace-view').forEach((view) => {
+    const active = view.dataset.workspaceView === workspaceView;
+    view.classList.toggle('active', active);
+    view.toggleAttribute('hidden', !active);
+  });
+  document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
+    const active = tab.dataset.view === workspaceView;
+    tab.classList.toggle('selected', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  if (viewingExplorer()) void refreshProjectTree();
+  if (viewingChanges()) void refreshSourceControl();
+  if (workspaceView === 'checkpoints') void refreshCheckpoints();
+}
 
 /** Opens or closes the context panel and shows one view in it. */
 function setRightPanel(open: boolean, view?: RightView): void {
@@ -1005,18 +1022,15 @@ function setRightPanel(open: boolean, view?: RightView): void {
   if (view) rightView = view;
   try { localStorage.setItem(rightOpenKey, String(open)); localStorage.setItem(rightViewKey, rightView); }
   catch { /* the panel still works for this run */ }
-  const panel = $('right-panel');
-  panel.toggleAttribute('hidden', !open);
+  $('right-panel').toggleAttribute('hidden', !open);
   document.querySelector('.app')?.classList.toggle('right-open', open);
-  for (const id of ['open-files', 'open-changes', 'open-preview', 'open-terminal']) {
-    const button = document.getElementById(id);
-    const pressed = open && id === `open-${rightView === 'files' ? 'files' : rightView}`;
-    button?.setAttribute('aria-pressed', String(pressed));
+  for (const id of ['open-preview', 'open-terminal']) {
+    document.getElementById(id)?.setAttribute('aria-pressed', String(open && id === `open-${rightView}`));
   }
   if (open) applyRightView();
 }
 
-/** Shows one right-panel view and loads the data it needs. */
+/** Shows one right-panel view. Both are cheap, so nothing needs prefetching. */
 function applyRightView(): void {
   document.querySelectorAll<HTMLElement>('.right-view').forEach((section) => {
     const active = section.dataset.rightView === rightView;
@@ -1028,9 +1042,12 @@ function applyRightView(): void {
     tab.classList.toggle('selected', active);
     tab.setAttribute('aria-selected', String(active));
   });
-  if (viewingFiles()) void refreshProjectTree();
-  if (viewingChanges()) void refreshSourceControl();
-  if (rightView === 'checkpoints') void refreshCheckpoints();
+}
+
+function switchWorkspaceView(view: WorkspaceView): void {
+  workspaceView = view;
+  try { localStorage.setItem(workspaceViewKey, view); } catch { /* the tab still switches for this run */ }
+  applyWorkspaceView();
 }
 
 function switchPanel(panel: SidebarPanel): void {
@@ -1045,6 +1062,7 @@ function switchPanel(panel: SidebarPanel): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
+  if (panel === 'workspace') applyWorkspaceView();
 }
 
 async function selectProject(workspace: string): Promise<void> {
@@ -1069,7 +1087,7 @@ async function selectWorkTask(taskId: string, saveDraft = true): Promise<void> {
     enterDraft('work');
     updateFolderContext();
     renderSessions();
-    if (viewingFiles()) void refreshProjectTree();
+    if (viewingExplorer()) void refreshProjectTree();
   }
 }
 function browserArgs(): { sessionId: string | null; projectWorkspace: string | null; workTaskId: string | null } {
@@ -1545,7 +1563,7 @@ attachButton.addEventListener('click', async () => {
     if (activeSessionId === sessionId) {
       pendingAttachments = [...pendingAttachments, ...records]; renderChips();
       setStatus(work ? `${pendingAttachments.length} file(s) attached. Copies are in Explorer.` : `${pendingAttachments.length} file(s) attached.`);
-      if (work && viewingFiles()) await refreshProjectTree();
+      if (work && viewingExplorer()) await refreshProjectTree();
     }
     else { const draft = composerDrafts.get(sessionId) ?? { text: '', attachments: [] }; composerDrafts.set(sessionId, { ...draft, attachments: [...draft.attachments, ...records] }); }
   } catch (error) { if (activeSessionId === sessionId) setStatus(String(error)); }
@@ -1569,12 +1587,15 @@ document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button
     else switchPanel(button.dataset.panel as SidebarPanel);
   });
 });
+document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
+  tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
+});
 document.querySelectorAll<HTMLButtonElement>('.right-tab').forEach((tab) => {
   tab.addEventListener('click', () => setRightPanel(true, parseRightView(tab.dataset.rightTab ?? null)));
 });
-for (const [id, view] of [['open-files', 'files'], ['open-changes', 'changes'], ['open-preview', 'preview'], ['open-terminal', 'terminal']] as const) {
-  document.getElementById(id)?.addEventListener('click', () => {
-    // Clicking the active view again closes the panel, like a toggle button.
+for (const view of ['preview', 'terminal'] as const) {
+  document.getElementById(`open-${view}`)?.addEventListener('click', () => {
+    // Pressing the active view again closes the panel, like a toggle button.
     setRightPanel(!(rightOpen && rightView === view), view);
   });
 }
@@ -2075,7 +2096,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
       await refreshSummaries();
-      if (id === activeSessionId && viewingFiles()) await refreshProjectTree();
+      if (id === activeSessionId && viewingExplorer()) await refreshProjectTree();
       if (id === activeSessionId && viewingChanges()) await refreshSourceControl();
     }).catch((error) => setStatus(String(error)));
   }

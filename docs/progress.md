@@ -316,12 +316,8 @@
 - Workspace tab labels fit at 10px; "Checkpoints" previously clipped to "Checkpoi…".
 - Tests: commit + push against a local bare remote, empty message, nothing-to-commit, identity before/after adding a remote, all error mappings, the Work guard, and the prompt-disabling environment.
 
-## Context panel on the right (0.4.29)
+## Reverted the panel move (0.4.30)
 
-- WorkBuddy's four top-right actions are not one category: workspace files and changes work in both modes, preview is most useful in Work, and a terminal is Code-only because Work has no command execution at all.
-- The left rail is now navigation only — Library, Schedules, Profile. Files, Changes, Checkpoints, Preview and Terminal moved into a right panel with an icon tab strip, a close button and a remembered open state and view. The app grid gained a fourth column that is 0 wide until the panel opens, so the conversation keeps its width.
-- Four launcher buttons at the top right (Preview, Workspace files, Changes, Terminal) open the panel on that view and close it when pressed again.
-- The file-preview dialog is gone: selecting a file opens the Preview view instead, which is better than a modal over the conversation.
-- Terminal is a command runner, not a PTY: `parseCommandLine` splits one line into a program and arguments (quote-aware, no shell), and `run_command` runs it through `command::execute_sandboxed` — the same AppContainer, timeout and output limits as the agent's `execute_command`, resolved through `code_workspace` so Work sessions are refused.
-- Two mistakes worth recording: an offset bug deleted `btw-dialog` while removing the preview dialog, and a second attempt duplicated `approval-dialog`. Both were caught by comparing the dialog list against `HEAD`; the final fix rebuilds the whole dialogs block from `HEAD` minus the preview dialog, and the duplicate-id check is clean.
-- Tests: the right panel holds five views and five tabs, the rail is three panels, the launchers carry the folder icon, and the command parser's quoting and no-shell rules.
+- 0.4.29 moved files, changes and checkpoints out of the left rail into the right panel. That was a reshuffle of the sidebar rather than the panel that was asked for, so it is reverted: the rail is back to Library, Workspace, Schedules, Profile, and the workspace panel again owns Files, Changes and Checkpoints with its remembered tab.
+- The right panel keeps only what the left rail does not already own: **Preview** (the file selected in Workspace files) and **Terminal**. Two launcher buttons replace the four, and the file-preview dialog stays gone because the panel is a better home for it.
+- Reverted with `git revert --no-commit` so the undo is explicit in history, then the two surviving views were re-applied on top.

@@ -46,18 +46,12 @@ The agent works in steps. Each step that changes files waits for your approval u
 
 ## Reference
 
-### Context panel
+### Preview and terminal
 
-The four icons at the top right open a panel beside the conversation:
+Two icons at the top right open a panel beside the conversation:
 
-| Button | Shows |
-| --- | --- |
-| **Preview** | The file you selected in Workspace files, read-only. |
-| **Workspace files** | The project or task folder tree. |
-| **Changes** | Branch, changed files and recent commits (Code only). |
-| **Terminal** | One command per line, run in the sandbox (Code only). |
-
-**Checkpoints** is the fifth tab inside the panel. The panel remembers whether it was open and which view you last used.
+- **Preview** shows the file you selected in Workspace files, read-only.
+- **Terminal** runs one program per line in the sandbox (Code only).
 
 The terminal is not a shell: the line is split into a program and arguments, quotes group words, and nothing else is interpreted. Pipes, `$VARS` and globs reach the program as literal text.
 
