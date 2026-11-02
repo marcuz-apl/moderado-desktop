@@ -225,3 +225,10 @@
 - The choice persists in `localStorage` under `moderado-display-size` and is applied at startup, the same way the theme is.
 - `parseDisplaySize` rejects anything outside the offered list and falls back to 100%, so a hand-edited or stale value cannot produce a broken layout.
 - Tests: `tests/display-size.test.mjs` covers parsing, the zoom value, and the Settings markup.
+
+## Send is an icon (0.4.18)
+
+- The composer action row mixed one text button with three icon buttons. Send is now a 34px arrow-up button with the same accent fill, so the row aligns on one size and the primary action stays the loudest by colour rather than by label.
+- `#send.composer-send` sets the square layout; the plain class rule lost to the `#send` id rule, which kept the old 9/16px padding and would have squeezed the 16px glyph.
+- The `#send span{display:none}` rule is gone with the arrow glyph it hid; the shortcut hint in the same row was already restored earlier.
+- `aria-label` and `title` keep the control named for screen readers and hover.

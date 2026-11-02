@@ -158,7 +158,7 @@ test('composer footer pairs the model with the shortcut hint and always shows st
   assert.ok(bottom.indexOf('id="selected-model"') < bottom.indexOf('class="composer-shortcuts"'), 'model leads the row');
   assert.ok(bottom.indexOf('id="send"') < bottom.indexOf('id="stop"'), 'stop sits right of send');
   assert.doesNotMatch(html, /id="stop"[^>]*\bhidden\b/);
-  assert.match(style, /#send span\{display:none\}/);
+  assert.match(style, /#send\.composer-send\{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0\}/);
   assert.match(style, /\.composer-stop\.running \.stop-square\{display:block\}/);
   assert.match(style, /\.composer-stop \.stop-square\{display:none;fill:#e2564a\}/);
 });
