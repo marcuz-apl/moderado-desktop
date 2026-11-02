@@ -14,7 +14,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { DEFAULT_SESSION_KIND, defaultPanel, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type AppPage } from './sessions-view';
+import { defaultPanel, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type AppPage } from './sessions-view';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -74,7 +74,9 @@ const emptyState = $('empty-state').cloneNode(true);
 
 let providers: ProviderPreset[] = [];
 const usageBySession = new Map<string, ModelUsage>();
-let activeKind: SessionKind = DEFAULT_SESSION_KIND;
+const lastKindKey = 'moderado-last-kind';
+/** Start in the mode you left, the way WorkBuddy does, not always in Work. */
+let activeKind: SessionKind = parseSessionKind(localStorage.getItem(lastKindKey));
 let pendingAttachments: AttachmentRecord[] = [];
 let initialized = false;
 let creatingSession = false;
@@ -88,6 +90,9 @@ let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
 let activePanel: SidebarPanel | null = 'library';
+/** The workspace panel's tab, remembered the way the mode is. */
+const workspaceViewKey = 'moderado-workspace-view';
+let workspaceView: WorkspaceView = parseWorkspaceView(localStorage.getItem(workspaceViewKey));
 let activePage: AppPage | null = null;
 let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
@@ -503,10 +508,6 @@ function applyKindUi(): void {
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-pressed', String(selected));
   }
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.activity-button'))) {
-    if (button.dataset.page) continue;
-    button.hidden = !panelAvailableForKind(button.dataset.panel as SidebarPanel, activeKind);
-  }
   // One container panel serves both modes; only its heading, actions and list change.
   const libraryLabel = work ? 'Tasks' : 'Projects';
   $('library-title').textContent = libraryLabel;
@@ -516,7 +517,6 @@ function applyKindUi(): void {
   $('project-operations').toggleAttribute('hidden', work);
   $('task-list').toggleAttribute('hidden', !work);
   $('project-list').toggleAttribute('hidden', work);
-  document.querySelector<HTMLElement>('.mode-control')?.toggleAttribute('hidden', work);
   $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
   $('approve-command-option').toggleAttribute('hidden', work);
   $('approve-mcp-option').toggleAttribute('hidden', work);
@@ -524,8 +524,10 @@ function applyKindUi(): void {
   attachButton.disabled = selectingContext || !activeSessionId;
   attachButton.title = 'Attach files';
   attachButton.setAttribute('aria-label', 'Attach files');
-  mentionButton.toggleAttribute('hidden', work);
-  mentionButton.disabled = selectingContext || (!activeSessionId && !selectedProjectWorkspace);
+  mentionButton.disabled = selectingContext || work || (!activeSessionId && !selectedProjectWorkspace);
+  const mentionLabel = work ? 'File references are available in Code sessions' : 'Reference a project file';
+  mentionButton.title = mentionLabel;
+  mentionButton.setAttribute('aria-label', mentionLabel);
   document.querySelector<HTMLElement>('.session-context')?.toggleAttribute('hidden', work);
   prompt.placeholder = work ? 'Describe the task or document you need…' : 'What should the agent work on in this project?';
   const emptyCopy = document.getElementById('empty-state-copy');
@@ -538,7 +540,6 @@ function applyKindUi(): void {
   $('new-session').toggleAttribute('hidden', false);
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-github').toggleAttribute('hidden', work);
-  if (activePanel && !panelAvailableForKind(activePanel, activeKind)) switchPanel(defaultPanel());
 
 }
 
@@ -677,13 +678,14 @@ function enterDraft(kind: SessionKind, workspace: string | null = selectedProjec
   $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
-  if (activePanel === 'explorer') void refreshProjectTree();
-  if (activePanel === 'source-control') void refreshSourceControl();
+  if (viewingExplorer()) void refreshProjectTree();
+  if (viewingChanges()) void refreshSourceControl();
   void refreshCheckpoints(); void refreshSchedules();
   setStatus(kind === 'work' ? selectedWorkTaskId ? 'Start a session in this task.' : 'Create or select a task to begin.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
 }
 async function setKind(kind: SessionKind): Promise<void> {
   if (kind === activeKind && !selectingContext) return;
+  try { localStorage.setItem(lastKindKey, kind); } catch { /* the mode still switches for this run */ }
   saveComposerDraft();
   const validProjects = new Set(projects.map((project) => project.workspace));
   const candidates = summaries.filter((session) => session.kind === 'work' || validProjects.has(session.workspace));
@@ -754,7 +756,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
-    await Promise.all([refreshCheckpoints(), refreshSchedules(), activePanel === 'explorer' ? refreshProjectTree() : Promise.resolve(), activePanel === 'source-control' ? refreshSourceControl() : Promise.resolve()]);
+    await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingExplorer() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
   finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
@@ -957,8 +959,33 @@ function switchPage(page: AppPage): void {
   setPageMode(page);
 }
 
+const viewingExplorer = (): boolean => activePanel === 'workspace' && workspaceView === 'explorer';
+const viewingChanges = (): boolean => activePanel === 'workspace' && workspaceView === 'changes';
+
+/** Shows one workspace tab and loads the data it needs. */
+function applyWorkspaceView(): void {
+  document.querySelectorAll<HTMLElement>('.workspace-view').forEach((view) => {
+    const active = view.dataset.workspaceView === workspaceView;
+    view.classList.toggle('active', active);
+    view.toggleAttribute('hidden', !active);
+  });
+  document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
+    const active = tab.dataset.view === workspaceView;
+    tab.classList.toggle('selected', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  if (viewingExplorer()) void refreshProjectTree();
+  if (viewingChanges()) void refreshSourceControl();
+  if (workspaceView === 'checkpoints') void refreshCheckpoints();
+}
+
+function switchWorkspaceView(view: WorkspaceView): void {
+  workspaceView = view;
+  try { localStorage.setItem(workspaceViewKey, view); } catch { /* the tab still switches for this run */ }
+  applyWorkspaceView();
+}
+
 function switchPanel(panel: SidebarPanel): void {
-  if (!panelAvailableForKind(panel, activeKind)) panel = defaultPanel();
   setPageMode(null);
   activePanel = panel;
   document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
@@ -970,8 +997,7 @@ function switchPanel(panel: SidebarPanel): void {
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
-  if (activePanel === 'explorer') void refreshProjectTree();
-  if (activePanel === 'source-control') void refreshSourceControl();
+  if (panel === 'workspace') applyWorkspaceView();
 }
 
 async function selectProject(workspace: string): Promise<void> {
@@ -996,7 +1022,7 @@ async function selectWorkTask(taskId: string, saveDraft = true): Promise<void> {
     enterDraft('work');
     updateFolderContext();
     renderSessions();
-    if (activePanel === 'explorer') void refreshProjectTree();
+    if (viewingExplorer()) void refreshProjectTree();
   }
 }
 function browserArgs(): { sessionId: string | null; projectWorkspace: string | null; workTaskId: string | null } {
@@ -1222,6 +1248,12 @@ async function refreshSourceControl(): Promise<void> {
   const history = $('commit-history');
   changes.replaceChildren();
   history.replaceChildren();
+  // A Work task folder is not a repository, so say why rather than probing for Git.
+  if (activeKind === 'work') {
+    branch.textContent = 'No repository';
+    message.textContent = 'Work sessions keep files in a managed task folder, so there is no Git history. Open a Code session to inspect a repository.';
+    return;
+  }
   if (!folder) { branch.textContent = 'Select a project'; message.textContent = 'Open a workspace to inspect Git.'; return; }
   branch.textContent = 'Loading…';
   message.textContent = 'Reading local Git status…';
@@ -1361,14 +1393,19 @@ async function initialize(): Promise<void> {
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
-    await setKind(DEFAULT_SESSION_KIND);
     switchPanel(defaultPanel());
-    const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
-    if (restoredTask) await selectWorkTask(restoredTask.id, false);
-    else {
-      const firstWorkSession = sessionForMode(summaries, DEFAULT_SESSION_KIND, lastSessionByKind.get(DEFAULT_SESSION_KIND));
-      if (firstWorkSession) await selectSession(firstWorkSession.id);
-      else await createSession(currentSettings(), DEFAULT_SESSION_KIND);
+    if (activeKind === 'work') {
+      const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
+      if (restoredTask) await selectWorkTask(restoredTask.id, false);
+      else {
+        const firstWorkSession = sessionForMode(summaries, 'work', lastSessionByKind.get('work'));
+        if (firstWorkSession) await selectSession(firstWorkSession.id);
+        else await createSession(currentSettings(), 'work');
+      }
+    } else {
+      const workspace = selectedProjectWorkspace ?? projects[0]?.workspace ?? null;
+      // Nothing to code in yet: fall back to Work rather than an empty shell.
+      if (workspace) await selectProject(workspace); else await setKind('work');
     }
     const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
     for (const item of local) {
@@ -1402,7 +1439,7 @@ attachButton.addEventListener('click', async () => {
     if (activeSessionId === sessionId) {
       pendingAttachments = [...pendingAttachments, ...records]; renderChips();
       setStatus(work ? `${pendingAttachments.length} file(s) attached. Copies are in Explorer.` : `${pendingAttachments.length} file(s) attached.`);
-      if (work && activePanel === 'explorer') await refreshProjectTree();
+      if (work && viewingExplorer()) await refreshProjectTree();
     }
     else { const draft = composerDrafts.get(sessionId) ?? { text: '', attachments: [] }; composerDrafts.set(sessionId, { ...draft, attachments: [...draft.attachments, ...records] }); }
   } catch (error) { if (activeSessionId === sessionId) setStatus(String(error)); }
@@ -1425,6 +1462,9 @@ document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button
     if (page) switchPage(page);
     else switchPanel(button.dataset.panel as SidebarPanel);
   });
+});
+document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
+  tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
 });
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });
 $<HTMLButtonElement>('refresh-source-control').addEventListener('click', () => { void refreshSourceControl(); });
@@ -1896,8 +1936,8 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
       await refreshSummaries();
-      if (id === activeSessionId && activePanel === 'explorer') await refreshProjectTree();
-      if (id === activeSessionId && activePanel === 'source-control') await refreshSourceControl();
+      if (id === activeSessionId && viewingExplorer()) await refreshProjectTree();
+      if (id === activeSessionId && viewingChanges()) await refreshSourceControl();
     }).catch((error) => setStatus(String(error)));
   }
   renderSessions();

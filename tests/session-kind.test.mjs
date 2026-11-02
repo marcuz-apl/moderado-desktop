@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { DEFAULT_SESSION_KIND, defaultPanel, needsWorkspacePicker, newSessionLabel, nextSessionKind, panelAvailableForKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { DEFAULT_SESSION_KIND, defaultPanel, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -31,15 +31,18 @@ test('new session action names the selected session kind', () => {
   assert.equal(newSessionLabel('code'), '+ New Code session');
 });
 
-test('both modes open on the same panel and only Git differs', () => {
+test('no panel is mode-specific any more', () => {
+  // The rail is the same in both modes; only panel contents differ. Git, the last
+  // mode-dependent panel, is now a tab inside Workspace.
   assert.equal(defaultPanel(), 'library');
-  for (const kind of ['work', 'code']) {
-    for (const panel of ['library', 'explorer', 'checkpoints', 'schedules', 'profile', 'settings']) {
-      assert.equal(panelAvailableForKind(panel, kind), true, `${panel} ${kind}`);
-    }
-  }
-  assert.equal(panelAvailableForKind('source-control', 'work'), false);
-  assert.equal(panelAvailableForKind('source-control', 'code'), true);
+  assert.equal(parseSessionKind('code'), 'code');
+  assert.equal(parseSessionKind('work'), 'work');
+  assert.equal(parseSessionKind(null), 'work');
+  assert.equal(parseSessionKind('unexpected'), 'work');
+  assert.equal(parseWorkspaceView('changes'), 'changes');
+  assert.equal(parseWorkspaceView('checkpoints'), 'checkpoints');
+  assert.equal(parseWorkspaceView(null), 'explorer');
+  assert.equal(parseWorkspaceView('source-control'), 'explorer', 'retired names fall back');
 });
 
 test('top bar contains the Work/Code switch and Explorer owns the folder icon', async () => {
@@ -50,7 +53,7 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
   assert.match(main, /radio\.type = 'radio'/);
-  assert.match(html, /data-panel="explorer"[^>]*aria-label="Explorer"[^>]*>[\s\S]*?#icon-folder/);
+  assert.match(html, /data-panel="workspace"[^>]*aria-label="Workspace"[^>]*>[\s\S]*?#icon-folder/);
   assert.match(html, /data-panel="library"[^>]*>[\s\S]*?#icon-projects/);
   assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
@@ -59,12 +62,31 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
 test('both modes share one activity rail', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const rail = [...html.matchAll(/class="activity-button" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rail, ['library', 'explorer', 'checkpoints', 'schedules', 'source-control', 'profile']);
+  assert.deepEqual(rail, ['library', 'workspace', 'schedules', 'profile'], 'four panels, identical in both modes');
+  assert.doesNotMatch(html, /data-panel="explorer"|data-panel="checkpoints"|data-panel="source-control"/);
   const pages = [...html.matchAll(/class="activity-button" data-page="([a-z]+)"/g)].map((match) => match[1]);
   assert.deepEqual(pages, ['docs', 'settings'], 'the manual sits above settings, which stays at the bottom');
   assert.doesNotMatch(html, /data-panel="tasks"|data-panel="projects"/);
   assert.doesNotMatch(html, /data-panel-content="settings"/, 'settings no longer lives in the sidebar');
   assert.match(html, /data-panel-content="library"><header class="panel-heading"><h2 id="library-title">/);
+});
+
+test('Workspace holds the file, change and checkpoint views as tabs', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const panel = html.slice(html.indexOf('data-panel-content="workspace"'), html.indexOf('data-panel-content="schedules"'));
+  const tabs = [...panel.matchAll(/class="panel-tab[^"]*" type="button" role="tab" data-view="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['explorer', 'changes', 'checkpoints']);
+  const views = [...panel.matchAll(/data-workspace-view="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(views, ['explorer', 'changes', 'checkpoints']);
+  // The ids the renderer drives must survive the merge.
+  for (const id of ['project-tree', 'project-root-name', 'source-branch', 'source-control-message',
+    'source-changes', 'commit-history', 'checkpoint-list', 'refresh-project', 'refresh-source-control']) {
+    assert.match(panel, new RegExp(`id="${id}"`), id);
+  }
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /const viewingExplorer = \(\): boolean => activePanel === 'workspace' && workspaceView === 'explorer'/);
+  assert.match(main, /localStorage\.getItem\(lastKindKey\)/, 'the mode is remembered across launches');
+  assert.match(main, /localStorage\.setItem\(workspaceViewKey, view\)/, 'the tab is remembered');
 });
 
 test('project operations stay under Projects and session navigation remains nested without session actions', async () => {
@@ -146,7 +168,11 @@ test('the composer offers a plus in both modes and a file menu in Code', async (
   assert.doesNotMatch(html, /id="attach-files"[^>]*\bhidden\b/, 'the plus is present in both modes');
   assert.match(html, /id="mention-menu"[^>]*role="listbox"[^>]*hidden/);
   assert.match(html, /id="mention-files" class="composer-attach composer-at"[^>]*aria-label="Reference a project file"/);
-  assert.match(main, /mentionButton\.toggleAttribute\('hidden', work\)/, 'the at button is Code only');
+  // The @ button stays visible in Work and explains itself, rather than vanishing
+  // and making the composer look like a different app in each mode.
+  assert.match(main, /mentionButton\.disabled = selectingContext \|\| work \|\|/, 'the at button is disabled, not hidden, in Work');
+  assert.doesNotMatch(main, /mentionButton\.toggleAttribute\('hidden'/);
+  assert.match(main, /File references are available in Code sessions/);
   assert.match(main, /invoke<string\[\]>/);
   assert.match(main, /mentionQuery\(prompt\.value/);
   assert.match(style, /\.composer-stop svg\{width:18px;height:18px\}/);

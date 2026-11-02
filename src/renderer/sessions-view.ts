@@ -1,6 +1,9 @@
 export type SessionKind = 'work' | 'code';
-/** One rail for both modes. `library` lists tasks in Work and projects in Code. */
-export type SidebarPanel = 'library' | 'explorer' | 'checkpoints' | 'schedules' | 'source-control' | 'profile';
+/** One rail for both modes. `workspace` holds the file, change and checkpoint views. */
+export type SidebarPanel = 'library' | 'workspace' | 'schedules' | 'profile';
+/** Tabs inside the workspace panel. Changes only has content in Code sessions. */
+export type WorkspaceView = 'explorer' | 'changes' | 'checkpoints';
+export const WORKSPACE_VIEWS: readonly WorkspaceView[] = ['explorer', 'changes', 'checkpoints'];
 /** Full-width views that replace the conversation instead of opening a panel. */
 export type AppPage = 'settings' | 'docs';
 
@@ -27,10 +30,14 @@ export function defaultPanel(): SidebarPanel {
   return 'library';
 }
 
-/// Git is the one capability that only exists in Code, so it is the only panel
-/// that differs between modes.
-export function panelAvailableForKind(panel: SidebarPanel, kind: SessionKind): boolean {
-  return panel !== 'source-control' || kind === 'code';
+/// No panel is mode-specific any more: switching Work/Code must not move the rail.
+export function parseWorkspaceView(value: string | null): WorkspaceView {
+  return value === 'changes' || value === 'checkpoints' ? value : 'explorer';
+}
+
+/// The rail remembers the mode you were last in, the way WorkBuddy does.
+export function parseSessionKind(value: string | null): SessionKind {
+  return value === 'code' ? 'code' : 'work';
 }
 
 export function sessionForMode<T extends { id: string; kind: SessionKind; workspace: string }>(

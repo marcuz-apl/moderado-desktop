@@ -284,3 +284,14 @@
 - Measured: 484/484/484, spread 0. Below 1000px the cards keep their natural heights, because the flattened column is content-height.
 - The About card gained a bottom-aligned line, `© 2026 Moderado AI, an Alfazen product`. The card is a flex column with `margin-top:auto` on that line, so the stretch space becomes a deliberate footer instead of a void.
 - A DOM-rebuilding script initially split the cards with naive string offsets and carried each column's closing `</div>` into the next group, unbalancing the markup. Rebuilt with a depth-matched tag parser, and the div count is now asserted to balance.
+
+## One shell for Work and Code (0.4.26)
+
+- Both reference products keep the navigation constant and vary only the payload. WorkBuddy has 工作模式 / 编程模式, but the differences are the task type, whether a working directory is required, and 界面记忆 — the shell, the creation flow and the `@` references are identical, and one task list holds both kinds. Qoder's Ask/Agent/Quest are autonomy levels inside one chat panel; nothing in its rail moves.
+- This app did the opposite: `applyKindUi` rebuilt the shell on every switch — hiding Git, swapping the library heading and both action rows and both lists, hiding Plan/Act, the `@` button, the session context and the GitHub row, and rewriting the placeholder and empty state.
+- The rail is now identical in both modes. **Explorer, Changes and Checkpoints became one Workspace panel with three tabs**; Git was the last mode-dependent icon, so `panelAvailableForKind` is gone entirely along with the rail-hiding loop and the panel fallback. Four panels: Library, Workspace, Schedules, Profile.
+- Changes does not probe for a repository in Work; it says a Work task folder has no Git history and points at Code.
+- `@` is disabled in Work with a reason in its tooltip instead of disappearing, so the composer no longer rearranges itself.
+- Plan/Act is available in both modes. The backend already gated writes on the mode rather than the session kind, so Work + Plan is read-only research and outlining.
+- The app reopens in the mode you last used (`moderado-last-kind`), and the workspace tab is remembered too (`moderado-workspace-view`).
+- Tests: the rail is asserted to be the same four panels, the three tabs and their views are asserted with every renderer-driven id, and the retired `source-control` / `explorer` panel names are asserted absent.
