@@ -262,3 +262,10 @@
 - Verified the page visually instead of by inspection: rendered the Settings markup and both stylesheets standalone in Chrome at 1280x900 in each theme. Light shows white cards, white inputs and a white LSP editor on the light background; dark is unchanged.
 - Two surfaces were still dark-only and would have looked broken in light mode: `#lsp-config` (the Language Servers JSON editor, `background:#102236` with `#e9f4f7` text) and `.muted` (`#8199a9`, 2.97:1 on a white card). Both now have light rules.
 - Replaced the hand-maintained list of "surfaces that need a light rule" with an audit: the test walks every rule in `style.css` that touches an element on the Settings page and fails if a dark fill or sub-4.5:1 text colour has no light counterpart. It reports the exact offending declarations, and was confirmed to fail when the two fixes are removed.
+
+## Settings cards packed into three columns (0.4.23)
+
+- The card grid was row-aligned, so the tallest card set the row height: Connection (481px) left 317px empty under MCP Servers and 177px under Language Servers, plus an unused third cell in row two.
+- The body is now three independent column stacks — Connection | MCP Servers + Appearance | Language Servers + About — so each column packs to its own content. Measured at 1280px: body height 782px → 481px, and Appearance sits directly under MCP Servers while About sits directly under Language Servers.
+- Below 1000px the columns flatten into a single list (`flex-direction:column` + `.page-col{display:contents}`), with `align-items:stretch` so cards stay full width.
+- Verified by measuring the rendered boxes headlessly and screenshotting both themes; the arrangement is asserted in `tests/pages.test.mjs`.

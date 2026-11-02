@@ -34,6 +34,24 @@ test('page mode drops the sidebar and the conversation', async () => {
   assert.match(style, /\.page\.active\{display:block\}/);
 });
 
+test('settings cards stack in three tight columns', async () => {
+  const [html, style] = await Promise.all([readHtml(), read('src/renderer/style.css')]);
+  const settings = html.slice(html.indexOf('id="page-settings"'), html.indexOf('id="page-docs"'));
+  // Row-aligned grid rows left ~300px of dead space under the short cards, so
+  // each column is its own stack: Connection | MCP + Appearance | Language + About.
+  const columns = [...settings.matchAll(/<div class="page-col">([\s\S]*?)\n<\/div>/g)].map((match) =>
+    [...match[1].matchAll(/<p class="eyebrow">([^<]+)<\/p>/g)].map((inner) => inner[1]));
+  assert.deepEqual(columns, [
+    ['CONNECTION'],
+    ['MCP SERVERS', 'APPEARANCE'],
+    ['LANGUAGE SERVERS', 'ABOUT'],
+  ]);
+  assert.match(style, /\.page-body\{display:flex;align-items:flex-start;gap:16px/);
+  assert.match(style, /\.page-col\{display:flex;flex:1 1 0;flex-direction:column;min-width:0;gap:16px\}/);
+  // Below 1000px the columns flatten into one list, so align-items must stretch.
+  assert.match(style, /@media\(max-width:1000px\)\{\.page-body\{flex-direction:column;align-items:stretch\}\.page-col\{display:contents\}\}/);
+});
+
 test('rail buttons open pages and panels respectively', async () => {
   const main = await readMain();
   assert.match(main, /const page = button\.dataset\.page as AppPage \| undefined;/);
