@@ -33,6 +33,16 @@ test('the manual is Getting started, then Reference, then License', async () => 
   assert.doesNotMatch(manual, /^# /m);
 });
 
+test('the About card carries the copyright on its bottom edge', async () => {
+  const [html, style, theme] = await Promise.all([readHtml(), read('src/renderer/style.css'), read('src/renderer/theme.css')]);
+  assert.match(html, /<p class="about-copyright">© 2026 Moderado AI, an Alfazen product<\/p>/);
+  // The card is a column so the line can be pushed to its bottom, which is where
+  // the stretched card's spare space would otherwise sit empty.
+  assert.match(style, /\.about-group\{display:flex;flex-direction:column\}/);
+  assert.match(style, /\.about-copyright\{margin:auto 0 0;/);
+  assert.match(theme, /:root\[data-theme="light"\] \.about-copyright\{color:#536b77\}/);
+});
+
 test('the rail names the page Docs', async () => {
   const html = await readHtml();
   const button = html.match(/<button class="activity-button" data-page="docs"[^>]*>/)?.[0] ?? '';
@@ -58,11 +68,14 @@ test('settings cards stack in three tight columns', async () => {
     [...match[1].matchAll(/<p class="eyebrow">([^<]+)<\/p>/g)].map((inner) => inner[1]));
   assert.deepEqual(columns, [
     ['CONNECTION'],
-    ['MCP SERVERS', 'APPEARANCE'],
-    ['LANGUAGE SERVERS', 'ABOUT'],
+    ['LANGUAGE SERVERS', 'MCP SERVERS'],
+    ['APPEARANCE', 'ABOUT'],
   ]);
-  assert.match(style, /\.page-body\{display:flex;align-items:flex-start;gap:16px/);
+  // Columns share a height and their cards grow equally, so the three stacks end
+  // on the same line instead of leaving a ragged 100px step.
+  assert.match(style, /\.page-body\{display:flex;align-items:stretch;gap:16px/);
   assert.match(style, /\.page-col\{display:flex;flex:1 1 0;flex-direction:column;min-width:0;gap:16px\}/);
+  assert.match(style, /\.page-col>\.settings-group\{flex:1 1 auto\}/);
   // Below 1000px the columns flatten into one list, so align-items must stretch.
   assert.match(style, /@media\(max-width:1000px\)\{\.page-body\{flex-direction:column;align-items:stretch\}\.page-col\{display:contents\}\}/);
 });

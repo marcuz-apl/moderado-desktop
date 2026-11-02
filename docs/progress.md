@@ -276,3 +276,11 @@
 - The manual is `docs/manual.md` and is organised as **Getting started → Reference → License**. Reference holds the keyboard table, a settings-fields table, where data lives, and troubleshooting; License states the licence position.
 - The duplicated title is gone: the page heading supplies "Docs", so the markdown starts at `## Getting started` instead of repeating an H1.
 - Fixed the squeezed "Mode" column. `.markdown-body` sets `overflow-wrap:anywhere`, which lets the table's auto layout shrink a column below the width of one word — the first column came out 58px and could not hold "Mode". Cells now use `overflow-wrap:break-word`, which keeps wrapping available without changing min-content sizing; the column measures 63px and the header sits on one line. Verified with the real MarkdownIt output, measuring column widths and checking that no cell overflows.
+
+## Settings columns regrouped and levelled (0.4.25)
+
+- Regrouped so related cards sit together: **Connection** | **Language Servers + MCP Servers** (both are tool servers) | **Appearance + About** (both are app settings). The previous pairing put MCP with Appearance and Language with About, which had no logic.
+- The columns are now equal height. Card heights are 481 (Connection), 304, 164, 285, 83, so with Connection alone the remaining pairs came out 484 and 384 — a 100px step at the bottom right. `.page-body` stretches its columns and `.page-col>.settings-group{flex:1 1 auto}` shares the slack between the cards of the short column (+50px each) rather than dumping all 100px into one card, which would have left About as an empty box.
+- Measured: 484/484/484, spread 0. Below 1000px the cards keep their natural heights, because the flattened column is content-height.
+- The About card gained a bottom-aligned line, `© 2026 Moderado AI, an Alfazen product`. The card is a flex column with `margin-top:auto` on that line, so the stretch space becomes a deliberate footer instead of a void.
+- A DOM-rebuilding script initially split the cards with naive string offsets and carried each column's closing `</div>` into the next group, unbalancing the markup. Rebuilt with a depth-matched tag parser, and the div count is now asserted to balance.
