@@ -331,3 +331,14 @@
 - **Security note, deliberate:** the shell runs as the user, outside the AppContainer sandbox. The agent's `execute_command` keeps its sandbox and approval gate; the two paths are separate on purpose and the panel says so. Still Code-only, through the same `code_workspace` guard.
 - Removed with the runner: `parseCommandLine` and its tests, since nothing else split command lines.
 - Tests: PTY sizing never reports zero, the incremental UTF-8 decoder handles a split character, and the UI is asserted to mount an emulator rather than a one-shot input.
+
+## Revert + real terminal (v0.4.30, 56f7f58 / d2db4f7)
+
+- User corrected course: 0.4.29 had moved files/changes/checkpoints into the right panel, which was a sidebar reshuffle rather than the panel they asked for. Reverted with `git revert --no-commit d25f07b`, then re-applied only Preview + Terminal on the right. Left rail is `library | workspace | schedules | profile` again; the workspace panel owns its three tabs.
+- Then the user asked for a real terminal, not a command executor. Replaced `run_command` + `parseCommandLine` with a PTY.
+- `src-tauri/src/terminal.rs`: `portable-pty` 0.8. One PTY per key (session id, else project workspace). A reader thread emits `terminal-output` (and `terminal-exit`); `terminal_write/resize/close` complete the set. Windows runs the built-in shell with `-NoLogo -NoProfile`; elsewhere `$SHELL`. Incremental UTF-8 decoder carries split multi-byte sequences.
+- Frontend: `@xterm/xterm` 6 + `@xterm/addon-fit` 0.11. Mounted once in `#terminal-host`, ResizeObserver refits and calls `terminal_resize`, restarts when the project key changes, stays alive when the view hides, `terminalTheme()` repaints on theme switch.
+- Security is a deliberate split: the PTY shell runs as the user, OUTSIDE the AppContainer sandbox; the agent's `execute_command` keeps sandbox + approval. Still Code-only via `code_workspace`. The panel says so in `#terminal-note`.
+- Gotchas: clippy `too_many_arguments` on the Tauri command (allowed with a comment); `project_workspace` moved into `code_workspace` before being used for the terminal key (needed `.clone()`); `TerminalState`'s tuple field must not be `pub` or clippy warns about a private type in a public interface.
+- **Bash filter trap:** a heredoc naming the Windows shell binary tripped the "Invoking [it] from Bash" guard. Use the Edit/Write tools for docs text that names it.
+- 129 Rust + 79 node tests, clippy, tsc, eslint, release build green.
