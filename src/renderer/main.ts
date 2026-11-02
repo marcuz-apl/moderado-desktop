@@ -443,61 +443,94 @@ function sessionRow(session: SessionSummary, group: string): HTMLElement {
   row.append(button, radio); return row;
 }
 
+type LibraryEntry = { kind: SessionKind; key: string; name: string; workspace: string; updatedAt: number };
+
+/** Tasks and projects in one list, newest first, so the panel never swaps. */
+function libraryEntries(): LibraryEntry[] {
+  return [
+    ...workTasks.map((task) => ({ kind: 'work' as const, key: task.id, name: task.name, workspace: task.workspace, updatedAt: task.updatedAt })),
+    ...projects.map((project) => ({ kind: 'code' as const, key: project.workspace, name: project.name, workspace: project.workspace, updatedAt: project.updatedAt })),
+  ].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function entryExpanded(entry: LibraryEntry): boolean {
+  return entry.kind === 'work' ? expandedWorkTasks.has(entry.key) : expandedProjects.has(entry.key);
+}
+
+function toggleEntry(entry: LibraryEntry): void {
+  const expanded = entry.kind === 'work' ? expandedWorkTasks : expandedProjects;
+  if (expanded.has(entry.key)) expanded.delete(entry.key); else expanded.add(entry.key);
+  renderSessions();
+}
+
+/** Which container the list has selected, so the action row can follow it. */
+function selectedEntryKind(): SessionKind | null {
+  if (activeKind === 'work') return selectedWorkTaskId ? 'work' : null;
+  return selectedProjectWorkspace ? 'code' : null;
+}
+
+/** Task actions for a selected task, project actions for a selected project. */
+function applyLibraryActions(): void {
+  const kind = selectedEntryKind() ?? activeKind;
+  $('task-operations').toggleAttribute('hidden', kind !== 'work');
+  $('project-operations').toggleAttribute('hidden', kind !== 'code');
+}
+
 function renderSessions(): void {
-  $('task-list').replaceChildren(...workTasks.map((task) => {
-    const section = document.createElement('section'); section.className = 'task-group';
-    const row = document.createElement('div'); row.className = 'selectable-session-row task-heading';
-    const children = summaries.filter((session) => session.kind === 'work' && session.taskId === task.id);
-    const expanded = expandedWorkTasks.has(task.id);
-    const expander = document.createElement('button'); expander.type = 'button'; expander.className = 'project-expander';
-    expander.textContent = expanded ? '▾' : '▸'; expander.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${task.name}`); expander.setAttribute('aria-expanded', String(expanded));
-    expander.addEventListener('click', () => { if (expanded) expandedWorkTasks.delete(task.id); else expandedWorkTasks.add(task.id); renderSessions(); });
-    const button = document.createElement('button'); button.type = 'button';
-    button.className = `session-item${activeKind === 'work' && task.id === selectedWorkTaskId ? ' selected' : ''}`;
-    button.textContent = `${children.some((session) => running.has(session.id)) ? '● ' : ''}${task.name}`;
-    button.title = `${task.workspace}\n${children.length} sessions`;
-    button.addEventListener('click', () => { void selectWorkTask(task.id); });
-    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'active-work-task'; radio.checked = activeKind === 'work' && task.id === selectedWorkTaskId;
-    radio.setAttribute('aria-label', `Select task ${task.name}`);
-    radio.addEventListener('change', () => { void selectWorkTask(task.id); });
-    row.append(button, expander, radio); section.append(row);
+  const entries = libraryEntries();
+  $('library-list').replaceChildren(...entries.map((entry) => {
+    const work = entry.kind === 'work';
+    const children = work
+      ? summaries.filter((session) => session.kind === 'work' && session.taskId === entry.key)
+      : sessionsForProject(summaries, entry.workspace);
+    const expanded = entryExpanded(entry);
+    const section = document.createElement('section');
+    section.className = work ? 'task-group' : 'project-group';
+    const row = document.createElement('div');
+    row.className = `selectable-session-row ${work ? 'task-heading' : 'project-heading'}`;
+    const expander = document.createElement('button');
+    expander.type = 'button';
+    expander.className = 'project-expander';
+    expander.textContent = expanded ? '▾' : '▸';
+    expander.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${entry.name}`);
+    expander.setAttribute('aria-expanded', String(expanded));
+    expander.addEventListener('click', () => toggleEntry(entry));
+    const button = document.createElement('button');
+    button.type = 'button';
+    const selected = work
+      ? activeKind === 'work' && entry.key === selectedWorkTaskId
+      : activeKind === 'code' && entry.key === selectedProjectWorkspace;
+    button.className = `session-item library-entry${selected ? ' selected' : ''}`;
+    const badge = document.createElement('span');
+    badge.className = 'library-badge';
+    badge.textContent = work ? 'Work' : 'Code';
+    const name = document.createElement('span');
+    name.className = 'library-name';
+    name.textContent = `${children.some((session) => running.has(session.id)) ? '● ' : ''}${entry.name}`;
+    // Name first so it reads from the row's left edge; the kind tag sits at the end.
+    button.append(name, badge);
+    button.title = `${entry.workspace}\n${children.length} sessions`;
+    button.addEventListener('click', () => { if (work) void selectWorkTask(entry.key); else void selectProject(entry.workspace); });
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'active-library-entry';
+    radio.checked = selected;
+    radio.setAttribute('aria-label', `Select ${work ? 'task' : 'project'} ${entry.name}`);
+    radio.addEventListener('change', () => { if (work) void selectWorkTask(entry.key); else void selectProject(entry.workspace); });
+    row.append(expander, button, radio);
+    section.append(row);
     if (expanded) {
-      const list = document.createElement('div'); list.className = 'task-sessions'; list.setAttribute('aria-label', `${task.name} sessions`);
-      list.append(...children.map((session) => sessionRow(session, 'active-work-session')));
+      const list = document.createElement('div');
+      list.className = work ? 'task-sessions' : 'project-sessions';
+      list.setAttribute('aria-label', `${entry.name} sessions`);
+      list.append(...children.map((session) => sessionRow(session, work ? 'active-work-session' : 'active-code-session')));
       if (!children.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No sessions yet.'; list.append(empty); }
       section.append(list);
     }
     return section;
   }));
-  if (!workTasks.length) $('task-list').textContent = 'Create a task to begin.';
-  $('project-list').replaceChildren(...projects.map((project) => {
-    const section = document.createElement('section'); section.className = 'project-group';
-    const row = document.createElement('div'); row.className = 'selectable-session-row project-heading';
-    const children = sessionsForProject(summaries, project.workspace);
-    const expanded = expandedProjects.has(project.workspace);
-    const expander = document.createElement('button'); expander.type = 'button'; expander.className = 'project-expander';
-    expander.textContent = expanded ? '▾' : '▸'; expander.setAttribute('aria-label', `Expand ${project.name}`); expander.setAttribute('aria-expanded', String(expanded));
-    expander.addEventListener('click', () => { if (expanded) expandedProjects.delete(project.workspace); else expandedProjects.add(project.workspace); renderSessions(); });
-    const button = document.createElement('button'); button.type = 'button';
-    button.className = `session-item${activeKind === 'code' && project.workspace === selectedProjectWorkspace ? ' selected' : ''}`;
-    button.textContent = `${children.some((session) => running.has(session.id)) ? '● ' : ''}${project.name}`;
-    button.title = `${project.workspace}
-${children.length} sessions`;
-    button.addEventListener('click', () => { void selectProject(project.workspace); });
-    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'active-code-project';
-    radio.checked = activeKind === 'code' && project.workspace === selectedProjectWorkspace;
-    radio.setAttribute('aria-label', `Select project ${project.name}`);
-    radio.addEventListener('change', () => { void selectProject(project.workspace); });
-    row.append(expander, button, radio); section.append(row);
-    if (expanded) {
-      const list = document.createElement('div'); list.className = 'project-sessions'; list.setAttribute('aria-label', `${project.name} sessions`);
-      list.append(...children.map((session) => sessionRow(session, 'active-code-session')));
-      if (!children.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No sessions yet.'; list.append(empty); }
-      section.append(list);
-    }
-    return section;
-  }));
-  if (!projects.length) $('project-list').textContent = 'Create a project or open an existing folder.';
+  if (!entries.length) $('library-list').textContent = 'Create a task or open a project to begin.';
+  applyLibraryActions();
 }
 
 function applyKindUi(): void {
@@ -508,15 +541,8 @@ function applyKindUi(): void {
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-pressed', String(selected));
   }
-  // One container panel serves both modes; only its heading, actions and list change.
-  const libraryLabel = work ? 'Tasks' : 'Projects';
-  $('library-title').textContent = libraryLabel;
-  const libraryButton = document.querySelector<HTMLButtonElement>('[data-panel="library"]');
-  if (libraryButton) { libraryButton.title = libraryLabel; libraryButton.setAttribute('aria-label', libraryLabel); }
-  $('task-operations').toggleAttribute('hidden', !work);
-  $('project-operations').toggleAttribute('hidden', work);
-  $('task-list').toggleAttribute('hidden', !work);
-  $('project-list').toggleAttribute('hidden', work);
+  // One list holds both kinds, so only the action row follows what is selected.
+  applyLibraryActions();
   $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
   $('approve-command-option').toggleAttribute('hidden', work);
   $('approve-mcp-option').toggleAttribute('hidden', work);

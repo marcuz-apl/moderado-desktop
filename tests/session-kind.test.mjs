@@ -71,6 +71,27 @@ test('both modes share one activity rail', async () => {
   assert.match(html, /data-panel-content="library"><header class="panel-heading"><h2 id="library-title">/);
 });
 
+test('Library lists tasks and projects in one badged list', async () => {
+  const [html, main, style] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+  ]);
+  const panel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  // One list, one heading, both action rows beside it.
+  assert.match(panel, /<h2 id="library-title">Library<\/h2>/);
+  assert.equal((panel.match(/class="panel-body session-list"/g) ?? []).length, 1, 'one list');
+  assert.match(panel, /id="library-list"/);
+  assert.doesNotMatch(panel, /id="task-list"|id="project-list"/);
+  assert.match(panel, /id="task-operations"[\s\S]*id="project-operations"/);
+  // Rows carry a Work/Code badge and are sorted newest first.
+  assert.match(main, /badge\.textContent = work \? 'Work' : 'Code'/);
+  assert.match(main, /library-badge/);
+  assert.match(main, /\.sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)/);
+  assert.match(main, /function applyLibraryActions/);
+  assert.match(style, /\.library-badge\{[^}]*text-transform:uppercase/);
+});
+
 test('Workspace holds the file, change and checkpoint views as tabs', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const panel = html.slice(html.indexOf('data-panel-content="workspace"'), html.indexOf('data-panel-content="schedules"'));
@@ -94,8 +115,8 @@ test('project operations stay under Projects and session navigation remains nest
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
   const panel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
-  assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"[\s\S]*id="project-list"/);
-  assert.match(main, /className = 'project-sessions'/);
+  assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"/);
+  assert.match(main, /className = work \? 'task-sessions' : 'project-sessions'/);
   assert.match(style, /\.project-sessions\{padding:[^}]*\}/);
   assert.doesNotMatch(main, /\['New Session',[\s\S]*renameProject\(project\)/);
 });
@@ -106,13 +127,13 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
   const taskPanel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
   const workspace = html.match(/class="session-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
-  assert.match(taskPanel, /class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"[\s\S]*id="task-list"/);
+  assert.match(taskPanel, /class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"/);
   assert.match(workspace, /id="new-session"[\s\S]*id="rename-session"[\s\S]*id="delete-session"/);
-  assert.match(main, /className = 'task-sessions'/);
+  assert.match(main, /className = work \? 'task-sessions' : 'project-sessions'/);
   assert.match(main, /session\.taskId/);
   assert.match(style, /\.task-sessions\{padding:[^}]*\}/);
   assert.match(style, /data-panel-content="library"\] \.session-item\.selected[^}]*background:transparent/);
-  assert.match(main, /session\.taskId === task\.id/);
+  assert.match(main, /session\.taskId === entry\.key/);
 });
 
 test('About displays the VERSION value without its BUILD metadata or an extra label', async () => {

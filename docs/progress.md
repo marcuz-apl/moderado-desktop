@@ -295,3 +295,11 @@
 - Plan/Act is available in both modes. The backend already gated writes on the mode rather than the session kind, so Work + Plan is read-only research and outlining.
 - The app reopens in the mode you last used (`moderado-last-kind`), and the workspace tab is remembered too (`moderado-workspace-view`).
 - Tests: the rail is asserted to be the same four panels, the three tabs and their views are asserted with every renderer-driven id, and the retired `source-control` / `explorer` panel names are asserted absent.
+
+## One Library list (0.4.27)
+
+- The last piece of the mode merge: the panel used to swap between a Tasks list and a Projects list, along with its heading and action row. There is now **one list** of both kinds, sorted newest first, each row carrying a Work/Code tag and expanding to its own sessions.
+- The heading is always **Library**; the action row follows the **selected entry's kind** (falling back to the mode when nothing is selected), so task actions appear for a task and project actions for a project.
+- `renderSessions` had two near-identical renderers; it is now one that builds `{kind, key, name, workspace, updatedAt}` entries and renders them with a shared row builder. Row order is unified (expander first) — Work rows previously put the expander last.
+- Tag placement was measured, not guessed: at a 260px sidebar the row is 201px and the name gets 94px after the expander (18), the tag (30) and the radio (15). The tag started at the left, which pushed every name 40px right; it now sits at the row's right end so names read from the left edge. Padding-left, row gaps and the expander width were tightened to recover another 12px.
+- Tests: one list element, no `task-list`/`project-list`, both action rows present, the badge text and the recency sort asserted, and the shared row builder pinned.
