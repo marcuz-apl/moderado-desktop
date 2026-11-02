@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { DEFAULT_SESSION_KIND, defaultPanel, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { DEFAULT_SESSION_KIND, defaultPanel, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseSessionKind, parseRightView, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -39,10 +39,10 @@ test('no panel is mode-specific any more', () => {
   assert.equal(parseSessionKind('work'), 'work');
   assert.equal(parseSessionKind(null), 'work');
   assert.equal(parseSessionKind('unexpected'), 'work');
-  assert.equal(parseWorkspaceView('changes'), 'changes');
-  assert.equal(parseWorkspaceView('checkpoints'), 'checkpoints');
-  assert.equal(parseWorkspaceView(null), 'explorer');
-  assert.equal(parseWorkspaceView('source-control'), 'explorer', 'retired names fall back');
+  assert.equal(parseRightView('changes'), 'changes');
+  assert.equal(parseRightView('checkpoints'), 'checkpoints');
+  assert.equal(parseRightView(null), 'files');
+  assert.equal(parseRightView('source-control'), 'files', 'retired names fall back');
 });
 
 test('top bar contains the Work/Code switch and Explorer owns the folder icon', async () => {
@@ -53,7 +53,8 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
   assert.match(main, /radio\.type = 'radio'/);
-  assert.match(html, /data-panel="workspace"[^>]*aria-label="Workspace"[^>]*>[\s\S]*?#icon-folder/);
+  // The folder icon now opens the workspace files in the context panel.
+  assert.match(html, /id="open-files"[^>]*aria-label="Workspace files"[^>]*>[\s\S]*?#icon-folder/);
   assert.match(html, /data-panel="library"[^>]*>[\s\S]*?#icon-projects/);
   assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
@@ -62,8 +63,8 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
 test('both modes share one activity rail', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const rail = [...html.matchAll(/class="activity-button" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rail, ['library', 'workspace', 'schedules', 'profile'], 'four panels, identical in both modes');
-  assert.doesNotMatch(html, /data-panel="explorer"|data-panel="checkpoints"|data-panel="source-control"/);
+  assert.deepEqual(rail, ['library', 'schedules', 'profile'], 'the rail is navigation only');
+  assert.doesNotMatch(html, /data-panel="workspace"|data-panel="explorer"|data-panel="checkpoints"|data-panel="source-control"/);
   const pages = [...html.matchAll(/class="activity-button" data-page="([a-z]+)"/g)].map((match) => match[1]);
   assert.deepEqual(pages, ['docs', 'settings'], 'the manual sits above settings, which stays at the bottom');
   assert.doesNotMatch(html, /data-panel="tasks"|data-panel="projects"/);
@@ -92,22 +93,22 @@ test('Library lists tasks and projects in one badged list', async () => {
   assert.match(style, /\.library-badge\{[^}]*text-transform:uppercase/);
 });
 
-test('Workspace holds the file, change and checkpoint views as tabs', async () => {
+test('the right panel holds the context views', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const panel = html.slice(html.indexOf('data-panel-content="workspace"'), html.indexOf('data-panel-content="schedules"'));
-  const tabs = [...panel.matchAll(/class="panel-tab[^"]*" type="button" role="tab" data-view="([a-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tabs, ['explorer', 'changes', 'checkpoints']);
-  const views = [...panel.matchAll(/data-workspace-view="([a-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(views, ['explorer', 'changes', 'checkpoints']);
+  const panel = html.slice(html.indexOf('class="right-panel"'), html.indexOf('</aside>', html.indexOf('class="right-panel"')));
+  const tabs = [...panel.matchAll(/class="right-tab[^"]*" type="button" role="tab" data-right-tab="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['files', 'changes', 'checkpoints', 'preview', 'terminal']);
+  const views = [...panel.matchAll(/data-right-view="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(views, ['files', 'changes', 'checkpoints', 'preview', 'terminal']);
   // The ids the renderer drives must survive the merge.
   for (const id of ['project-tree', 'project-root-name', 'source-branch', 'source-control-message',
     'source-changes', 'commit-history', 'checkpoint-list', 'refresh-project', 'refresh-source-control']) {
     assert.match(panel, new RegExp(`id="${id}"`), id);
   }
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /const viewingExplorer = \(\): boolean => activePanel === 'workspace' && workspaceView === 'explorer'/);
+  assert.match(main, /const viewingFiles = \(\): boolean => rightOpen && rightView === 'files'/);
   assert.match(main, /localStorage\.getItem\(lastKindKey\)/, 'the mode is remembered across launches');
-  assert.match(main, /localStorage\.setItem\(workspaceViewKey, view\)/, 'the tab is remembered');
+  assert.match(main, /localStorage\.setItem\(rightViewKey, rightView\)/, 'the view is remembered');
 });
 
 test('project operations stay under Projects and session navigation remains nested without session actions', async () => {

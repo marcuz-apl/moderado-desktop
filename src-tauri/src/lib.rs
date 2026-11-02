@@ -478,6 +478,32 @@ fn git_push(
     source_control::push(&root)
 }
 
+/// One command typed by the user, run through the same AppContainer sandbox and
+/// timeout the agent's `execute_command` uses. No shell is involved: the caller
+/// splits the line into a program and its arguments.
+#[tauri::command]
+async fn run_command(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+    program: String,
+    args: Vec<String>,
+    timeout_ms: Option<u64>,
+) -> Result<command::CommandResult, String> {
+    let root = code_workspace(&state, session_id, project_workspace, work_task_id)?;
+    command::execute_sandboxed(
+        &root,
+        command::CommandRequest {
+            program,
+            args,
+            working_directory: String::new(),
+            timeout_ms,
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 fn rename_session(
     state: tauri::State<'_, AppState>,
@@ -1459,6 +1485,7 @@ pub fn run() {
             git_identity,
             git_commit,
             git_push,
+            run_command,
             rename_session,
             delete_session,
             create_schedule,

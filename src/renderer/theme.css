@@ -153,6 +153,7 @@
 :root[data-theme="light"] .kind-segment{background:#e3eff1;border-color:var(--light-border)}
 :root[data-theme="light"] .kind-segment button{color:#45616c}
 :root[data-theme="light"] .kind-segment button.selected{background:var(--light-accent);color:#fff}
-:root[data-theme="light"] .panel-tabs{background:#e3eff1}:root[data-theme="light"] .panel-tab{color:#45616c}:root[data-theme="light"] .panel-tab:hover{color:#123f42}:root[data-theme="light"] .panel-tab.selected{background:var(--light-accent);color:#fff}
+
 :root[data-theme="light"] .library-badge{background:#e3eff1;color:#45616c}
 :root[data-theme="light"] .git-actions input{background:var(--light-surface);border-color:#a9bec5;color:#203744}
+:root[data-theme="light"] .right-panel{background:var(--light-panel);border-color:var(--light-border)}:root[data-theme="light"] .right-head{border-color:var(--light-border)}:root[data-theme="light"] .right-tab,:root[data-theme="light"] .right-close,:root[data-theme="light"] .topbar-icon{color:#526b78}:root[data-theme="light"] .right-tab:hover,:root[data-theme="light"] .right-close:hover{background:#dbeaec;color:#134846}:root[data-theme="light"] .right-tab.selected,:root[data-theme="light"] .topbar-icon[aria-pressed="true"]{background:var(--light-accent);color:#fff}:root[data-theme="light"] .topbar-icon:hover{border-color:#a9bec5;color:#134846}:root[data-theme="light"] .terminal-run input{background:var(--light-surface);border-color:#a9bec5;color:#203744}:root[data-theme="light"] .terminal-output{background:#e7eff1;color:#203744}
