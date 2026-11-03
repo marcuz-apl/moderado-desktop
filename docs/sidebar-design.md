@@ -20,16 +20,20 @@ Workspace, and Right Pane.
   actions, Plan/Act, theme), the transcript, the composer, and a terminal drawer
   below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
 - The Right Pane is the Task Monitor, open by default. At 1200 px and wider it is a
-  320 px grid column; below 1200 px it overlays the workspace as
-  `min(340px, calc(100vw - 60px))`. It leaves the grid when collapsed, and page mode
-  also closes its column. Its 56 px header has exactly three controls: Tools
+  320 px grid column; below 1200 px it overlays the workspace's right edge as
+  `min(340px, calc(100vw - 60px))`, so the rail, Left Pane and workspace stay visible
+  and the grid has no third column while overlaying. It leaves the grid when
+  collapsed, and page mode also closes its column. Its 56 px header has exactly three
+  controls: Tools
   (File browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
   and the collapse triangle. Collapsing leaves a 24 x 64 px edge tab that reopens it.
 - Page mode hides the conversation (topbar and transcript), the composer, the drawer
   and the Right Pane, and closes the pane column, leaving the rail and Left Pane
   beside the page.
-- At 999 px and below the Left Pane is clamped to 220 px and the topbar compacts.
-  The rail never hides, and the window minimum stays 760 px.
+- At 999 px and below the Left Pane is clamped to 220 px, the resizer is hidden, and
+  the workspace context line in the topbar hides. Session actions stay reachable at
+  every width, so New, Rename, and Delete never disappear. The rail never hides, and
+  the window minimum stays 760 px.
 - The rail selection persists in `moderado-left-view` (`workspaces`, `files`, `git`,
   `schedules`; default `workspaces`), the Git switch in `moderado-git-view`
   (`changes` or `checkpoints`; default `changes`), the Left Pane width in

@@ -17,7 +17,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { DEFAULT_LEFT_VIEW, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
+import { parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
 import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
 import {
   artifactsFromActivity,
@@ -765,7 +765,10 @@ async function setKind(kind: SessionKind): Promise<void> {
   const remembered = kind === 'code' && workspace ? lastSessionByProject.get(workspace) : lastSessionByKind.get(kind);
   const next = sessionForMode(candidates, kind, remembered, kind === 'code' ? workspace : null);
   enterDraft(kind, kind === 'code' ? workspace ?? next?.workspace ?? null : workspace);
-  selectLeftView(DEFAULT_LEFT_VIEW);
+  // Only the rail selects the Left Pane view, so switching kind keeps it and persists nothing.
+  setPageMode(null);
+  previewOpen = false;
+  applyLeftView();
   if (kind === 'work') {
     const task = workTasks.find((item) => item.id === selectedWorkTaskId) ?? workTasks[0];
     if (task) await selectWorkTask(task.id, false);

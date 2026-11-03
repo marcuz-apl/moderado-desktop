@@ -81,7 +81,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 - **Topbar** (56 px): session title and eyebrow, workspace context, session actions, Plan/Act control, theme toggle. The Work/Code selector, the sidebar toggle, and the Tools menu are removed from it.
 - Transcript, empty state, composer, status, auto-approve bar, and model usage are unchanged.
 - The terminal drawer stays below the composer, Code-only, PTY kept alive while hidden. The Right Pane's terminal icon toggles the same drawer.
-- The topbar compacts below 1000 px: the workspace context line and session actions collapse first; the title, Plan/Act, and theme remain.
+- The topbar compacts below 1000 px: the workspace context line hides, while session actions stay reachable at every width so New, Rename, and Delete never disappear; the title, Plan/Act, and theme remain.
 
 ## Right Pane (`.task-monitor`)
 
@@ -108,7 +108,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 ## Responsive rules
 
 - **1200 px and wider**: rail, Left Pane, workspace, Right Pane all in the grid.
-- **1000-1199 px**: the Right Pane overlays the workspace's right edge at `min(340px, calc(100vw - 60px))` with a shadow; the grid keeps three columns.
+- **1000-1199 px**: the Right Pane overlays the workspace's right edge at `min(340px, calc(100vw - 60px))` with a shadow; the rail, Left Pane, and workspace stay visible, and the grid has no third column while the pane overlays.
 - **760-999 px**: the Left Pane stays in the grid at a clamped 220 px; the Right Pane overlays as above. The topbar compacts.
 - The rail is never overlaid or hidden.
 - The window minimum stays 760 px.

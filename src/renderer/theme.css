@@ -108,10 +108,6 @@
 :root[data-theme="light"] .session-actions button,
 :root[data-theme="light"] .schedule-item button{color:var(--light-accent)}
 :root[data-theme="light"] .key-apply-link{color:var(--light-accent)}
-:root[data-theme="light"] .kind-switch{color:#526b78}
-:root[data-theme="light"] .kind-toggle{background:#dbeaec;border-color:#9db9c0}
-:root[data-theme="light"] .kind-toggle[aria-checked="true"]{background:#bee2dd;border-color:var(--light-accent)}
-:root[data-theme="light"] .kind-toggle-thumb{background:var(--light-accent)}
 
 :root[data-theme="light"] .empty-symbol{background:#14233a;border-color:transparent}
 :root[data-theme="light"] .model-usage-row #model-usage{color:#5d7480}

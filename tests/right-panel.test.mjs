@@ -126,8 +126,12 @@ test('the shell degrades without hiding the rail', async () => {
   // The composer reserves the overlay footprint; Send/stop must stay reachable.
   assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.app\.task-monitor-open \.composer-wrap\{padding-right:calc\(min\(340px,calc\(100vw - 60px\)\) \+ 12px\)\}/);
   assert.match(style, /@media\(max-width:999px\)\{\s*\.left-shell\{grid-template-columns:52px 220px\}/);
-  assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.sidebar-resizer\{display:none\}/);
-  assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.topbar #workspace-context\{display:none\}/);
+  assert.match(style, /@media\(max-width:999px\)\{[^@]*?\.sidebar-resizer\{display:none\}/);
+  assert.match(style, /@media\(max-width:999px\)\{[^@]*?\.topbar #workspace-context\{display:none\}/);
+  assert.match(style, /\.app\.page-mode\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/, 'page mode closes the monitor column instead of leaving a dead strip');
+  const start999 = style.indexOf('@media(max-width:999px){');
+  const block999 = style.slice(start999, style.indexOf('\n}', start999));
+  assert.doesNotMatch(block999, /\.session-actions\{[^}]*display:none/, 'New/Rename/Delete stay reachable below 1000px');
   assert.doesNotMatch(style, /\.topbar \.session-actions\{display:none\}/, 'New/Rename/Delete stay reachable at every width');
   assert.doesNotMatch(style, /sidebar-collapsed|task-monitor-width/);
   assert.doesNotMatch(style, /@media\(max-width:850px\)/);

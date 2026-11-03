@@ -56,6 +56,8 @@ test('the rail bottom opens the Settings, Docs, and Profile pages', async () => 
 test('page mode keeps the rail and Left Pane and drops the conversation', async () => {
   const style = await read('src/renderer/style.css');
   assert.match(style, /\.app\.page-mode\{grid-template-columns:auto minmax\(0,1fr\)\}/);
+  // Without this guard, page mode at 1200px and wider keeps the hidden monitor's column.
+  assert.match(style, /\.app\.page-mode\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/, 'page mode wins over an open monitor');
   assert.doesNotMatch(style, /\.app\.page-mode \.sidebar\{display:none\}/);
   assert.match(style, /\.main\.page-mode>\.topbar,\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
   assert.match(style, /\.main\.page-mode>\.terminal-drawer\{display:none\}/, 'page mode hides the terminal drawer');

@@ -74,7 +74,7 @@ test('both modes share one Left Pane and one rail', async () => {
   assert.doesNotMatch(html, /data-panel-content=/);
   assert.doesNotMatch(html, /id="sidebar-toggle"/);
   assert.doesNotMatch(html, /class="activity-bar"|class="activity-button"/);
-  assert.match(html, /<aside class="sidebar" id="sidebar" aria-label="Left pane">/);
+  assert.match(html, /<aside class="sidebar" id="sidebar" role="tabpanel" aria-label="Left pane">/);
 });
 
 test('Workspaces lists tasks and projects in one badged list', async () => {
@@ -117,6 +117,14 @@ test('Files and Git own their Left Pane contents', async () => {
   assert.match(main, /localStorage\.getItem\(leftViewKey\)/, 'the view is remembered across launches');
   assert.match(main, /const storedLeftView = activeLeftView[\s\S]*selectLeftView\(storedLeftView\)/, 'initialize restores the stored left view');
   assert.match(main, /localStorage\.setItem\(gitViewKey, view\)/, 'the Git tab is remembered');
+});
+
+test('a Work/Code switch never resets or persists the rail view', async () => {
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const setKindBody = main.match(/async function setKind\([\s\S]*?\n}/)?.[0] ?? '';
+  assert.ok(setKindBody.length > 0, 'the setKind body is captured');
+  assert.doesNotMatch(setKindBody, /selectLeftView|leftViewKey/, 'a mode switch never changes or persists the rail view');
+  assert.match(setKindBody, /applyLeftView\(\)/);
 });
 
 test('project operations stay under Projects and session navigation remains nested without session actions', async () => {
