@@ -106,7 +106,10 @@
 .monitor-artifact:hover{border-color:#65cbbd}
 @media(max-width:1199px){
   .app.task-monitor-open{grid-template-columns:auto minmax(0,1fr)}
-  .task-monitor{position:absolute;right:0;top:0;bottom:0;width:min(340px,calc(100vw - 60px));z-index:8;box-shadow:-18px 0 40px #0007}
+  /* Starts below the topbar so Plan/Act and the theme toggle stay clickable. */
+  .task-monitor{position:absolute;right:0;top:56px;bottom:0;width:min(340px,calc(100vw - 60px));z-index:8;box-shadow:-18px 0 40px #0007}
+  /* Only the composer needs its Send/stop reachable; transcript and drawer stay full-bleed. */
+  .app.task-monitor-open .composer-wrap{padding-right:calc(min(340px,calc(100vw - 60px)) + 12px)}
 }
 .app.page-mode .task-monitor{display:none}
 .app.page-mode .monitor-edge{display:none}
@@ -141,7 +144,6 @@
   .sidebar-resizer{display:none}
   .topbar{padding:0 16px}
   .topbar #workspace-context{display:none}
-  .topbar .session-actions{display:none}
   .transcript{padding:24px 5%}
   .composer-wrap{padding:0 5% 18px}
 }

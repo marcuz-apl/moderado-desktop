@@ -121,11 +121,14 @@ test('the edge tab mirrors the monitor open state, which survives a restart', as
 test('the shell degrades without hiding the rail', async () => {
   const [style, theme] = await Promise.all([read('src/renderer/style.css'), read('src/renderer/theme.css')]);
   assert.match(style, /@media\(max-width:1199px\)\{\s*\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/);
-  assert.match(style, /\.task-monitor\{position:absolute;right:0;top:0;bottom:0;width:min\(340px,calc\(100vw - 60px\)\)/);
+  // The overlay starts below the topbar, so Plan/Act and the theme toggle stay clickable.
+  assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.task-monitor\{position:absolute;right:0;top:56px;bottom:0;width:min\(340px,calc\(100vw - 60px\)\)/);
+  // The composer reserves the overlay footprint; Send/stop must stay reachable.
+  assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.app\.task-monitor-open \.composer-wrap\{padding-right:calc\(min\(340px,calc\(100vw - 60px\)\) \+ 12px\)\}/);
   assert.match(style, /@media\(max-width:999px\)\{\s*\.left-shell\{grid-template-columns:52px 220px\}/);
   assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.sidebar-resizer\{display:none\}/);
   assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.topbar #workspace-context\{display:none\}/);
-  assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.topbar \.session-actions\{display:none\}/);
+  assert.doesNotMatch(style, /\.topbar \.session-actions\{display:none\}/, 'New/Rename/Delete stay reachable at every width');
   assert.doesNotMatch(style, /sidebar-collapsed|task-monitor-width/);
   assert.doesNotMatch(style, /@media\(max-width:850px\)/);
   assert.doesNotMatch(style, /@media\(max-width:650px\)/);
