@@ -6,12 +6,20 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 
 ## Layout
 
+- Revised 2026-11-03: the 52 px Activity Bar is removed. The left panel is the only
+  navigation surface and carries a compact tab row: Sessions, Files, Schedules, and
+  Profile. Preview opens from Files and keeps the Files tab selected.
+- The left panel is resizable from 240 to 420 px and collapses from the topbar toggle.
+- The conversation column owns the transcript, composer, and a terminal drawer below
+  the composer. The drawer is Code-only and keeps its PTY alive while hidden.
+- The right Task Monitor is a collapsible sidecar with Updates, Background processes,
+  and Artifacts. It overlays the conversation below 1100 px.
+- The top-right Tools menu owns File browser, Task monitor, Terminal panel, Open in
+  VS Code, Open system terminal, Settings, and Docs. Settings and Docs remain
+  full-width pages.
+- At narrow widths the left panel overlays the conversation and the topbar toggle
+  remains the way to open or close it.
 - Later change (0.4.10): the separate Sessions, Tasks, and Projects panels were consolidated into one `library` panel that lists tasks in Work mode and projects in Code mode. See `progress.md`.
-
-- The leftmost Activity Bar is a narrow icon rail, about 52 px wide. Its upper group contains Sessions, Workspace, Checkpoints, Schedules, and Source Control in that order. Its lower group contains Profile immediately above Settings.
-- Selecting an icon shows one contextual panel beside the rail. The panel is about 260 px wide and has a heading, relevant actions, and a scrollable body. The conversation remains visible to the right.
-- The selected icon has a visible accent marker and background. Every icon button has a tooltip, an accessible name, a keyboard focus state, and `aria-pressed` or equivalent selection semantics. Use a consistent set of inline SVG icons; no new icon package or network asset is needed.
-- At the current 760 px minimum window width, the rail and panel leave at least 448 px for the conversation. At narrow widths the panel can overlay the conversation when opened, with a clear close action; the rail remains accessible.
 
 ## Panels
 
@@ -50,7 +58,7 @@ Group Connection and Web Search controls under the bottom gear icon, followed by
 ## Verification
 
 - Rust tests cover folder ordering, workspace path and symlink rejection, file preview bounds, a local Git repository with a commit and a dirty file, and rejection of a nested workspace in a parent repository.
-- Frontend checks cover Activity Bar selection and keyboard labels, tree expand/collapse, file preview, Settings visibility, empty states, and source control history rendering.
+- Frontend checks cover Activity Bar selection and keyboard labels, tree expand/collapse, file preview, Settings visibility, empty states, and source control history rendering. `tests/tools-menu.test.mjs` covers the Tools menu actions and keyboard navigation, and `tests/task-monitor.test.mjs` covers the monitor sections and their update merging.
 - Run `npm test`, `npm run lint`, `npm run build`, and a Tauri startup check. Inspect the layout at the minimum window width and at a wide desktop width.
 
 ## Reference
