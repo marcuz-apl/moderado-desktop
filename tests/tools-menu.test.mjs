@@ -43,6 +43,18 @@ test('the top-right menu renders the panel and app actions from the model', asyn
   assert.match(html, /role="menuitemcheckbox" data-tool="terminal-panel" aria-checked="false"/);
 });
 
+test('the menu exposes both external launchers', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const [html, main] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.match(html, /data-tool="vscode">Open in VS Code/);
+  assert.match(html, /data-tool="system-terminal">Open system terminal/);
+  assert.match(main, /invoke\('open_in_editor', browserArgs\(\)\)/);
+  assert.match(main, /invoke\('open_system_terminal', browserArgs\(\)\)/);
+});
+
 test('the menu keeps one stable order', () => {
   assert.deepEqual(TOOL_ITEMS.map((item) => item.action), [
     'files', 'task-monitor', 'terminal-panel',

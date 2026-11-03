@@ -1197,6 +1197,14 @@ function runTool(action: ToolAction): void {
   if (action === 'files') { switchPanel('workspace'); switchWorkspaceView('explorer'); return; }
   if (action === 'task-monitor') { setTaskMonitor(!taskMonitorOpen); return; }
   if (action === 'terminal-panel') { void setTerminalOpen(!terminalOpen); return; }
+  if (action === 'vscode') {
+    void invoke('open_in_editor', browserArgs()).catch((error) => setStatus(String(error)));
+    return;
+  }
+  if (action === 'system-terminal') {
+    void invoke('open_system_terminal', browserArgs()).catch((error) => setStatus(String(error)));
+    return;
+  }
   if (action === 'settings') { switchPage('settings'); return; }
   if (action === 'docs') { switchPage('docs'); return; }
 }
