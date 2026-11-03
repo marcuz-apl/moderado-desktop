@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { DEFAULT_SESSION_KIND, defaultPanel, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { DEFAULT_LEFT_VIEW, DEFAULT_SESSION_KIND, GIT_VIEWS, LEFT_VIEWS, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -31,57 +31,55 @@ test('new session action names the selected session kind', () => {
   assert.equal(newSessionLabel('code'), '+ New Code session');
 });
 
-test('no panel is mode-specific any more', () => {
-  // The rail is the same in both modes; only panel contents differ. Git, the last
-  // mode-dependent panel, is now a tab inside Workspace.
-  assert.equal(defaultPanel(), 'library');
-  assert.equal(parseSessionKind('code'), 'code');
-  assert.equal(parseSessionKind('work'), 'work');
-  assert.equal(parseSessionKind(null), 'work');
-  assert.equal(parseSessionKind('unexpected'), 'work');
-  assert.equal(parseWorkspaceView('changes'), 'changes');
-  assert.equal(parseWorkspaceView('checkpoints'), 'checkpoints');
-  assert.equal(parseWorkspaceView(null), 'explorer');
-  assert.equal(parseWorkspaceView('source-control'), 'explorer', 'retired names fall back');
+test('the rail chooses the Left Pane view and remembers it', () => {
+  assert.equal(DEFAULT_LEFT_VIEW, 'workspaces');
+  assert.deepEqual(LEFT_VIEWS, ['workspaces', 'files', 'git', 'schedules']);
+  assert.equal(parseLeftView('files'), 'files');
+  assert.equal(parseLeftView('git'), 'git');
+  assert.equal(parseLeftView('schedules'), 'schedules');
+  assert.equal(parseLeftView('source-control'), 'workspaces', 'retired names fall back');
+  assert.equal(parseLeftView(null), 'workspaces');
+  assert.deepEqual(GIT_VIEWS, ['changes', 'checkpoints']);
+  assert.equal(parseGitView('checkpoints'), 'checkpoints');
+  assert.equal(parseGitView('explorer'), 'changes', 'retired names fall back');
+  assert.equal(parseGitView(null), 'changes');
 });
 
-test('top bar contains the Work/Code switch and Explorer owns the folder icon', async () => {
+test('the merged shell header holds Work/Code and the topbar does not', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
-  assert.match(html, /class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
-  assert.match(html, /class="kind-stack"><div class="kind-segment"[\s\S]*<p class="eyebrow">AGENT SESSION<\/p><h1 id="session-title"/);
+  assert.match(html, /class="left-shell">[\s\S]*class="shell-head">[\s\S]*class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
+  const topbar = html.slice(html.indexOf('<header class="topbar">'), html.indexOf('</header>', html.indexOf('<header class="topbar">')));
+  assert.doesNotMatch(topbar, /id="kind-work"|id="kind-code"|class="kind-segment"|id="sidebar-toggle"/);
+  assert.match(html, /class="rail-tabs"[^>]*role="tablist"[^>]*aria-orientation="vertical"[\s\S]*data-rail="workspaces"[\s\S]*data-rail="files"[\s\S]*data-rail="git"[\s\S]*data-rail="schedules"/);
+  assert.match(html, /class="rail-pages"[\s\S]*data-page-link="settings"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="profile"/);
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
-  assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
-  assert.match(main, /radio\.type = 'radio'/);
-  assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
+  assert.match(main, /radio\.type = 'radio'/);
 });
 
-test('both modes share one left panel', async () => {
+test('both modes share one Left Pane and one rail', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const tabs = [...html.matchAll(/class="sidebar-tab[^"]*" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tabs, ['library', 'workspace', 'schedules', 'profile']);
+  const views = [...html.matchAll(/data-left-view="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(views, ['workspaces', 'files', 'git', 'schedules']);
+  assert.doesNotMatch(html, /data-panel-content=/);
+  assert.doesNotMatch(html, /id="sidebar-toggle"/);
   assert.doesNotMatch(html, /class="activity-bar"|class="activity-button"/);
-  assert.doesNotMatch(html, /data-panel="explorer"|data-panel="checkpoints"|data-panel="source-control"/);
-  assert.doesNotMatch(html, /data-panel="tasks"|data-panel="projects"/);
-  assert.doesNotMatch(html, /data-panel-content="settings"/, 'settings no longer lives in the sidebar');
-  assert.match(html, /data-panel-content="library"><header class="panel-heading"><h2 id="library-title">/);
+  assert.match(html, /<aside class="sidebar" id="sidebar" aria-label="Left pane">/);
 });
 
-test('Library lists tasks and projects in one badged list', async () => {
+test('Workspaces lists tasks and projects in one badged list', async () => {
   const [html, main, style] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
   ]);
-  const panel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
-  // One list, one heading, both action rows beside it.
-  assert.match(panel, /<h2 id="library-title">Library<\/h2>/);
+  const panel = html.match(/data-left-view="workspaces">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  assert.match(panel, /<h2 id="workspaces-title">Workspaces<\/h2>/);
   assert.equal((panel.match(/class="panel-body session-list"/g) ?? []).length, 1, 'one list');
   assert.match(panel, /id="library-list"/);
   assert.doesNotMatch(panel, /id="task-list"|id="project-list"/);
   assert.match(panel, /id="task-operations"[\s\S]*id="project-operations"/);
-  // Rows carry a Work/Code badge and are sorted newest first.
   assert.match(main, /badge\.textContent = work \? 'Work' : 'Code'/);
   assert.match(main, /library-badge/);
   assert.match(main, /\.sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)/);
@@ -89,29 +87,33 @@ test('Library lists tasks and projects in one badged list', async () => {
   assert.match(style, /\.library-badge\{[^}]*text-transform:uppercase/);
 });
 
-test('Workspace holds the file, change and checkpoint views as tabs', async () => {
+test('Files and Git own their Left Pane contents', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const panel = html.slice(html.indexOf('data-panel-content="workspace"'), html.indexOf('data-panel-content="schedules"'));
-  const tabs = [...panel.matchAll(/class="panel-tab[^"]*" type="button" role="tab" data-view="([a-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tabs, ['explorer', 'changes', 'checkpoints']);
-  const views = [...panel.matchAll(/data-workspace-view="([a-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(views, ['explorer', 'changes', 'checkpoints']);
-  // The ids the renderer drives must survive the merge.
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const files = html.slice(html.indexOf('data-left-view="files"'), html.indexOf('data-left-view="git"'));
+  assert.match(files, /id="files-view"[\s\S]*id="project-tree"/);
+  assert.match(files, /id="preview-view"[^>]*hidden[\s\S]*id="preview-back"/);
+  assert.doesNotMatch(files, /data-git-tab|panel-tab/, 'Files has no tab row');
+  const git = html.slice(html.indexOf('data-left-view="git"'), html.indexOf('data-left-view="schedules"'));
+  const tabs = [...git.matchAll(/data-git-tab="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['changes', 'checkpoints']);
+  const views = [...git.matchAll(/data-git-view="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(views, ['changes', 'checkpoints']);
   for (const id of ['project-tree', 'project-root-name', 'source-branch', 'source-control-message',
     'source-changes', 'commit-history', 'checkpoint-list', 'refresh-project', 'refresh-source-control']) {
-    assert.match(panel, new RegExp(`id="${id}"`), id);
+    assert.match(html, new RegExp(`id="${id}"`), id);
   }
-  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /const viewingExplorer = \(\): boolean => activePanel === 'workspace' && workspaceView === 'explorer'/);
-  assert.match(main, /localStorage\.getItem\(lastKindKey\)/, 'the mode is remembered across launches');
-  assert.match(main, /localStorage\.setItem\(workspaceViewKey, view\)/, 'the tab is remembered');
+  assert.match(main, /const viewingFiles = \(\): boolean => activeLeftView === 'files' && !previewOpen/);
+  assert.match(main, /const viewingChanges = \(\): boolean => activeLeftView === 'git' && gitView === 'changes'/);
+  assert.match(main, /localStorage\.getItem\(leftViewKey\)/, 'the view is remembered across launches');
+  assert.match(main, /localStorage\.setItem\(gitViewKey, view\)/, 'the Git tab is remembered');
 });
 
 test('project operations stay under Projects and session navigation remains nested without session actions', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  const panel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  const panel = html.match(/data-left-view="workspaces">([\s\S]*?)<\/section>/)?.[1] ?? '';
   assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"/);
   assert.match(main, /className = work \? 'task-sessions' : 'project-sessions'/);
   assert.match(style, /\.project-sessions\{padding:[^}]*\}/);
@@ -122,14 +124,14 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  const taskPanel = html.match(/data-panel-content="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
+  const taskPanel = html.match(/data-left-view="workspaces">([\s\S]*?)<\/section>/)?.[1] ?? '';
   const workspace = html.match(/class="session-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
   assert.match(taskPanel, /class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"/);
   assert.match(workspace, /id="new-session"[\s\S]*id="rename-session"[\s\S]*id="delete-session"/);
   assert.match(main, /className = work \? 'task-sessions' : 'project-sessions'/);
   assert.match(main, /session\.taskId/);
   assert.match(style, /\.task-sessions\{padding:[^}]*\}/);
-  assert.match(style, /data-panel-content="library"\] \.session-item\.selected[^}]*background:transparent/);
+  assert.match(style, /data-left-view="workspaces"\] \.session-item\.selected[^}]*background:transparent/);
   assert.match(main, /session\.taskId === entry\.key/);
 });
 

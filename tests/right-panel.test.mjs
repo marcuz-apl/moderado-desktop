@@ -4,24 +4,26 @@ import { test } from 'node:test';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('the shell has one left panel, one right monitor, and no activity rail', async () => {
+test('the shell is a rail, a Left Pane, and a Right Pane', async () => {
   const html = await read('index.html');
-  assert.doesNotMatch(html, /class="activity-bar"|class="activity-button"/, 'the icon rail is gone');
-  const tabs = [...html.matchAll(/class="sidebar-tab[^"]*" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tabs, ['library', 'workspace', 'schedules', 'profile']);
-  const panels = [...html.matchAll(/data-panel-content="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(panels, ['library', 'workspace', 'preview', 'schedules', 'profile']);
-  assert.match(html, /id="sidebar-toggle"[^>]*aria-expanded="true"/);
+  const tabs = [...html.matchAll(/data-rail="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['workspaces', 'files', 'git', 'schedules']);
+  const pages = [...html.matchAll(/data-page-link="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(pages, ['settings', 'docs', 'profile']);
+  const views = [...html.matchAll(/data-left-view="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(views, ['workspaces', 'files', 'git', 'schedules']);
+  assert.match(html, /class="left-shell">[\s\S]*class="shell-head"/);
+  assert.doesNotMatch(html, /id="sidebar-toggle"/);
   assert.match(html, /id="tools-toggle"[^>]*aria-haspopup="menu"/);
-  assert.match(html, /<section class="sidebar-panel" data-panel-content="preview">/);
 });
 
 test('the side panel can be widened by dragging its edge', async () => {
   const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src/renderer/style.css')]);
   assert.match(html, /id="sidebar-resizer"[^>]*role="separator"/);
   // The width is a variable so a drag is one property write, not a layout rewrite.
-  assert.match(style, /\.app\{grid-template-columns:var\(--sidebar-width,280px\) minmax\(0,1fr\)/);
-  assert.match(style, /\.app\.sidebar-collapsed\{grid-template-columns:0 minmax\(0,1fr\)\}/);
+  assert.match(style, /\.left-shell\{grid-area:1\/1;display:grid;grid-template-columns:52px var\(--sidebar-width,260px\)/);
+  assert.match(style, /\.left-shell\{[^}]*grid-template-rows:56px minmax\(0,1fr\)/);
+  assert.match(style, /\.rail\{grid-area:rail;[^}]*border-right:1px solid #2a4258/);
   assert.match(style, /\.sidebar-resizer\{position:absolute;[^}]*cursor:col-resize/);
   assert.match(main, /--sidebar-width/);
   assert.match(main, /localStorage\.setItem\(sidebarWidthKey/, 'the width is remembered');
@@ -77,10 +79,11 @@ test('typing reaches the shell the backend actually created', async () => {
   assert.doesNotMatch(main, /invoke\('terminal_write'[^\n]*\.catch\(\(\) => \{\}\)/, 'a failed write is not silent');
 });
 
-test('selecting a file opens the Preview panel instead of a dialog', async () => {
+test('selecting a file opens the Preview sub-view instead of a dialog', async () => {
   const [html, main] = await Promise.all([read('index.html'), read('src/renderer/main.ts')]);
   assert.doesNotMatch(html, /file-preview-dialog/, 'the modal is gone');
-  assert.match(main, /switchPanel\('preview'\)/);
+  assert.match(main, /function openPreview\(\): void/);
+  assert.match(main, /previewOpen = true/);
   assert.match(main, /pty\.terminal\.options\.theme = terminalTheme\(\)/, 'a theme switch repaints the shell');
 });
 
@@ -94,7 +97,7 @@ test('the task monitor is the only right-hand surface', async () => {
   assert.ok(monitor.indexOf('Updates') < monitor.indexOf('Background processes'));
   assert.ok(monitor.indexOf('Background processes') < monitor.indexOf('Artifacts'));
   assert.match(html, /data-tool="task-monitor"/);
-  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:var\(--sidebar-width,280px\) minmax\(0,1fr\) var\(--task-monitor-width,320px\)\}/);
+  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\) var\(--task-monitor-width,320px\)\}/);
   assert.match(main, /function setTaskMonitor\(open: boolean\)/);
   assert.match(main, /function renderTaskMonitor\(\): void/);
 });

@@ -17,7 +17,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { defaultPanel, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type AppPage } from './sessions-view';
+import { DEFAULT_LEFT_VIEW, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
 import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
 import {
   artifactsFromActivity,
@@ -104,12 +104,16 @@ let mode: 'plan' | 'act' = 'act';
 let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
-let activePanel: SidebarPanel | null = 'library';
+/** The rail destination that owns the Left Pane, remembered like the mode. */
+const leftViewKey = 'moderado-left-view';
+let activeLeftView: LeftView = parseLeftView(localStorage.getItem(leftViewKey));
+/** Files shows the Preview sub-view instead of the tree. */
+let previewOpen = false;
+/** The tab inside the Git destination. */
+const gitViewKey = 'moderado-git-view';
+let gitView: GitView = parseGitView(localStorage.getItem(gitViewKey));
 /** The Tools menu popover, closed until the topbar button asks for it. */
 let toolsOpen = false;
-/** The workspace panel's tab, remembered the way the mode is. */
-const workspaceViewKey = 'moderado-workspace-view';
-let workspaceView: WorkspaceView = parseWorkspaceView(localStorage.getItem(workspaceViewKey));
 // Declared with the rest of the state: applyTheme() runs at load and reads pty.
 let pty: Pty | null = null;
 let terminalEventsBound = false;
@@ -199,8 +203,8 @@ themeSelect.addEventListener('change', () => {
   catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
 });
 $('docs-content').innerHTML = markdown.render(manual);
-for (const id of ['close-page', 'close-docs']) {
-  $(id).addEventListener('click', () => { if (activePage) switchPanel(activePanel ?? defaultPanel()); });
+for (const id of ['close-page', 'close-docs', 'close-profile']) {
+  $(id).addEventListener('click', leavePage);
 }
 themeToggle.addEventListener('click', () => {
   themePreference = oppositeTheme(resolveTheme(themePreference, new Date()));
@@ -744,13 +748,13 @@ function enterDraft(kind: SessionKind, workspace: string | null = selectedProjec
   $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
-  if (viewingExplorer()) void refreshProjectTree();
+  if (viewingFiles()) void refreshProjectTree();
   if (viewingChanges()) void refreshSourceControl();
   void refreshCheckpoints(); void refreshSchedules();
   setStatus(kind === 'work' ? selectedWorkTaskId ? 'Start a session in this task.' : 'Create or select a task to begin.' : workspace ? 'Start a session in this project.' : 'Create or open a project to begin.');
 }
 async function setKind(kind: SessionKind): Promise<void> {
-  if (kind === activeKind && !selectingContext) return;
+  if (kind === activeKind && !selectingContext) { if (activePage) setPageMode(null); return; }
   try { localStorage.setItem(lastKindKey, kind); } catch { /* the mode still switches for this run */ }
   saveComposerDraft();
   const validProjects = new Set(projects.map((project) => project.workspace));
@@ -759,7 +763,7 @@ async function setKind(kind: SessionKind): Promise<void> {
   const remembered = kind === 'code' && workspace ? lastSessionByProject.get(workspace) : lastSessionByKind.get(kind);
   const next = sessionForMode(candidates, kind, remembered, kind === 'code' ? workspace : null);
   enterDraft(kind, kind === 'code' ? workspace ?? next?.workspace ?? null : workspace);
-  switchPanel(defaultPanel());
+  selectLeftView(DEFAULT_LEFT_VIEW);
   if (kind === 'work') {
     const task = workTasks.find((item) => item.id === selectedWorkTaskId) ?? workTasks[0];
     if (task) await selectWorkTask(task.id, false);
@@ -826,7 +830,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
       if (record.kind === 'work') void setTerminalOpen(false);
       else void ensureTerminal();
     }
-    await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingExplorer() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
+    await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingFiles() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
     renderTaskMonitor();
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
@@ -1003,14 +1007,6 @@ async function refreshSchedules(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
-function setSidebarCollapsed(collapsed: boolean): void {
-  document.querySelector<HTMLElement>('.app')?.classList.toggle('sidebar-collapsed', collapsed);
-  const toggle = $('sidebar-toggle');
-  toggle.setAttribute('aria-expanded', String(!collapsed));
-  toggle.setAttribute('aria-label', collapsed ? 'Open side panel' : 'Close side panel');
-  try { localStorage.setItem('moderado-sidebar-collapsed', String(collapsed)); } catch { /* applies for this run */ }
-}
-
 function setTaskMonitor(open: boolean): void {
   taskMonitorOpen = open;
   document.querySelector<HTMLElement>('.app')?.classList.toggle('task-monitor-open', open);
@@ -1106,9 +1102,13 @@ function setPageMode(page: AppPage | null): void {
   document.querySelectorAll<HTMLElement>('.page').forEach((section) => {
     section.classList.toggle('active', section.dataset.page === page);
   });
+  document.querySelectorAll<HTMLButtonElement>('.rail-pages .rail-tab').forEach((button) => {
+    if (button.dataset.pageLink === page) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
   if (open) {
-    document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
     closeMention();
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('.page.active .page-head .text-button')?.focus());
   }
 }
 
@@ -1116,46 +1116,83 @@ function switchPage(page: AppPage): void {
   setPageMode(page);
 }
 
-const viewingExplorer = (): boolean => activePanel === 'workspace' && workspaceView === 'explorer';
-const viewingChanges = (): boolean => activePanel === 'workspace' && workspaceView === 'changes';
+/** Back from a page: the conversation returns, focused and ready to type. */
+function leavePage(): void {
+  setPageMode(null);
+  prompt.focus();
+}
 
-/** Shows one workspace tab and loads the data it needs. */
-function applyWorkspaceView(): void {
-  document.querySelectorAll<HTMLElement>('.workspace-view').forEach((view) => {
-    const active = view.dataset.workspaceView === workspaceView;
+const viewingFiles = (): boolean => activeLeftView === 'files' && !previewOpen;
+const viewingChanges = (): boolean => activeLeftView === 'git' && gitView === 'changes';
+
+/** Shows one rail destination and loads the data it needs. */
+function applyLeftView(): void {
+  document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab').forEach((button) => {
+    const selected = button.dataset.rail === activeLeftView;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll<HTMLElement>('[data-left-view]').forEach((section) => {
+    section.classList.toggle('active', section.dataset.leftView === activeLeftView);
+  });
+  if (activeLeftView === 'files') applyFilesView();
+  if (activeLeftView === 'git') applyGitView();
+}
+
+function selectLeftView(view: LeftView): void {
+  setPageMode(null);
+  activeLeftView = view;
+  previewOpen = false;
+  try { localStorage.setItem(leftViewKey, view); } catch { /* the pane still switches for this run */ }
+  applyLeftView();
+}
+
+function applyFilesView(): void {
+  const files = $('files-view');
+  const preview = $('preview-view');
+  files.classList.toggle('active', !previewOpen);
+  files.toggleAttribute('hidden', previewOpen);
+  preview.classList.toggle('active', previewOpen);
+  preview.toggleAttribute('hidden', !previewOpen);
+  if (!previewOpen) void refreshProjectTree();
+}
+
+/** Preview keeps the Files rail tab selected; only the sub-view changes. */
+function openPreview(): void {
+  setPageMode(null);
+  if (activeLeftView !== 'files') {
+    activeLeftView = 'files';
+    try { localStorage.setItem(leftViewKey, 'files'); } catch { /* the pane still switches for this run */ }
+  }
+  previewOpen = true;
+  applyLeftView();
+}
+
+function closePreview(): void {
+  previewOpen = false;
+  applyFilesView();
+}
+
+function applyGitView(): void {
+  document.querySelectorAll<HTMLElement>('[data-git-view]').forEach((view) => {
+    const active = view.dataset.gitView === gitView;
     view.classList.toggle('active', active);
     view.toggleAttribute('hidden', !active);
   });
-  document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
-    const active = tab.dataset.view === workspaceView;
+  document.querySelectorAll<HTMLButtonElement>('[data-git-tab]').forEach((tab) => {
+    const active = tab.dataset.gitTab === gitView;
     tab.classList.toggle('selected', active);
     tab.setAttribute('aria-selected', String(active));
   });
-  if (viewingExplorer()) void refreshProjectTree();
-  if (viewingChanges()) void refreshSourceControl();
-  if (workspaceView === 'checkpoints') void refreshCheckpoints();
+  if (gitView === 'changes') void refreshSourceControl();
+  else void refreshCheckpoints();
 }
 
-function switchWorkspaceView(view: WorkspaceView): void {
-  workspaceView = view;
-  try { localStorage.setItem(workspaceViewKey, view); } catch { /* the tab still switches for this run */ }
-  applyWorkspaceView();
-}
-
-function switchPanel(panel: SidebarPanel): void {
-  setPageMode(null);
-  activePanel = panel;
-  setSidebarCollapsed(false);
-  const selectedPanel = panel === 'preview' ? 'workspace' : panel;
-  document.querySelectorAll<HTMLButtonElement>('.sidebar-tab').forEach((button) => {
-    const selected = button.dataset.panel === selectedPanel;
-    button.classList.toggle('selected', selected);
-    button.setAttribute('aria-selected', String(selected));
-  });
-  document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
-    section.classList.toggle('active', section.dataset.panelContent === panel);
-  });
-  if (panel === 'workspace') applyWorkspaceView();
+function switchGitView(view: GitView): void {
+  gitView = view;
+  try { localStorage.setItem(gitViewKey, view); } catch { /* the tab still switches for this run */ }
+  applyGitView();
 }
 
 function menuToolButtons(): HTMLButtonElement[] {
@@ -1200,7 +1237,7 @@ function moveToolsFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
 
 function runTool(action: ToolAction): void {
   closeToolsMenu(true);
-  if (action === 'files') { switchPanel('workspace'); switchWorkspaceView('explorer'); return; }
+  if (action === 'files') { selectLeftView('files'); return; }
   if (action === 'task-monitor') { setTaskMonitor(!taskMonitorOpen); return; }
   if (action === 'terminal-panel') { void setTerminalOpen(!terminalOpen); return; }
   if (action === 'vscode') {
@@ -1217,7 +1254,7 @@ function runTool(action: ToolAction): void {
 
 async function selectProject(workspace: string): Promise<void> {
   if (!projects.some((project) => project.workspace === workspace)) { setStatus('Open this project first.'); return; }
-  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); switchPanel('library');
+  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); selectLeftView('workspaces');
   const next = sessionForMode(summaries, 'code', lastSessionByProject.get(workspace), workspace);
   if (next) await selectSession(next.id, false);
   else renderSessions();
@@ -1231,13 +1268,13 @@ async function selectWorkTask(taskId: string, saveDraft = true): Promise<void> {
   const children = summaries.filter((session) => session.kind === 'work' && session.taskId === taskId);
   const remembered = lastSessionByTask.get(taskId) ?? (summaries.find((session) => session.id === lastSessionByKind.get('work') && session.taskId === taskId)?.id);
   const next = children.find((session) => session.id === remembered) ?? children[0];
-  switchPanel('library');
+  selectLeftView('workspaces');
   if (next) await selectSession(next.id, false);
   else {
     enterDraft('work');
     updateFolderContext();
     renderSessions();
-    if (viewingExplorer()) void refreshProjectTree();
+    if (viewingFiles()) void refreshProjectTree();
   }
 }
 function browserArgs(): { sessionId: string | null; projectWorkspace: string | null; workTaskId: string | null } {
@@ -1318,7 +1355,7 @@ async function previewProjectFile(entry: ProjectEntry): Promise<void> {
   $('file-preview-title').textContent = entry.name;
   $('file-preview-path').textContent = entry.path;
   $('file-preview-content').textContent = 'Loading…';
-  switchPanel('preview');
+  openPreview();
   try {
     const contents = await invoke<string>('read_project_file', { ...browserArgs(), path: entry.path });
     if (folder === currentFolder()) $('file-preview-content').textContent = contents;
@@ -1743,8 +1780,8 @@ async function initialize(): Promise<void> {
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
-    switchPanel(defaultPanel());
-    const storedMonitor = localStorage.getItem('moderado-task-monitor') === 'true';
+    const storedLeftView = activeLeftView;
+    const storedMonitor = localStorage.getItem('moderado-task-monitor') !== 'false';
     setTaskMonitor(storedMonitor);
     if (activeKind === 'work') {
       const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
@@ -1759,8 +1796,8 @@ async function initialize(): Promise<void> {
       // Nothing to code in yet: fall back to Work rather than an empty shell.
       if (workspace) await selectProject(workspace); else await setKind('work');
     }
-    // Mode selection expands the sidebar, so apply the saved state last.
-    setSidebarCollapsed(localStorage.getItem('moderado-sidebar-collapsed') === 'true');
+    // Selecting a task or project moves the rail, so the persisted view is restored last.
+    selectLeftView(storedLeftView);
     const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
     for (const item of local) {
       const preset = providers.find((provider) => provider.id === item.id);
@@ -1793,7 +1830,7 @@ attachButton.addEventListener('click', async () => {
     if (activeSessionId === sessionId) {
       pendingAttachments = [...pendingAttachments, ...records]; renderChips();
       setStatus(work ? `${pendingAttachments.length} file(s) attached. Copies are in Explorer.` : `${pendingAttachments.length} file(s) attached.`);
-      if (work && viewingExplorer()) await refreshProjectTree();
+      if (work && viewingFiles()) await refreshProjectTree();
     }
     else { const draft = composerDrafts.get(sessionId) ?? { text: '', attachments: [] }; composerDrafts.set(sessionId, { ...draft, attachments: [...draft.attachments, ...records] }); }
   } catch (error) { if (activeSessionId === sessionId) setStatus(String(error)); }
@@ -1810,14 +1847,29 @@ $<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel
 document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
   button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
 });
-document.querySelectorAll<HTMLButtonElement>('.sidebar-tab').forEach((button) => {
-  button.addEventListener('click', () => switchPanel(button.dataset.panel as SidebarPanel));
+function moveRailFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
+  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab'));
+  if (!tabs.length) return;
+  const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  tabs[nextMenuIndex(current, tabs.length, key)]?.focus();
+}
+document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab').forEach((button) => {
+  button.addEventListener('click', () => selectLeftView(parseLeftView(button.dataset.rail ?? null)));
 });
-$('sidebar-toggle').addEventListener('click', () => {
-  const collapsed = document.querySelector<HTMLElement>('.app')?.classList.contains('sidebar-collapsed') ?? false;
-  setSidebarCollapsed(!collapsed);
+document.querySelector<HTMLElement>('.rail-tabs')?.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+    event.preventDefault();
+    moveRailFocus(event.key);
+  }
 });
-$('preview-back').addEventListener('click', () => { switchPanel('workspace'); switchWorkspaceView('explorer'); });
+document.querySelectorAll<HTMLButtonElement>('.rail-pages .rail-tab').forEach((button) => {
+  button.addEventListener('click', () => {
+    const page = button.dataset.pageLink as AppPage;
+    if (activePage === page) { setPageMode(null); button.focus(); }
+    else switchPage(page);
+  });
+});
+$('preview-back').addEventListener('click', closePreview);
 $('terminal-close').addEventListener('click', () => { void setTerminalOpen(false); });
 $('task-monitor-close').addEventListener('click', () => setTaskMonitor(false));
 $('tools-toggle').addEventListener('click', () => {
@@ -1842,8 +1894,8 @@ document.addEventListener('pointerdown', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && toolsOpen) closeToolsMenu(true);
 });
-document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
-  tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
+document.querySelectorAll<HTMLButtonElement>('[data-git-tab]').forEach((tab) => {
+  tab.addEventListener('click', () => switchGitView(parseGitView(tab.dataset.gitTab ?? null)));
 });
 const sidebarWidthKey = 'moderado-sidebar-width';
 let sidebarWidth = 260;
@@ -2151,7 +2203,7 @@ $('workspace-button').addEventListener('click', async () => {
   try {
     const task = await invoke<WorkTaskRecord>('create_work_task');
     await refreshSummaries(); selectedWorkTaskId = task.id; expandedWorkTasks.add(task.id); lastSessionByTask.delete(task.id); rememberNavigation();
-    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); switchPanel('library');
+    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); selectLeftView('workspaces');
     setStatus(`Task “${task.name}” created. Create a session in the workspace to begin.`);
   } catch (error) { setStatus(String(error)); }
   finally { creatingSession = false; renderSessions(); updateControls(); }
@@ -2205,7 +2257,7 @@ $('open-project').addEventListener('click', async () => {
 });
 async function newProjectSession(workspace: string): Promise<void> {
   if (creatingSession) return;
-  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); switchPanel('library');
+  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); selectLeftView('workspaces');
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
 $('new-session').addEventListener('click', () => {
@@ -2368,7 +2420,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
       await refreshSummaries();
-      if (id === activeSessionId && viewingExplorer()) await refreshProjectTree();
+      if (id === activeSessionId && viewingFiles()) await refreshProjectTree();
       if (id === activeSessionId && viewingChanges()) await refreshSourceControl();
     }).catch((error) => setStatus(String(error)));
   }

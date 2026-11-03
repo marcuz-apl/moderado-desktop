@@ -17,6 +17,13 @@
   --light-surface:#fff;
 }
 :root[data-theme="light"] .sidebar{background:var(--light-panel);border-color:var(--light-border)}
+:root[data-theme="light"] .left-shell{background:var(--light-panel);border-color:var(--light-border)}
+:root[data-theme="light"] .shell-head{border-color:var(--light-border)}
+:root[data-theme="light"] .rail{border-color:var(--light-border)}
+:root[data-theme="light"] .rail-tab{color:#45616c}
+:root[data-theme="light"] .rail-tab:hover{background:#dbeaec;color:#123f42}
+:root[data-theme="light"] .rail-tab.selected,
+:root[data-theme="light"] .rail-tab[aria-current="page"]{background:#d5e9e8;color:#134846}
 :root[data-theme="light"] .main{background:radial-gradient(circle at 80% 0%,#e9f4f5 0%,#f8fbfc 55%)}
 :root[data-theme="light"] .topbar,
 :root[data-theme="light"] .panel-heading,
@@ -153,12 +160,8 @@
 :root[data-theme="light"] .git-actions input{background:var(--light-surface);border-color:#a9bec5;color:#203744}
 :root[data-theme="light"] .sidebar-resizer:hover,:root[data-theme="light"] .sidebar-resizer:focus-visible,:root[data-theme="light"] .sidebar-resizer.dragging{background:#08766d44}
 
-/* The rail-free shell: sidebar tabs, the sidebar toggle, the drawer, the Tools menu,
+/* The rail-free shell: the sidebar toggle, the drawer, the Tools menu,
    the task monitor. */
-:root[data-theme="light"] .sidebar-tabs{border-color:var(--light-border)}
-:root[data-theme="light"] .sidebar-tab{color:#45616c}
-:root[data-theme="light"] .sidebar-tab:hover{background:#dbeaec;color:#123f42}
-:root[data-theme="light"] .sidebar-tab.selected{background:#d5e9e8;color:#134846;box-shadow:inset 0 -2px var(--light-accent)}
 :root[data-theme="light"] .topbar-toggle{background:#e3eff1;border-color:var(--light-border);color:#4c6571}
 :root[data-theme="light"] .topbar-toggle:hover{border-color:var(--light-accent);color:#123f42}
 :root[data-theme="light"] .terminal-drawer{background:var(--light-panel);border-color:var(--light-border)}

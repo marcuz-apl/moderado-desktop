@@ -1,11 +1,12 @@
 export type SessionKind = 'work' | 'code';
-/** One left panel for both modes; the terminal lives in a drawer, not here. */
-export type SidebarPanel = 'library' | 'workspace' | 'preview' | 'schedules' | 'profile';
-/** Tabs inside the workspace panel. Changes only has content in Code sessions. */
-export type WorkspaceView = 'explorer' | 'changes' | 'checkpoints';
-export const WORKSPACE_VIEWS: readonly WorkspaceView[] = ['explorer', 'changes', 'checkpoints'];
-/** Full-width views that replace the conversation instead of opening a panel. */
-export type AppPage = 'settings' | 'docs';
+/** The rail destinations that own the Left Pane. */
+export type LeftView = 'workspaces' | 'files' | 'git' | 'schedules';
+export const LEFT_VIEWS: readonly LeftView[] = ['workspaces', 'files', 'git', 'schedules'];
+/** Tabs inside the Git destination. */
+export type GitView = 'changes' | 'checkpoints';
+export const GIT_VIEWS: readonly GitView[] = ['changes', 'checkpoints'];
+/** Full-width views that replace the conversation. */
+export type AppPage = 'settings' | 'docs' | 'profile';
 
 export type ProjectSessionLike = {
   id: string;
@@ -24,15 +25,15 @@ export type ProjectSummary = {
 };
 
 export const DEFAULT_SESSION_KIND: SessionKind = 'work';
+export const DEFAULT_LEFT_VIEW: LeftView = 'workspaces';
 
-/// Both modes open on the same panel; only its contents change.
-export function defaultPanel(): SidebarPanel {
-  return 'library';
+/// Unknown or retired stored views open the default one.
+export function parseLeftView(value: string | null): LeftView {
+  return value === 'files' || value === 'git' || value === 'schedules' ? value : DEFAULT_LEFT_VIEW;
 }
 
-/// No panel is mode-specific any more: switching Work/Code must not move the rail.
-export function parseWorkspaceView(value: string | null): WorkspaceView {
-  return value === 'changes' || value === 'checkpoints' ? value : 'explorer';
+export function parseGitView(value: string | null): GitView {
+  return value === 'checkpoints' ? value : 'changes';
 }
 
 

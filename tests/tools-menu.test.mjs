@@ -24,12 +24,12 @@ test('keyboard navigation wraps and handles an empty focus', () => {
   assert.equal(nextMenuIndex(0, 0, 'ArrowDown'), -1);
 });
 
-test('the tools menu is wired to panel and page actions', async () => {
+test('the File browser action selects the Files rail tab', async () => {
   const { readFile } = await import('node:fs/promises');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   assert.match(main, /function syncToolMenu\(\): void/);
   assert.match(main, /function runTool\(action: ToolAction\): void/);
-  assert.match(main, /if \(action === 'files'\) \{ switchPanel\('workspace'\); switchWorkspaceView\('explorer'\); return; \}/);
+  assert.match(main, /if \(action === 'files'\) \{ selectLeftView\('files'\); return; \}/);
 });
 
 test('choosing a menu item returns focus to the trigger', async () => {

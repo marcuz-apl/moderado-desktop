@@ -43,21 +43,21 @@ test('the About card carries the copyright on its bottom edge', async () => {
   assert.match(theme, /:root\[data-theme="light"\] \.about-copyright\{color:#536b77\}/);
 });
 
-test('the Tools menu names the Docs and Settings pages', async () => {
+test('the rail bottom opens the Settings, Docs, and Profile pages', async () => {
   const html = await readHtml();
-  assert.match(html, /id="tools-menu"[\s\S]*data-tool="docs"/);
-  assert.match(html, /id="tools-menu"[\s\S]*data-tool="settings"/);
+  const pages = html.slice(html.indexOf('class="rail-pages"'), html.indexOf('</aside>'));
+  assert.match(pages, /data-page-link="settings"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="profile"/);
   assert.match(html, /<h1>Docs<\/h1>/);
   assert.match(html, /<h1>Settings<\/h1>/);
+  assert.match(html, /<h1>Profile<\/h1>/);
+  assert.doesNotMatch(html, /data-panel-content="profile"/);
 });
 
-test('page mode drops the sidebar and the conversation', async () => {
+test('page mode keeps the rail and Left Pane and drops the conversation', async () => {
   const style = await read('src/renderer/style.css');
-  assert.match(style, /\.app\.page-mode\{grid-template-columns:minmax\(0,1fr\)\}/);
-  assert.match(style, /\.app\.page-mode \.sidebar\{display:none\}/);
+  assert.match(style, /\.app\.page-mode\{grid-template-columns:auto minmax\(0,1fr\)\}/);
+  assert.doesNotMatch(style, /\.app\.page-mode \.sidebar\{display:none\}/);
   assert.match(style, /\.main\.page-mode>\.topbar,\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
-  // The drawer is a direct child of .main too, so it must hide with the rest of
-  // page mode instead of leaving a live terminal strip under Settings and Docs.
   assert.match(style, /\.main\.page-mode>\.terminal-drawer\{display:none\}/, 'page mode hides the terminal drawer');
   assert.match(style, /\.page\.active\{display:block\}/);
 });
@@ -83,10 +83,11 @@ test('settings cards stack in three tight columns', async () => {
   assert.match(style, /@media\(max-width:1000px\)\{\.page-body\{flex-direction:column;align-items:stretch\}\.page-col\{display:contents\}\}/);
 });
 
-test('the Tools menu opens pages and panels', async () => {
+test('rail buttons open pages and the Back buttons leave them', async () => {
   const main = await readMain();
-  assert.match(main, /function runTool\(action: ToolAction\): void/);
-  assert.match(main, /if \(action === 'settings'\) \{ switchPage\('settings'\); return; \}/);
-  assert.match(main, /if \(action === 'docs'\) \{ switchPage\('docs'\); return; \}/);
+  assert.match(main, /function setPageMode\(page: AppPage \| null\): void/);
+  assert.match(main, /document\.querySelectorAll<HTMLButtonElement>\('\.rail-pages \.rail-tab'\)/);
+  assert.match(main, /switchPage\(page\)/);
+  assert.match(main, /for \(const id of \['close-page', 'close-docs', 'close-profile'\]\)/);
   assert.doesNotMatch(main, /\.activity-button/);
 });
