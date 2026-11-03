@@ -6,26 +6,39 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 
 ## Layout
 
-- Revised 2026-11-03: the 52 px Activity Bar is removed. The left panel is the only
-  navigation surface and carries a compact tab row: Sessions, Files, Schedules, and
-  Profile. Preview opens from Files and keeps the Files tab selected.
-- The left panel is resizable from 200 to 560 px (260 px default) and collapses from the topbar toggle.
-- The conversation column owns the transcript, composer, and a terminal drawer below
-  the composer. The drawer is Code-only and keeps its PTY alive while hidden.
-- The right Task Monitor is a collapsible sidecar with Updates, Background processes,
-  and Artifacts. It overlays the conversation below 1100 px.
-- The top-right Tools menu owns File browser, Task monitor, Terminal panel, Open in
-  VS Code, Open system terminal, Settings, and Docs. Settings and Docs remain
-  full-width pages.
-- At narrow widths the left panel overlays the conversation and the topbar toggle
-  remains the way to open or close it.
-- Later change (0.4.10): the separate Sessions, Tasks, and Projects panels were consolidated into one `library` panel that lists tasks in Work mode and projects in Code mode. See `progress.md`.
+Revised 2026-11-03: the window is four vertical regions — Activity Rail, Left Pane,
+Workspace, and Right Pane.
+
+- The 52 px Activity Rail and the resizable Left Pane (200-560 px, 260 px default)
+  share one 56 px merged header. The header carries the Moderado mark and wordmark
+  plus the Work/Code segmented control. Below the header the rail and the Left Pane
+  are separate columns.
+- The rail's top group selects the Left Pane contents: Workspaces, Files, Git, and
+  Schedules. Its bottom group — Settings, Docs, and User (Profile) — opens each as a
+  full-width page; activating the active page button returns to the conversation.
+- The conversation column owns the 56 px topbar (session title, workspace context,
+  actions, Plan/Act, theme), the transcript, the composer, and a terminal drawer
+  below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
+- The Right Pane is the Task Monitor at a fixed 320 px, open by default and leaving
+  the grid only when collapsed. Its 56 px header has exactly three controls: Tools
+  (File browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
+  and the collapse triangle. Collapsing leaves a 24 x 64 px edge tab that reopens it.
+- Pages render inside the workspace column with the rail and Left Pane visible and
+  the Right Pane hidden.
+- At 1199 px and below the Right Pane overlays the workspace; at 999 px and below
+  the Left Pane is clamped to 220 px and the topbar compacts. The rail never hides,
+  and the window minimum stays 760 px.
+- The rail selection persists in `moderado-left-view` (`workspaces`, `files`, `git`,
+  `schedules`; default `workspaces`), the Git switch in `moderado-git-view`
+  (`changes` or `checkpoints`; default `changes`), the Left Pane width in
+  `moderado-sidebar-width` (200-560 px; default 260), and the Right Pane in
+  `moderado-task-monitor`, open unless stored as `false`.
 
 ## Panels
 
-### Sessions
+### Workspaces
 
-Keep the existing session list and New session action. Show the active session, a running indicator, and its workspace path. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
+The Workspaces rail tab keeps the existing session list and New session action. Show the active session, a running indicator, and its workspace path. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
 
 ### Workspace / Project Browser
 
@@ -35,11 +48,13 @@ The renderer obtains entries and previews only through Tauri commands that call 
 
 ### Checkpoints and Schedules
 
-Move the existing lists and actions into separate panels without changing their behavior. Checkpoint restore keeps its diff preview and confirmation. Scheduled runs and approval dialogs continue to work regardless of which panel is selected.
+The Checkpoints and Schedules views keep the existing lists and actions without changing their behavior: Checkpoints under the Git rail tab, Schedules under its own tab. Checkpoint restore keeps its diff preview and confirmation. Scheduled runs and approval dialogs continue to work regardless of which rail tab is selected.
 
 ### Source Control
 
-For a Git repository whose root equals the selected workspace, show the current branch, changed and untracked files, and the 50 most recent commits with short hash, subject, author, and local date. The view has Refresh and explicit empty/error states. Git calls are read-only; this scope does not add staging, committing, checkout, fetch, or push controls. If the selected workspace is not a repository root, show a message to open the repository root as the workspace. This keeps Git inspection inside the workspace boundary. Commit rows can reveal the files changed in that commit if the bounded history contract supports it; the first implementation can present the commit list without a graph.
+For a Git repository whose root equals the selected workspace, the Git rail tab shows
+the current branch, changed and untracked files, and the 50 most recent commits with
+short hash, subject, author, and local date. The view has Refresh and explicit empty/error states. Git calls are read-only; this scope does not add staging, committing, checkout, fetch, or push controls. If the selected workspace is not a repository root, show a message to open the repository root as the workspace. This keeps Git inspection inside the workspace boundary. Commit rows can reveal the files changed in that commit if the bounded history contract supports it; the first implementation can present the commit list without a graph.
 
 ### Profile
 
@@ -47,7 +62,8 @@ Keep the Profile panel available in both modes. In Work mode, show a local profi
 
 ### Settings
 
-Settings opens as a full-width page from the Tools menu; group the Connection and Web Search controls there with an About section that carries the app's version and build. Both existing settings sections retain their validation, keychain handling, and per-session behavior. Navigating away must not silently discard typed provider drafts; secret input fields remain transient and are cleared after saving or changing sessions.
+Settings opens as a full-width page from the rail bottom; group the Connection and
+Web Search controls there with an About section that carries the app's version and build. Both existing settings sections retain their validation, keychain handling, and per-session behavior. Navigating away must not silently discard typed provider drafts; secret input fields remain transient and are cleared after saving or changing sessions.
 
 ## Backend contracts
 
@@ -58,8 +74,8 @@ Settings opens as a full-width page from the Tools menu; group the Connection an
 ## Verification
 
 - Rust tests cover folder ordering, workspace path and symlink rejection, file preview bounds, a local Git repository with a commit and a dirty file, and rejection of a nested workspace in a parent repository.
-- Frontend checks cover the left-panel tabs and the sidebar toggle, Tools menu actions and keyboard navigation, terminal drawer placement and page-mode hiding, Task Monitor derivation and its surfaces, and the theme counterparts of the new surfaces. `tests/right-panel.test.mjs` and `tests/pages.test.mjs` cover the shell geometry and page mode, `tests/tools-menu.test.mjs` covers the Tools menu actions and keyboard navigation, `tests/task-monitor.test.mjs` covers the monitor sections and their update merging, and `tests/theme.test.mjs` covers the light counterparts.
-- Run `npm test`, `npm run lint`, `npm run build`, and a Tauri startup check. Inspect the layout at the minimum window width and at a wide desktop width.
+- Frontend checks cover the rail tabs and their keyboard roving, the merged header, each Left Pane destination, the Files preview sub-view, the Git Changes/Checkpoints switch, the three-control Right Pane header and its edge tab, page mode keeping the rail and Left Pane, the Tools menu actions, and the light counterparts of every new surface. `tests/session-kind.test.mjs`, `tests/right-panel.test.mjs`, `tests/pages.test.mjs`, `tests/tools-menu.test.mjs`, and `tests/theme.test.mjs` carry those checks.
+- Run `npm test`, `npm run lint`, `npm run build`, and a Tauri startup check. Inspect the layout at 760 px, 1180 px, and a wide desktop width.
 
 ## Reference
 
