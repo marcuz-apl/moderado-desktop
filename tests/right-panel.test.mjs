@@ -117,3 +117,17 @@ test('the edge tab mirrors the monitor open state, which survives a restart', as
   assert.match(main, /localStorage\.setItem\('moderado-task-monitor', String\(open\)\)/, 'the open state is stored under one key');
   assert.match(main, /localStorage\.getItem\('moderado-task-monitor'\) !== 'false'/, 'and restored on boot, open unless closed');
 });
+
+test('the shell degrades without hiding the rail', async () => {
+  const [style, theme] = await Promise.all([read('src/renderer/style.css'), read('src/renderer/theme.css')]);
+  assert.match(style, /@media\(max-width:1199px\)\{\s*\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/);
+  assert.match(style, /\.task-monitor\{position:absolute;right:0;top:0;bottom:0;width:min\(340px,calc\(100vw - 60px\)\)/);
+  assert.match(style, /@media\(max-width:999px\)\{\s*\.left-shell\{grid-template-columns:52px 220px\}/);
+  assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.sidebar-resizer\{display:none\}/);
+  assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.topbar #workspace-context\{display:none\}/);
+  assert.match(style, /@media\(max-width:999px\)\{[\s\S]*?\.topbar \.session-actions\{display:none\}/);
+  assert.doesNotMatch(style, /sidebar-collapsed|task-monitor-width/);
+  assert.doesNotMatch(style, /@media\(max-width:850px\)/);
+  assert.doesNotMatch(style, /@media\(max-width:650px\)/);
+  assert.doesNotMatch(theme, /@media\(max-width:650px\)/);
+});
