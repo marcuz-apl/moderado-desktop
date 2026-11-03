@@ -19,20 +19,24 @@ Workspace, and Right Pane.
 - The conversation column owns the 56 px topbar (session title, workspace context,
   actions, Plan/Act, theme), the transcript, the composer, and a terminal drawer
   below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
-- The Right Pane is the Task Monitor at a fixed 320 px, open by default and leaving
-  the grid only when collapsed. Its 56 px header has exactly three controls: Tools
+- The Right Pane is the Task Monitor, open by default. At 1200 px and wider it is a
+  320 px grid column; below 1200 px it overlays the workspace as
+  `min(340px, calc(100vw - 60px))`. It leaves the grid when collapsed, and page mode
+  also closes its column. Its 56 px header has exactly three controls: Tools
   (File browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
   and the collapse triangle. Collapsing leaves a 24 x 64 px edge tab that reopens it.
-- Pages render inside the workspace column with the rail and Left Pane visible and
-  the Right Pane hidden.
-- At 1199 px and below the Right Pane overlays the workspace; at 999 px and below
-  the Left Pane is clamped to 220 px and the topbar compacts. The rail never hides,
-  and the window minimum stays 760 px.
+- Page mode hides the conversation (topbar and transcript), the composer, the drawer
+  and the Right Pane, and closes the pane column, leaving the rail and Left Pane
+  beside the page.
+- At 999 px and below the Left Pane is clamped to 220 px and the topbar compacts.
+  The rail never hides, and the window minimum stays 760 px.
 - The rail selection persists in `moderado-left-view` (`workspaces`, `files`, `git`,
   `schedules`; default `workspaces`), the Git switch in `moderado-git-view`
   (`changes` or `checkpoints`; default `changes`), the Left Pane width in
   `moderado-sidebar-width` (200-560 px; default 260), and the Right Pane in
-  `moderado-task-monitor`, open unless stored as `false`.
+  `moderado-task-monitor`, open unless stored as `false`. The retired keys
+  `moderado-sidebar-collapsed` and `moderado-workspace-view` are ignored: stored
+  values are not migrated.
 
 ## Panels
 
@@ -42,7 +46,7 @@ The Workspaces rail tab keeps the existing session list and New session action. 
 
 ### Workspace / Project Browser
 
-Show the selected workspace name and path, followed by a lazy folder tree. The root loads when the panel opens; expanding a folder loads only that folder. Folders appear before files; `.git` is hidden, symlinks are omitted, and very large directories report a clear limit error. An explicit Refresh action reloads the visible tree. Selecting a UTF-8 file opens a read-only preview with its relative path; the existing 256 KiB file limit applies. No file edit action is added here.
+Show the selected workspace name and path, followed by a lazy folder tree. The root loads when the Left Pane opens; expanding a folder loads only that folder. Folders appear before files; `.git` is hidden, symlinks are omitted, and very large directories report a clear limit error. An explicit Refresh action reloads the visible tree. Selecting a UTF-8 file opens a read-only preview with its relative path; the existing 256 KiB file limit applies. No file edit action is added here.
 
 The renderer obtains entries and previews only through Tauri commands that call the jailed workspace functions. The renderer never receives an unrestricted filesystem path to open itself.
 
@@ -58,7 +62,7 @@ short hash, subject, author, and local date. The view has Refresh and explicit e
 
 ### Profile
 
-Keep the Profile panel available in both modes. In Work mode, show a local profile and make clear that no GitHub account is needed. In Code mode, offer optional GitHub sign-in and show the connected account when available. Keep account credentials in the OS keychain. About information belongs in Settings and must describe the app independently of source-control hosting.
+Keep the Profile page available in both modes. In Work mode, show a local profile and make clear that no GitHub account is needed. In Code mode, offer optional GitHub sign-in and show the connected account when available. Keep account credentials in the OS keychain. About belongs in Settings and must describe the app independently of source-control hosting.
 
 ### Settings
 

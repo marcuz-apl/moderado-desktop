@@ -56,6 +56,15 @@ test('the merged shell header holds Work/Code and the topbar does not', async ()
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
   assert.match(main, /radio\.type = 'radio'/);
+  // The design doc claims the rail's keyboard roving is covered by frontend checks.
+  const railTabs = html.slice(html.indexOf('class="rail-tabs"'), html.indexOf('class="rail-pages"'));
+  assert.equal((railTabs.match(/tabindex="0"/g) ?? []).length, 1, 'only the selected rail tab is tabbable');
+  assert.equal((railTabs.match(/tabindex="-1"/g) ?? []).length, 3, 'every other rail view leaves the tab order');
+  assert.equal((railTabs.match(/aria-selected="true"/g) ?? []).length, 1, 'one tab is selected');
+  assert.equal((railTabs.match(/aria-selected="false"/g) ?? []).length, 3);
+  assert.match(main, /function moveRailFocus\(key: 'ArrowDown' \| 'ArrowUp' \| 'Home' \| 'End'\): void \{[\s\S]*?tabs\[nextMenuIndex\(current, tabs\.length, key\)\]\?\.focus\(\)/, 'rail roving reuses the shared menu-index helper');
+  assert.match(main, /\.rail-tabs'\)\?\.addEventListener\('keydown', \(event\) => \{\s*if \(event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp' \|\| event\.key === 'Home' \|\| event\.key === 'End'\) \{\s*event\.preventDefault\(\);\s*moveRailFocus\(event\.key\);/, 'arrow, Home and End keys move the rail');
+  assert.match(main, /button\.setAttribute\('aria-selected', String\(selected\)\);\s*button\.tabIndex = selected \? 0 : -1;/, 'selection writes aria-selected and the roving tabindex');
 });
 
 test('both modes share one Left Pane and one rail', async () => {
