@@ -111,6 +111,11 @@ test('every dark surface on the settings page has a light counterpart', async ()
   assert.deepEqual(gaps, [], `settings page surfaces with no light rule:\n${gaps.join('\n')}`);
 });
 
+test('the focus ring stays visible in the light theme', async () => {
+  const theme = await readTheme();
+  assert.match(theme, /:root\[data-theme="light"\] button:focus-visible\{outline-color:#08766d\}/);
+});
+
 test('a light override out-specifies the dark rule it replaces', async () => {
   const theme = await readTheme();
   const card = ':root[data-theme="light"] .page .settings-group';

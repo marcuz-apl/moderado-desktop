@@ -181,3 +181,4 @@
 :root[data-theme="light"] .monitor-item.running{border-color:var(--light-accent)}
 :root[data-theme="light"] .monitor-artifact{border-color:var(--light-border)}
 :root[data-theme="light"] .monitor-artifact:hover{border-color:var(--light-accent)}
+:root[data-theme="light"] button:focus-visible{outline-color:#08766d}

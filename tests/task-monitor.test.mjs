@@ -9,6 +9,7 @@ import {
   mergeUpdates,
   shortText,
   toolTitle,
+  turnUpdate,
   updatesFromActivity,
 } from '../src/renderer/task-monitor.ts';
 
@@ -38,6 +39,27 @@ test('updates keep tool failures and hide read payloads', () => {
   assert.equal(updates.find((item) => item.label === 'Read a file')?.detail, '');
   assert.equal(updates.find((item) => item.label === 'Created a file')?.detail, 'Wrote src/main.ts');
   assert.equal(updates.find((item) => item.label === 'Ran a command')?.detail, 'Exit 0');
+});
+
+test('restored rows without timestamps keep their newest-first order', () => {
+  const updates = updatesFromActivity([
+    activity('read_file', 'older', { toolId: 'old', createdAt: undefined }),
+    activity('write_file', 'Wrote src/new.ts', { toolId: 'new', createdAt: undefined }),
+  ], 10_000);
+  assert.deepEqual(updates.map((item) => item.id), ['tool:new', 'tool:old']);
+  assert.equal(updates[0].at, 9_999);
+  assert.equal(updates[1].at, 9_998);
+  assert.ok(updates[0].at > updates[1].at);
+});
+
+test('a finished turn is one update with a stopped or completed label', () => {
+  assert.deepEqual(turnUpdate(1_000, false), {
+    id: 'turn:last', at: 1_000, kind: 'turn', label: 'Turn completed', detail: '',
+  });
+  const stopped = turnUpdate(2_000, true);
+  assert.equal(stopped.kind, 'turn');
+  assert.equal(stopped.label, 'Turn stopped');
+  assert.equal(stopped.at, 2_000);
 });
 
 test('checkpoints merge newest first and ids are deduplicated', () => {

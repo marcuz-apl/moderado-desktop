@@ -9,7 +9,7 @@ export type MonitorActivity = {
 export type MonitorUpdate = {
   id: string;
   at: number;
-  kind: 'tool' | 'error' | 'checkpoint';
+  kind: 'tool' | 'error' | 'checkpoint' | 'turn';
   label: string;
   detail: string;
 };
@@ -97,13 +97,19 @@ export function updatesFromActivity(
       const failed = activity.content.startsWith('Error:');
       return [{
         id: `tool:${activity.toolId ?? index}`,
-        at: activity.createdAt ?? now,
+        // Restored history has no timestamp: derive one from the row's position,
+        // so later (newer) rows still sort above earlier ones.
+        at: activity.createdAt ?? now - (activities.length - index),
         kind: failed ? 'error' as const : 'tool' as const,
         label: toolTitle(activity.toolName),
         detail: failed ? shortText(activity.content) : toolDetail(activity.toolName, activity.content),
       }];
     })
     .sort((left, right) => right.at - left.at);
+}
+
+export function turnUpdate(at: number, stopped: boolean): MonitorUpdate {
+  return { id: 'turn:last', at, kind: 'turn', label: stopped ? 'Turn stopped' : 'Turn completed', detail: '' };
 }
 
 export function checkpointUpdates(checkpoints: readonly MonitorCheckpoint[]): MonitorUpdate[] {

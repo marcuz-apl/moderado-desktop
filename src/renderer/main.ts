@@ -25,6 +25,7 @@ import {
   checkpointUpdates,
   mergeUpdates,
   shortText,
+  turnUpdate,
   updatesFromActivity,
   type MonitorRun,
 } from './task-monitor';
@@ -150,6 +151,8 @@ const runInfo = new Map<string, MonitorRun>();
 /** The last list each refresh saw, so the monitor renders without a second invoke. */
 const schedulesBySession = new Map<string, Schedule[]>();
 const checkpointsBySession = new Map<string, Checkpoint[]>();
+/** How the last turn in each session ended, for the monitor's turn row. */
+const turnCompleted = new Map<string, { at: number; stopped: boolean }>();
 /** The right-hand monitor, closed until the Tools menu or a stored preference asks for it. */
 let taskMonitorOpen = false;
 const approvalQueue: ApprovalEvent[] = [];
@@ -1037,9 +1040,11 @@ function renderTaskMonitor(): void {
     return;
   }
   const now = Date.now();
+  const turn = turnCompleted.get(id);
   const updates = mergeUpdates([
     updatesFromActivity(views.get(id) ?? [], now),
     checkpointUpdates(checkpointsBySession.get(id) ?? []),
+    turn ? [turnUpdate(turn.at, turn.stopped)] : [],
   ]);
   const artifacts = artifactsFromActivity(views.get(id) ?? [], now);
   const processes = backgroundRows(runInfo.get(id), schedulesBySession.get(id) ?? [], now);
@@ -1082,6 +1087,7 @@ function renderTaskMonitor(): void {
 /** A running turn is both a busy flag and a labelled row; the two never drift apart. */
 function markRunning(id: string, label: string, scheduled = false, scheduleId?: string): void {
   running.add(id);
+  turnCompleted.delete(id);
   runInfo.set(id, { label, startedAt: Date.now(), scheduled, scheduleId });
   renderTaskMonitor();
 }
@@ -1193,7 +1199,7 @@ function moveToolsFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
 }
 
 function runTool(action: ToolAction): void {
-  closeToolsMenu();
+  closeToolsMenu(true);
   if (action === 'files') { switchPanel('workspace'); switchWorkspaceView('explorer'); return; }
   if (action === 'task-monitor') { setTaskMonitor(!taskMonitorOpen); return; }
   if (action === 'terminal-panel') { void setTerminalOpen(!terminalOpen); return; }
@@ -1737,10 +1743,7 @@ async function initialize(): Promise<void> {
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
-    // switchPanel() records an expanded sidebar, so read the saved state first.
-    const sidebarWasCollapsed = localStorage.getItem('moderado-sidebar-collapsed') === 'true';
     switchPanel(defaultPanel());
-    if (sidebarWasCollapsed) setSidebarCollapsed(true);
     const storedMonitor = localStorage.getItem('moderado-task-monitor') === 'true';
     setTaskMonitor(storedMonitor);
     if (activeKind === 'work') {
@@ -1756,6 +1759,8 @@ async function initialize(): Promise<void> {
       // Nothing to code in yet: fall back to Work rather than an empty shell.
       if (workspace) await selectProject(workspace); else await setKind('work');
     }
+    // Mode selection expands the sidebar, so apply the saved state last.
+    setSidebarCollapsed(localStorage.getItem('moderado-sidebar-collapsed') === 'true');
     const local = await invoke<LocalProviderStatus[]>('probe_local_providers');
     for (const item of local) {
       const preset = providers.find((provider) => provider.id === item.id);
@@ -2357,6 +2362,8 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
       }
     }
     if (!scheduledPending.has(id)) clearRunning(id);
+    turnCompleted.set(id, { at: Date.now(), stopped: payload.kind === 'cancelled' });
+    renderTaskMonitor();
     mentionFiles.clear();
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {

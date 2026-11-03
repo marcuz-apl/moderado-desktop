@@ -32,6 +32,12 @@ test('the tools menu is wired to panel and page actions', async () => {
   assert.match(main, /if \(action === 'files'\) \{ switchPanel\('workspace'\); switchWorkspaceView\('explorer'\); return; \}/);
 });
 
+test('choosing a menu item returns focus to the trigger', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /function runTool\(action: ToolAction\): void \{\s*closeToolsMenu\(true\);/);
+});
+
 test('the top-right menu renders the panel and app actions from the model', async () => {
   const { readFile } = await import('node:fs/promises');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
