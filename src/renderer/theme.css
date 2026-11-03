@@ -153,7 +153,8 @@
 :root[data-theme="light"] .git-actions input{background:var(--light-surface);border-color:#a9bec5;color:#203744}
 :root[data-theme="light"] .sidebar-resizer:hover,:root[data-theme="light"] .sidebar-resizer:focus-visible,:root[data-theme="light"] .sidebar-resizer.dragging{background:#08766d44}
 
-/* The rail-free shell: sidebar tabs, the sidebar toggle, the drawer, the Tools menu. */
+/* The rail-free shell: sidebar tabs, the sidebar toggle, the drawer, the Tools menu,
+   the task monitor. */
 :root[data-theme="light"] .sidebar-tabs{border-color:var(--light-border)}
 :root[data-theme="light"] .sidebar-tab{color:#45616c}
 :root[data-theme="light"] .sidebar-tab:hover{background:#dbeaec;color:#123f42}
@@ -169,3 +170,14 @@
 :root[data-theme="light"] .tools-menu button{color:#203744}
 :root[data-theme="light"] .tools-menu button:hover:not(:disabled){background:#dbeaec;color:#134846}
 :root[data-theme="light"] .tools-menu button:disabled{color:#5d7480}
+:root[data-theme="light"] .task-monitor{background:var(--light-panel);border-color:var(--light-border)}
+:root[data-theme="light"] .monitor-head h2{color:#183441}
+:root[data-theme="light"] .monitor-section{border-color:var(--light-border)}
+:root[data-theme="light"] .monitor-section h3{color:#45616c}
+:root[data-theme="light"] .monitor-item{background:var(--light-surface);border-color:var(--light-border);color:#203744}
+:root[data-theme="light"] .monitor-item strong{color:#203744}
+:root[data-theme="light"] .monitor-item span{color:var(--light-muted)}
+:root[data-theme="light"] .monitor-item.error{border-color:#c4837a}
+:root[data-theme="light"] .monitor-item.running{border-color:var(--light-accent)}
+:root[data-theme="light"] .monitor-artifact{border-color:var(--light-border)}
+:root[data-theme="light"] .monitor-artifact:hover{border-color:var(--light-accent)}

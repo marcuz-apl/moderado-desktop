@@ -123,9 +123,14 @@ test('a light override out-specifies the dark rule it replaces', async () => {
 
 test('the shell surfaces added after the first light pass have light counterparts', async () => {
   const theme = await readTheme();
-  // Each surface the rail removal, drawer and tools menu introduced ships dark first;
-  // without a light rule it keeps its dark chip or ink in the default daytime theme.
-  for (const selector of ['.sidebar-tab', '.terminal-drawer', '.terminal-head', '.tools-menu', '.topbar-toggle']) {
+  // Each surface the rail removal, drawer, tools menu and task monitor introduced ships
+  // dark first; without a light rule it keeps its dark chip or ink in the default daytime theme.
+  for (const selector of [
+    '.sidebar-tab', '.terminal-drawer', '.terminal-head', '.tools-menu', '.topbar-toggle',
+    '.task-monitor', '.monitor-head h2', '.monitor-section', '.monitor-section h3',
+    '.monitor-item', '.monitor-item strong', '.monitor-item span', '.monitor-item.error',
+    '.monitor-item.running', '.monitor-artifact', '.monitor-artifact:hover',
+  ]) {
     const escaped = selector.replace(/\./g, '\\.');
     assert.match(theme, new RegExp(`:root\\[data-theme="light"\\] ${escaped}(?![\\w-])`), `${selector} has no light rule`);
   }
