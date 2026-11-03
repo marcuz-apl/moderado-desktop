@@ -32,6 +32,17 @@ test('the tools menu is wired to panel and page actions', async () => {
   assert.match(main, /if \(action === 'files'\) \{ switchPanel\('workspace'\); switchWorkspaceView\('explorer'\); return; \}/);
 });
 
+test('the top-right menu renders the panel and app actions from the model', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="tools-toggle"[^>]*aria-haspopup="menu"/);
+  assert.match(html, /id="tools-menu"[^>]*role="menu"/);
+  for (const action of ['files', 'terminal-panel', 'settings', 'docs']) {
+    assert.match(html, new RegExp(`data-tool="${action}"`), `missing ${action}`);
+  }
+  assert.match(html, /role="menuitemcheckbox" data-tool="terminal-panel" aria-checked="false"/);
+});
+
 test('the menu keeps one stable order', () => {
   assert.deepEqual(TOOL_ITEMS.map((item) => item.action), [
     'files', 'task-monitor', 'terminal-panel',

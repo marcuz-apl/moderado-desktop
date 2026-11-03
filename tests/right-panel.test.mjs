@@ -44,9 +44,14 @@ test('the terminal is a real PTY, not a command runner', async () => {
   assert.doesNotMatch(lib, /fn run_command\(/);
 });
 
-test('the shell starts when its panel is shown, and only in Code', async () => {
-  const [main, lib] = await Promise.all([read('src/renderer/main.ts'), read('src-tauri/src/lib.rs')]);
-  assert.match(main, /if \(panel === 'terminal' && activeKind === 'code'\) void ensureTerminal\(\);/);
+test('the shell starts when its drawer opens, and only in Code', async () => {
+  const [html, main, lib] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src-tauri/src/lib.rs')]);
+  assert.match(html, /<section id="terminal-drawer" class="terminal-drawer"[^>]*hidden>/);
+  assert.ok(html.indexOf('id="terminal-drawer"') > html.indexOf('class="composer-wrap"'), 'the drawer sits below the composer');
+  assert.doesNotMatch(html, /data-panel-content="terminal"/, 'the sidebar terminal is gone');
+  assert.match(main, /async function setTerminalOpen\(open: boolean\)/);
+  assert.match(main, /if \(open && activeKind !== 'code'\)/);
+  assert.match(main, /if \(!pty \|\| !terminalOpen\) return;/, 'resize only when the drawer is visible');
   assert.match(main, /Commands run in Code sessions only/);
   const body = lib.slice(lib.indexOf('fn terminal_open('), lib.indexOf('fn terminal_write('));
   assert.match(body, /code_workspace\(&state/);

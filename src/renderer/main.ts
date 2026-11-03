@@ -18,6 +18,7 @@ import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
 import { defaultPanel, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type AppPage } from './sessions-view';
+import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -94,12 +95,16 @@ let currentApproval: ApprovalEvent | null = null;
 let pendingRestore: { sessionId: string; preview: CheckpointPreview } | null = null;
 let approvalBefore = '';
 let activePanel: SidebarPanel | null = 'library';
+/** The Tools menu popover, closed until the topbar button asks for it. */
+let toolsOpen = false;
 /** The workspace panel's tab, remembered the way the mode is. */
 const workspaceViewKey = 'moderado-workspace-view';
 let workspaceView: WorkspaceView = parseWorkspaceView(localStorage.getItem(workspaceViewKey));
 // Declared with the rest of the state: applyTheme() runs at load and reads pty.
 let pty: Pty | null = null;
 let terminalEventsBound = false;
+/** The terminal drawer below the composer, closed until asked for. */
+let terminalOpen = false;
 let activePage: AppPage | null = null;
 let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
@@ -575,13 +580,14 @@ function applyKindUi(): void {
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-git').toggleAttribute('hidden', work);
   // The shell is Code-only, like every other command path.
+  if (work) void setTerminalOpen(false);
   const terminalNote = document.getElementById('terminal-note');
   if (terminalNote) {
     terminalNote.textContent = work
       ? 'Commands run in Code sessions only.'
       : 'A real shell in the project folder. It runs as you, outside the agent sandbox.';
   }
-
+  syncToolMenu();
 }
 
 function rememberNavigation(): void {
@@ -797,6 +803,10 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
+    if (terminalOpen) {
+      if (record.kind === 'work') void setTerminalOpen(false);
+      else void ensureTerminal();
+    }
     await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingExplorer() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
@@ -877,6 +887,7 @@ function updateControls(): void {
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;
   $<HTMLButtonElement>('new-schedule').disabled = !activeSessionId;
   $<HTMLButtonElement>('import-transcript').disabled = !activeSessionId;
+  syncToolMenu();
 }
 
 function setMode(next: 'plan' | 'act'): void {
@@ -1033,6 +1044,54 @@ function switchPanel(panel: SidebarPanel): void {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
   if (panel === 'workspace') applyWorkspaceView();
+}
+
+function menuToolButtons(): HTMLButtonElement[] {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('#tools-menu [data-tool]'));
+}
+
+function syncToolMenu(): void {
+  const context = { kind: activeKind, hasWorkspace: Boolean(currentFolder()) };
+  for (const button of menuToolButtons()) {
+    const action = button.dataset.tool as ToolAction;
+    const reason = toolDisabledReason(action, context);
+    button.disabled = reason !== null;
+    button.toggleAttribute('aria-disabled', reason !== null);
+    button.title = reason ?? '';
+    if (button.getAttribute('role') === 'menuitemcheckbox') {
+      const checked = action === 'terminal-panel' ? terminalOpen : false;
+      button.setAttribute('aria-checked', String(checked));
+    }
+  }
+}
+
+function openToolsMenu(): void {
+  toolsOpen = true;
+  $('tools-menu').toggleAttribute('hidden', false);
+  $('tools-toggle').setAttribute('aria-expanded', 'true');
+  syncToolMenu();
+}
+
+function closeToolsMenu(returnFocus = false): void {
+  toolsOpen = false;
+  $('tools-menu').toggleAttribute('hidden', true);
+  $('tools-toggle').setAttribute('aria-expanded', 'false');
+  if (returnFocus) $('tools-toggle').focus();
+}
+
+function moveToolsFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
+  const items = menuToolButtons().filter((button) => !button.disabled);
+  if (!items.length) return;
+  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  items[nextMenuIndex(current, items.length, key)]?.focus();
+}
+
+function runTool(action: ToolAction): void {
+  closeToolsMenu();
+  if (action === 'files') { switchPanel('workspace'); switchWorkspaceView('explorer'); return; }
+  if (action === 'terminal-panel') { void setTerminalOpen(!terminalOpen); return; }
+  if (action === 'settings') { switchPage('settings'); return; }
+  if (action === 'docs') { switchPage('docs'); return; }
 }
 
 async function selectProject(workspace: string): Promise<void> {
@@ -1311,8 +1370,18 @@ async function startShell(): Promise<void> {
   }
 }
 
+/** Opens or closes the drawer; the shell starts only once, when it is first shown. */
+async function setTerminalOpen(open: boolean): Promise<void> {
+  if (open && activeKind !== 'code') { setStatus('Commands run in Code sessions only.'); return; }
+  terminalOpen = open;
+  $('terminal-drawer').toggleAttribute('hidden', !open);
+  syncToolMenu();
+  if (!open) return;
+  await ensureTerminal();
+  requestAnimationFrame(() => { fitTerminal(); pty?.terminal.focus(); });
+}
+
 /** Mounts the terminal once, then starts a shell for whichever project is open. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the terminal drawer is the next commit's caller
 async function ensureTerminal(): Promise<void> {
   const host = $('terminal-host');
   if (!host) return;
@@ -1350,7 +1419,7 @@ async function ensureTerminal(): Promise<void> {
         }
       });
       new ResizeObserver(() => {
-        if (!pty) return;
+        if (!pty || !terminalOpen) return;
         fitTerminal();
         void invoke('terminal_resize', { sessionId: pty.key, cols: pty.terminal.cols, rows: pty.terminal.rows }).catch(() => {});
       }).observe(host);
@@ -1366,9 +1435,9 @@ async function ensureTerminal(): Promise<void> {
   }
   if (!key) { pty.terminal.write('\r\nOpen a project to start a shell.\r\n'); return; }
   if (!pty.started) await startShell();
-  // Opening the panel from the rail should put the caret in the shell, so the
-  // user can type immediately instead of hunting for the click target.
-  requestAnimationFrame(() => { pty?.terminal.focus(); });
+  // Opening the drawer should put the caret in the shell, so the user can type
+  // immediately instead of hunting for the click target.
+  requestAnimationFrame(() => { if (terminalOpen) pty?.terminal.focus(); });
 }
 
 async function refreshGitIdentity(): Promise<void> {
@@ -1627,6 +1696,29 @@ $('sidebar-toggle').addEventListener('click', () => {
   setSidebarCollapsed(!collapsed);
 });
 $('preview-back').addEventListener('click', () => { switchPanel('workspace'); switchWorkspaceView('explorer'); });
+$('terminal-close').addEventListener('click', () => { void setTerminalOpen(false); });
+$('tools-toggle').addEventListener('click', () => {
+  if (toolsOpen) closeToolsMenu(true);
+  else openToolsMenu();
+});
+$<HTMLDivElement>('tools-menu').addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tool]');
+  if (button) runTool(button.dataset.tool as ToolAction);
+});
+$<HTMLDivElement>('tools-menu').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { event.preventDefault(); closeToolsMenu(true); return; }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+    event.preventDefault();
+    moveToolsFocus(event.key);
+  }
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!toolsOpen) return;
+  if (!(event.target as HTMLElement).closest('.tools-wrap')) closeToolsMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && toolsOpen) closeToolsMenu(true);
+});
 document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
   tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
 });
