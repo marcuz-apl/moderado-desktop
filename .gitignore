@@ -5,3 +5,4 @@ src-tauri/gen/schemas/
 .playwright-cli/
 .worktrees/
 .workbuddy-ai/
+.superpowers/

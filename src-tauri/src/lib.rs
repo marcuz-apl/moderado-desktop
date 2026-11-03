@@ -481,6 +481,8 @@ fn git_push(
 
 /// Opens (or restarts) the terminal for this session, in its project folder.
 /// This is the user's own shell, not the agent's sandboxed command path.
+/// Returns the id the shell is stored under; the frontend keys every later
+/// write and resize with it, so the two can never disagree.
 /// The signature mirrors the frontend payload, so it is wide on purpose.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -493,13 +495,11 @@ fn terminal_open(
     work_task_id: Option<String>,
     cols: u16,
     rows: u16,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let root = code_workspace(&state, session_id.clone(), project_workspace.clone(), work_task_id)?;
-    // The frontend keys write/resize/close with the same value it sends here.
-    let key = session_id
-        .or(project_workspace)
-        .unwrap_or_else(|| root.to_string_lossy().into_owned());
-    terminal::open(&app, &terminals, &key, &root, cols, rows)
+    let key = terminal::key(session_id, project_workspace, &root);
+    terminal::open(&app, &terminals, &key, &root, cols, rows)?;
+    Ok(key)
 }
 
 #[tauri::command]

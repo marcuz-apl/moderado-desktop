@@ -50,6 +50,25 @@ test('the shell starts when its panel is shown, and only in Code', async () => {
   assert.match(body, /code_workspace\(&state/);
 });
 
+test('typing reaches the shell the backend actually created', async () => {
+  const [main, lib, terminal] = await Promise.all([
+    read('src/renderer/main.ts'), read('src-tauri/src/lib.rs'), read('src-tauri/src/terminal.rs'),
+  ]);
+  const keyFn = main.slice(main.indexOf('function terminalKey()'), main.indexOf('function terminalTheme()'));
+  // A Code session sends no session id, so keying by the active session pointed
+  // at a terminal that was never created: the shell started, keys went nowhere.
+  const keyCode = keyFn
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(keyCode, /activeSessionId/, 'the key must mirror what browserArgs sends');
+  assert.match(keyFn, /browserArgs\(\)/);
+  assert.match(main, /pty\.key = await invoke<string>\('terminal_open'/, 'the id the backend returns is adopted');
+  assert.match(lib, /fn terminal_open\([\s\S]*?\) -> Result<String, String>/, 'the backend reports its key');
+  assert.match(lib, /terminal::key\(session_id, project_workspace, &root\)/, 'one place owns the rule');
+  assert.match(terminal, /pub fn key\(/);
+  assert.doesNotMatch(main, /invoke\('terminal_write'[^\n]*\.catch\(\(\) => \{\}\)/, 'a failed write is not silent');
+});
+
 test('selecting a file opens the Preview panel instead of a dialog', async () => {
   const [html, main] = await Promise.all([read('index.html'), read('src/renderer/main.ts')]);
   assert.doesNotMatch(html, /file-preview-dialog/, 'the modal is gone');

@@ -1285,7 +1285,12 @@ $<HTMLFormElement>('project-entry-form').addEventListener('submit', async (event
 type Pty = { terminal: Terminal; fit: FitAddon; key: string; started: boolean };
 /** The value the backend also keys write/resize/close with. */
 function terminalKey(): string {
-  return activeSessionId ?? selectedProjectWorkspace ?? '';
+  // Must mirror `terminal_open`: the session when this mode sends one, else the
+  // project. A Code session deliberately sends no session id, so its shell is
+  // keyed by the project folder — reading `activeSessionId` here would address
+  // a terminal that was never created.
+  const args = browserArgs();
+  return args.sessionId ?? args.projectWorkspace ?? '';
 }
 
 function terminalTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
@@ -1303,7 +1308,9 @@ async function startShell(): Promise<void> {
   if (!pty || !pty.key) return;
   fitTerminal();
   try {
-    await invoke('terminal_open', { ...browserArgs(), cols: pty.terminal.cols, rows: pty.terminal.rows });
+    // The backend decides which id it stores the shell under and returns it, so
+    // this side never has to reconstruct the rule and drift from it.
+    pty.key = await invoke<string>('terminal_open', { ...browserArgs(), cols: pty.terminal.cols, rows: pty.terminal.rows });
     pty.started = true;
     pty.terminal.focus();
   } catch (error) {
@@ -1329,7 +1336,13 @@ async function ensureTerminal(): Promise<void> {
     pty = { terminal, fit, key: terminalKey(), started: false };
     terminal.onData((data) => {
       if (!pty) return;
-      void invoke('terminal_write', { sessionId: pty.key, data }).catch(() => {});
+      // A shell that has exited cannot take input; say so once rather than
+      // swallowing the keystroke and leaving the user typing into a void.
+      void invoke('terminal_write', { sessionId: pty.key, data }).catch((error) => {
+        if (!pty || !pty.started) return;
+        pty.started = false;
+        pty.terminal.write(`\r\n${String(error)}\r\n`);
+      });
     });
     if (!terminalEventsBound) {
       terminalEventsBound = true;
@@ -1359,6 +1372,9 @@ async function ensureTerminal(): Promise<void> {
   }
   if (!key) { pty.terminal.write('\r\nOpen a project to start a shell.\r\n'); return; }
   if (!pty.started) await startShell();
+  // Opening the panel from the rail should put the caret in the shell, so the
+  // user can type immediately instead of hunting for the click target.
+  requestAnimationFrame(() => { if (activePanel === 'terminal') pty?.terminal.focus(); });
 }
 
 async function refreshGitIdentity(): Promise<void> {

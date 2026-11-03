@@ -80,6 +80,16 @@ fn size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+/// The id a shell is stored under. `open` returns this value and the frontend
+/// adopts it, so the rule lives here alone: a session when the caller has one,
+/// otherwise the project (a Code session sends no session id), otherwise the
+/// folder itself.
+pub fn key(session_id: Option<String>, project_workspace: Option<String>, root: &Path) -> String {
+    session_id
+        .or(project_workspace)
+        .unwrap_or_else(|| root.to_string_lossy().into_owned())
+}
+
 /// Start a shell for this session, replacing any terminal it already had.
 pub fn open(
     app: &AppHandle,
@@ -201,5 +211,26 @@ mod tests {
         let small = size(0, 0);
         assert_eq!(small.cols, 1);
         assert_eq!(small.rows, 1);
+    }
+
+    #[test]
+    fn a_session_keys_its_own_shell() {
+        assert_eq!(
+            key(Some("s1".into()), Some("p1".into()), Path::new("/repo")),
+            "s1"
+        );
+    }
+
+    #[test]
+    fn a_code_session_keys_by_project_because_it_sends_no_session_id() {
+        // The renderer sends `sessionId: null` in Code mode. Keying by the open
+        // session there addressed a shell that was never created, so typing did
+        // nothing; the project is the id both sides agree on.
+        assert_eq!(key(None, Some("p1".into()), Path::new("/repo")), "p1");
+    }
+
+    #[test]
+    fn without_an_id_the_folder_is_the_key() {
+        assert_eq!(key(None, None, Path::new("/repo")), "/repo");
     }
 }
