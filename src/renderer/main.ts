@@ -120,6 +120,8 @@ let terminalEventsBound = false;
 /** The terminal drawer below the composer, closed until asked for. */
 let terminalOpen = false;
 let activePage: AppPage | null = null;
+/** The bottom rail button that opened the current page, so Back can return focus to it. */
+let pageOrigin: HTMLElement | null = null;
 let selectedProjectWorkspace: string | null = null;
 let selectedWorkTaskId: string | null = null;
 const projectEntries = new Map<string, ProjectEntry[]>();
@@ -1113,13 +1115,17 @@ function setPageMode(page: AppPage | null): void {
 }
 
 function switchPage(page: AppPage): void {
+  const trigger = document.activeElement;
+  pageOrigin = trigger instanceof HTMLElement && trigger.matches('.rail-pages .rail-tab') ? trigger : null;
   setPageMode(page);
 }
 
-/** Back from a page: the conversation returns, focused and ready to type. */
+/** Back from a page: focus returns to the rail button that opened it, else the composer. */
 function leavePage(): void {
   setPageMode(null);
-  prompt.focus();
+  if (pageOrigin?.isConnected) pageOrigin.focus();
+  else prompt.focus();
+  pageOrigin = null;
 }
 
 const viewingFiles = (): boolean => activeLeftView === 'files' && !previewOpen;

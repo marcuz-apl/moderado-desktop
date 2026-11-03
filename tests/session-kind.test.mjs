@@ -106,6 +106,7 @@ test('Files and Git own their Left Pane contents', async () => {
   assert.match(main, /const viewingFiles = \(\): boolean => activeLeftView === 'files' && !previewOpen/);
   assert.match(main, /const viewingChanges = \(\): boolean => activeLeftView === 'git' && gitView === 'changes'/);
   assert.match(main, /localStorage\.getItem\(leftViewKey\)/, 'the view is remembered across launches');
+  assert.match(main, /const storedLeftView = activeLeftView[\s\S]*selectLeftView\(storedLeftView\)/, 'initialize restores the stored left view');
   assert.match(main, /localStorage\.setItem\(gitViewKey, view\)/, 'the Git tab is remembered');
 });
 

@@ -160,7 +160,7 @@
 :root[data-theme="light"] .git-actions input{background:var(--light-surface);border-color:#a9bec5;color:#203744}
 :root[data-theme="light"] .sidebar-resizer:hover,:root[data-theme="light"] .sidebar-resizer:focus-visible,:root[data-theme="light"] .sidebar-resizer.dragging{background:#08766d44}
 
-/* The rail-free shell: the sidebar toggle, the drawer, the Tools menu,
+/* The activity rail shell: the Tools toggle, the drawer, the Tools menu,
    the task monitor. */
 :root[data-theme="light"] .topbar-toggle{background:#e3eff1;border-color:var(--light-border);color:#4c6571}
 :root[data-theme="light"] .topbar-toggle:hover{border-color:var(--light-accent);color:#123f42}
