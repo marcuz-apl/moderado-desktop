@@ -1,6 +1,6 @@
 export type SessionKind = 'work' | 'code';
-/** One rail for both modes; every view lives here, nothing floats on the right. */
-export type SidebarPanel = 'library' | 'workspace' | 'preview' | 'terminal' | 'schedules' | 'profile';
+/** One left panel for both modes; the terminal lives in a drawer, not here. */
+export type SidebarPanel = 'library' | 'workspace' | 'preview' | 'schedules' | 'profile';
 /** Tabs inside the workspace panel. Changes only has content in Code sessions. */
 export type WorkspaceView = 'explorer' | 'changes' | 'checkpoints';
 export const WORKSPACE_VIEWS: readonly WorkspaceView[] = ['explorer', 'changes', 'checkpoints'];

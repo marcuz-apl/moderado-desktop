@@ -53,19 +53,16 @@ test('top bar contains the Work/Code switch and Explorer owns the folder icon', 
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /data-panel="mode"|data-panel-content="mode"/);
   assert.match(main, /radio\.type = 'radio'/);
-  assert.match(html, /data-panel="workspace"[^>]*aria-label="Workspace"[^>]*>[\s\S]*?#icon-folder/);
-  assert.match(html, /data-panel="library"[^>]*>[\s\S]*?#icon-projects/);
   assert.match(html, /<span>⌘<\/span><\/div>/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
 });
 
-test('both modes share one activity rail', async () => {
+test('both modes share one left panel', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const rail = [...html.matchAll(/class="activity-button" data-panel="[a-z-]+"(?: data-view="[a-z]+")? type="button" aria-label="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rail, ['Tasks and projects', 'Workspace', 'Git', 'Preview', 'Terminal', 'Schedules', 'Profile'], 'the same rail in both modes');
+  const tabs = [...html.matchAll(/class="sidebar-tab[^"]*" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['library', 'workspace', 'schedules', 'profile']);
+  assert.doesNotMatch(html, /class="activity-bar"|class="activity-button"/);
   assert.doesNotMatch(html, /data-panel="explorer"|data-panel="checkpoints"|data-panel="source-control"/);
-  const pages = [...html.matchAll(/class="activity-button" data-page="([a-z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(pages, ['docs', 'settings'], 'the manual sits above settings, which stays at the bottom');
   assert.doesNotMatch(html, /data-panel="tasks"|data-panel="projects"/);
   assert.doesNotMatch(html, /data-panel-content="settings"/, 'settings no longer lives in the sidebar');
   assert.match(html, /data-panel-content="library"><header class="panel-heading"><h2 id="library-title">/);

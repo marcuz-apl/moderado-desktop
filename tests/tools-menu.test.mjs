@@ -24,6 +24,14 @@ test('keyboard navigation wraps and handles an empty focus', () => {
   assert.equal(nextMenuIndex(0, 0, 'ArrowDown'), -1);
 });
 
+test('the tools menu is wired to panel and page actions', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /function syncToolMenu\(\): void/);
+  assert.match(main, /function runTool\(action: ToolAction\): void/);
+  assert.match(main, /if \(action === 'files'\) \{ switchPanel\('workspace'\); switchWorkspaceView\('explorer'\); return; \}/);
+});
+
 test('the menu keeps one stable order', () => {
   assert.deepEqual(TOOL_ITEMS.map((item) => item.action), [
     'files', 'task-monitor', 'terminal-panel',

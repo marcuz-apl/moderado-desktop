@@ -575,9 +575,12 @@ function applyKindUi(): void {
   $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-git').toggleAttribute('hidden', work);
   // The shell is Code-only, like every other command path.
-  $('terminal-note').textContent = work
-    ? 'Commands run in Code sessions only.'
-    : 'A real shell in the project folder. It runs as you, outside the agent sandbox.';
+  const terminalNote = document.getElementById('terminal-note');
+  if (terminalNote) {
+    terminalNote.textContent = work
+      ? 'Commands run in Code sessions only.'
+      : 'A real shell in the project folder. It runs as you, outside the agent sandbox.';
+  }
 
 }
 
@@ -965,14 +968,12 @@ async function refreshSchedules(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
-function closePanel(): void {
-  activePanel = null;
-  document.querySelector<HTMLElement>('.app')?.classList.add('sidebar-collapsed');
-  document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
-    button.classList.remove('selected');
-    button.setAttribute('aria-pressed', 'false');
-  });
-  document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
+function setSidebarCollapsed(collapsed: boolean): void {
+  document.querySelector<HTMLElement>('.app')?.classList.toggle('sidebar-collapsed', collapsed);
+  const toggle = $('sidebar-toggle');
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  toggle.setAttribute('aria-label', collapsed ? 'Open side panel' : 'Close side panel');
+  try { localStorage.setItem('moderado-sidebar-collapsed', String(collapsed)); } catch { /* applies for this run */ }
 }
 function setPageMode(page: AppPage | null): void {
   activePage = page;
@@ -981,11 +982,6 @@ function setPageMode(page: AppPage | null): void {
   document.querySelector<HTMLElement>('.main')?.classList.toggle('page-mode', open);
   document.querySelectorAll<HTMLElement>('.page').forEach((section) => {
     section.classList.toggle('active', section.dataset.page === page);
-  });
-  document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
-    const selected = open ? button.dataset.page === page : button.dataset.panel === activePanel;
-    button.classList.toggle('selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
   });
   if (open) {
     document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => section.classList.remove('active'));
@@ -1026,20 +1022,17 @@ function switchWorkspaceView(view: WorkspaceView): void {
 function switchPanel(panel: SidebarPanel): void {
   setPageMode(null);
   activePanel = panel;
-  document.querySelector<HTMLElement>('.app')?.classList.remove('sidebar-collapsed');
-  document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
-    // A button with data-view points at one tab of a panel, so it only reads as
-    // selected when that tab is the one showing.
-    const selected = button.dataset.panel === activePanel
-      && (!button.dataset.view || button.dataset.view === workspaceView);
+  setSidebarCollapsed(false);
+  const selectedPanel = panel === 'preview' ? 'workspace' : panel;
+  document.querySelectorAll<HTMLButtonElement>('.sidebar-tab').forEach((button) => {
+    const selected = button.dataset.panel === selectedPanel;
     button.classList.toggle('selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
+    button.setAttribute('aria-selected', String(selected));
   });
   document.querySelectorAll<HTMLElement>('.sidebar-panel').forEach((section) => {
     section.classList.toggle('active', section.dataset.panelContent === panel);
   });
   if (panel === 'workspace') applyWorkspaceView();
-  if (panel === 'terminal' && activeKind === 'code') void ensureTerminal();
 }
 
 async function selectProject(workspace: string): Promise<void> {
@@ -1319,6 +1312,7 @@ async function startShell(): Promise<void> {
 }
 
 /** Mounts the terminal once, then starts a shell for whichever project is open. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the terminal drawer is the next commit's caller
 async function ensureTerminal(): Promise<void> {
   const host = $('terminal-host');
   if (!host) return;
@@ -1356,7 +1350,7 @@ async function ensureTerminal(): Promise<void> {
         }
       });
       new ResizeObserver(() => {
-        if (!pty || activePanel !== 'terminal') return;
+        if (!pty) return;
         fitTerminal();
         void invoke('terminal_resize', { sessionId: pty.key, cols: pty.terminal.cols, rows: pty.terminal.rows }).catch(() => {});
       }).observe(host);
@@ -1374,7 +1368,7 @@ async function ensureTerminal(): Promise<void> {
   if (!pty.started) await startShell();
   // Opening the panel from the rail should put the caret in the shell, so the
   // user can type immediately instead of hunting for the click target.
-  requestAnimationFrame(() => { if (activePanel === 'terminal') pty?.terminal.focus(); });
+  requestAnimationFrame(() => { pty?.terminal.focus(); });
 }
 
 async function refreshGitIdentity(): Promise<void> {
@@ -1559,7 +1553,10 @@ async function initialize(): Promise<void> {
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
+    // switchPanel() records an expanded sidebar, so read the saved state first.
+    const sidebarWasCollapsed = localStorage.getItem('moderado-sidebar-collapsed') === 'true';
     switchPanel(defaultPanel());
+    if (sidebarWasCollapsed) setSidebarCollapsed(true);
     if (activeKind === 'work') {
       const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
       if (restoredTask) await selectWorkTask(restoredTask.id, false);
@@ -1622,16 +1619,14 @@ $<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel
 document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
   button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
 });
-document.querySelectorAll<HTMLButtonElement>('.activity-button').forEach((button) => {
-  button.addEventListener('click', () => {
-    const page = button.dataset.page as AppPage | undefined;
-    if (page) { switchPage(page); return; }
-    const view = button.dataset.view;
-    // Switch the tab first so the rail's selected state is computed against it.
-    if (view) switchWorkspaceView(parseWorkspaceView(view));
-    switchPanel(button.dataset.panel as SidebarPanel);
-  });
+document.querySelectorAll<HTMLButtonElement>('.sidebar-tab').forEach((button) => {
+  button.addEventListener('click', () => switchPanel(button.dataset.panel as SidebarPanel));
 });
+$('sidebar-toggle').addEventListener('click', () => {
+  const collapsed = document.querySelector<HTMLElement>('.app')?.classList.contains('sidebar-collapsed') ?? false;
+  setSidebarCollapsed(!collapsed);
+});
+$('preview-back').addEventListener('click', () => { switchPanel('workspace'); switchWorkspaceView('explorer'); });
 document.querySelectorAll<HTMLButtonElement>('.panel-tab').forEach((tab) => {
   tab.addEventListener('click', () => switchWorkspaceView(parseWorkspaceView(tab.dataset.view ?? null)));
 });
@@ -2128,17 +2123,6 @@ $('delete-session').addEventListener('click', async () => {
 
 $('selected-model').addEventListener('click', () => switchPage('settings'));
 $('selected-model').style.cursor = 'pointer';
-document.querySelectorAll<HTMLElement>('.panel-heading').forEach((heading) => {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.textContent = '◀';
-  btn.className = 'text-button panel-close';
-  btn.setAttribute('aria-label', 'Close side panel');
-  btn.title = 'Close side panel';
-  btn.style.marginLeft = 'auto';
-  btn.addEventListener('click', closePanel);
-  heading.append(btn);
-});
 const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
   const id = payload.session_id;
   if (payload.kind === 'usage') {

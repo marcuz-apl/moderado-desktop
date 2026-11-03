@@ -4,22 +4,24 @@ import { test } from 'node:test';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('every view lives in the left rail; nothing floats on the right', async () => {
+test('the shell has one left panel, one right monitor, and no activity rail', async () => {
   const html = await read('index.html');
+  assert.doesNotMatch(html, /class="activity-bar"|class="activity-button"/, 'the icon rail is gone');
+  const tabs = [...html.matchAll(/class="sidebar-tab[^"]*" data-panel="([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['library', 'workspace', 'schedules', 'profile']);
   const panels = [...html.matchAll(/data-panel-content="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(panels, ['library', 'workspace', 'preview', 'terminal', 'schedules', 'profile']);
-  // Git is its own button that opens the Workspace panel on its Changes tab.
-  assert.match(html, /data-panel="workspace" data-view="changes"[^>]*aria-label="Git"/);
-  assert.doesNotMatch(html, /class="right-panel"|right-launcher|topbar-icon/, 'no right-hand surface');
+  assert.deepEqual(panels, ['library', 'workspace', 'preview', 'schedules', 'profile']);
+  assert.match(html, /id="sidebar-toggle"[^>]*aria-expanded="true"/);
+  assert.match(html, /id="tools-toggle"[^>]*aria-haspopup="menu"/);
   assert.match(html, /<section class="sidebar-panel" data-panel-content="preview">/);
-  assert.match(html, /<section class="sidebar-panel" data-panel-content="terminal">/);
 });
 
 test('the side panel can be widened by dragging its edge', async () => {
   const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src/renderer/style.css')]);
   assert.match(html, /id="sidebar-resizer"[^>]*role="separator"/);
   // The width is a variable so a drag is one property write, not a layout rewrite.
-  assert.match(style, /\.app\{grid-template-columns:52px var\(--sidebar-width,260px\) minmax\(0,1fr\)/);
+  assert.match(style, /\.app\{grid-template-columns:var\(--sidebar-width,280px\) minmax\(0,1fr\)/);
+  assert.match(style, /\.app\.sidebar-collapsed\{grid-template-columns:0 minmax\(0,1fr\)\}/);
   assert.match(style, /\.sidebar-resizer\{position:absolute;[^}]*cursor:col-resize/);
   assert.match(main, /--sidebar-width/);
   assert.match(main, /localStorage\.setItem\(sidebarWidthKey/, 'the width is remembered');

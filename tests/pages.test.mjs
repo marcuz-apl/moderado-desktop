@@ -43,17 +43,17 @@ test('the About card carries the copyright on its bottom edge', async () => {
   assert.match(theme, /:root\[data-theme="light"\] \.about-copyright\{color:#536b77\}/);
 });
 
-test('the rail names the page Docs', async () => {
+test('the Tools menu names the Docs and Settings pages', async () => {
   const html = await readHtml();
-  const button = html.match(/<button class="activity-button" data-page="docs"[^>]*>/)?.[0] ?? '';
-  assert.match(button, /aria-label="Docs"/);
-  assert.match(button, /title="Docs"/);
+  assert.match(html, /id="tools-menu"[\s\S]*data-tool="docs"/);
+  assert.match(html, /id="tools-menu"[\s\S]*data-tool="settings"/);
   assert.match(html, /<h1>Docs<\/h1>/);
+  assert.match(html, /<h1>Settings<\/h1>/);
 });
 
 test('page mode drops the sidebar and the conversation', async () => {
   const style = await read('src/renderer/style.css');
-  assert.match(style, /\.app\.page-mode\{grid-template-columns:52px minmax\(0,1fr\)\}/);
+  assert.match(style, /\.app\.page-mode\{grid-template-columns:minmax\(0,1fr\)\}/);
   assert.match(style, /\.app\.page-mode \.sidebar\{display:none\}/);
   assert.match(style, /\.main\.page-mode>\.topbar,\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
   assert.match(style, /\.page\.active\{display:block\}/);
@@ -80,9 +80,10 @@ test('settings cards stack in three tight columns', async () => {
   assert.match(style, /@media\(max-width:1000px\)\{\.page-body\{flex-direction:column;align-items:stretch\}\.page-col\{display:contents\}\}/);
 });
 
-test('rail buttons open pages and panels respectively', async () => {
+test('the Tools menu opens pages and panels', async () => {
   const main = await readMain();
-  assert.match(main, /const page = button\.dataset\.page as AppPage \| undefined;/);
-  assert.match(main, /if \(page\) \{ switchPage\(page\); return; \}/);
-  assert.match(main, /setPageMode\(null\);/);
+  assert.match(main, /function runTool\(action: ToolAction\): void/);
+  assert.match(main, /if \(action === 'settings'\) \{ switchPage\('settings'\); return; \}/);
+  assert.match(main, /if \(action === 'docs'\) \{ switchPage\('docs'\); return; \}/);
+  assert.doesNotMatch(main, /\.activity-button/);
 });
