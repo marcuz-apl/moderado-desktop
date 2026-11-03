@@ -27,6 +27,7 @@
         <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20 13.5A8 8 0 0 1 10.5 4a8.5 8.5 0 1 0 9.5 9.5Z"/></symbol>
         <symbol id="icon-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
         <symbol id="icon-tools" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+        <symbol id="icon-collapse" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
       </svg>
       <div class="left-shell">
         <header class="shell-head">
@@ -62,21 +63,6 @@
             <div class="session-actions"><button id="new-session" type="button" hidden>New Session</button><button id="rename-session" type="button">Rename</button><button id="delete-session" type="button">Delete</button></div>
           </div>
           <div class="topbar-controls">
-            <div class="tools-wrap">
-              <button id="tools-toggle" class="topbar-toggle" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tools-menu" aria-label="Tools" title="Tools"><svg aria-hidden="true"><use href="#icon-tools"/></svg></button>
-              <div id="tools-menu" class="tools-menu" role="menu" aria-label="Tools" hidden>
-                <p class="menu-label" role="presentation">Panels</p>
-                <button type="button" role="menuitem" data-tool="files">File browser</button>
-                <button type="button" role="menuitemcheckbox" data-tool="task-monitor" aria-checked="false">Task monitor</button>
-                <button type="button" role="menuitemcheckbox" data-tool="terminal-panel" aria-checked="false">Terminal panel</button>
-                <p class="menu-label" role="presentation">Open in</p>
-                <button type="button" role="menuitem" data-tool="vscode">Open in VS Code</button>
-                <button type="button" role="menuitem" data-tool="system-terminal">Open system terminal</button>
-                <p class="menu-label" role="presentation">App</p>
-                <button type="button" role="menuitem" data-tool="settings">Settings</button>
-                <button type="button" role="menuitem" data-tool="docs">Docs</button>
-              </div>
-            </div>
             <div class="mode-control" role="group" aria-label="Agent mode"><button id="plan-mode" type="button" aria-pressed="false">Plan</button><button id="act-mode" class="selected" type="button" aria-pressed="true">Act</button></div>
             <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme" title="Light, follows local time — switch to dark"><svg class="theme-sun" aria-hidden="true"><use href="#icon-sun"/></svg><svg class="theme-moon" aria-hidden="true"><use href="#icon-moon"/></svg></button>
           </div>
@@ -131,8 +117,16 @@
       </main>
       <aside id="task-monitor" class="task-monitor" aria-label="Task monitor" hidden>
         <header class="monitor-head">
-          <div><p class="eyebrow">TASK</p><h2>Monitor</h2></div>
-          <button id="task-monitor-close" class="icon-action" type="button" aria-label="Close task monitor" title="Close task monitor">×</button>
+          <div class="tools-wrap">
+            <button id="tools-toggle" class="monitor-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tools-menu" aria-label="Tools" title="Tools"><svg aria-hidden="true"><use href="#icon-tools"/></svg></button>
+            <div id="tools-menu" class="tools-menu" role="menu" aria-label="Tools" hidden>
+              <button type="button" role="menuitem" data-tool="files">File browser</button>
+              <button type="button" role="menuitem" data-tool="system-terminal">Open system terminal</button>
+              <button type="button" role="menuitem" data-tool="vscode">Open in VS Code</button>
+            </div>
+          </div>
+          <button id="terminal-panel" class="monitor-button" type="button" aria-pressed="false" aria-label="Open terminal panel" title="Open terminal panel"><svg aria-hidden="true"><use href="#icon-terminal"/></svg></button>
+          <button id="task-monitor-close" class="monitor-button" type="button" aria-label="Collapse task monitor" title="Collapse task monitor"><svg aria-hidden="true"><use href="#icon-collapse"/></svg></button>
         </header>
         <section class="monitor-section monitor-updates">
           <header><h3>Updates</h3></header>
@@ -147,6 +141,7 @@
           <div id="monitor-artifacts" class="monitor-list"></div>
         </section>
       </aside>
+      <button id="task-monitor-open" class="monitor-edge" type="button" aria-label="Open task monitor" title="Open task monitor" hidden><svg aria-hidden="true"><use href="#icon-panel"/></svg></button>
     </div>
     <div id="explorer-context-menu" class="explorer-context-menu" role="menu" aria-label="File and folder actions" hidden>
       <button type="button" role="menuitem" data-explorer-action="new-file">New File</button>

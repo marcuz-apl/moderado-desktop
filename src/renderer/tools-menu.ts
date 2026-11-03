@@ -1,24 +1,12 @@
-export type ToolAction =
-  | 'files'
-  | 'task-monitor'
-  | 'terminal-panel'
-  | 'vscode'
-  | 'system-terminal'
-  | 'settings'
-  | 'docs';
-
-export type ToolGroup = 'panels' | 'open-in' | 'app';
+export type ToolAction = 'files' | 'terminal-panel' | 'vscode' | 'system-terminal';
 export type ToolContext = { kind: 'work' | 'code'; hasWorkspace: boolean };
-export type ToolItem = { action: ToolAction; label: string; group: ToolGroup; checkbox: boolean };
+export type ToolItem = { action: ToolAction; label: string };
 
+/** The Right Pane menu: the three things that are not rail destinations. */
 export const TOOL_ITEMS: readonly ToolItem[] = [
-  { action: 'files', label: 'File browser', group: 'panels', checkbox: false },
-  { action: 'task-monitor', label: 'Task monitor', group: 'panels', checkbox: true },
-  { action: 'terminal-panel', label: 'Terminal panel', group: 'panels', checkbox: true },
-  { action: 'vscode', label: 'Open in VS Code', group: 'open-in', checkbox: false },
-  { action: 'system-terminal', label: 'Open system terminal', group: 'open-in', checkbox: false },
-  { action: 'settings', label: 'Settings', group: 'app', checkbox: false },
-  { action: 'docs', label: 'Docs', group: 'app', checkbox: false },
+  { action: 'files', label: 'File browser' },
+  { action: 'system-terminal', label: 'Open system terminal' },
+  { action: 'vscode', label: 'Open in VS Code' },
 ];
 
 /** A disabled item still renders; the reason becomes its tooltip. */

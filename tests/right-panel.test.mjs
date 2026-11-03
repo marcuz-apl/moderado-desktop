@@ -87,17 +87,23 @@ test('selecting a file opens the Preview sub-view instead of a dialog', async ()
   assert.match(main, /pty\.terminal\.options\.theme = terminalTheme\(\)/, 'a theme switch repaints the shell');
 });
 
-test('the task monitor is the only right-hand surface', async () => {
+test('the Right Pane is the Task Monitor behind three controls', async () => {
   const [html, style, main] = await Promise.all([read('index.html'), read('src/renderer/style.css'), read('src/renderer/main.ts')]);
   assert.match(html, /<aside id="task-monitor" class="task-monitor"[^>]*hidden/);
-  const monitor = html.slice(html.indexOf('id="task-monitor"'), html.indexOf('</aside>', html.indexOf('id="task-monitor"')));
+  const start = html.indexOf('id="task-monitor"');
+  const monitor = html.slice(start, html.indexOf('</aside>', start));
   assert.match(monitor, /<h3>Updates<\/h3>/);
   assert.match(monitor, /<h3>Background processes<\/h3>/);
   assert.match(monitor, /<h3>Artifacts<\/h3>/);
   assert.ok(monitor.indexOf('Updates') < monitor.indexOf('Background processes'));
   assert.ok(monitor.indexOf('Background processes') < monitor.indexOf('Artifacts'));
-  assert.match(html, /data-tool="task-monitor"/);
-  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\) var\(--task-monitor-width,320px\)\}/);
-  assert.match(main, /function setTaskMonitor\(open: boolean\)/);
+  assert.doesNotMatch(monitor, /<h2>/, 'the header has no title text');
+  const controls = [...monitor.matchAll(/id="(tools-toggle|terminal-panel|task-monitor-close)"/g)].map((match) => match[1]);
+  assert.deepEqual(controls, ['tools-toggle', 'terminal-panel', 'task-monitor-close']);
+  assert.match(html, /id="task-monitor-open"[^>]*aria-label="Open task monitor"[^>]*hidden/);
+  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\) 320px\}/);
+  assert.match(style, /\.monitor-head\{[^}]*justify-content:flex-end/);
+  assert.match(main, /function setTaskMonitor\(open: boolean, focus = false\): void/);
   assert.match(main, /function renderTaskMonitor\(\): void/);
+  assert.match(main, /HTMLButtonElement>\('terminal-panel'\)/, 'the terminal toggle reflects the drawer');
 });

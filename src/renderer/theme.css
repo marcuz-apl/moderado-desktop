@@ -160,21 +160,22 @@
 :root[data-theme="light"] .git-actions input{background:var(--light-surface);border-color:#a9bec5;color:#203744}
 :root[data-theme="light"] .sidebar-resizer:hover,:root[data-theme="light"] .sidebar-resizer:focus-visible,:root[data-theme="light"] .sidebar-resizer.dragging{background:#08766d44}
 
-/* The activity rail shell: the Tools toggle, the drawer, the Tools menu,
-   the task monitor. */
-:root[data-theme="light"] .topbar-toggle{background:#e3eff1;border-color:var(--light-border);color:#4c6571}
-:root[data-theme="light"] .topbar-toggle:hover{border-color:var(--light-accent);color:#123f42}
+/* The activity rail shell: the Right Pane header, the drawer, the Tools menu,
+   the task monitor, the edge tab. */
 :root[data-theme="light"] .terminal-drawer{background:var(--light-panel);border-color:var(--light-border)}
 :root[data-theme="light"] .terminal-head{border-color:var(--light-border)}
 :root[data-theme="light"] .terminal-head h2{color:#183441}
 :root[data-theme="light"] .terminal-head .hint{color:var(--light-muted)}
 :root[data-theme="light"] .tools-menu{background:var(--light-surface);border-color:var(--light-border);box-shadow:0 10px 28px #20374433}
-:root[data-theme="light"] .menu-label{color:#526e79}
 :root[data-theme="light"] .tools-menu button{color:#203744}
 :root[data-theme="light"] .tools-menu button:hover:not(:disabled){background:#dbeaec;color:#134846}
 :root[data-theme="light"] .tools-menu button:disabled{color:#5d7480}
 :root[data-theme="light"] .task-monitor{background:var(--light-panel);border-color:var(--light-border)}
-:root[data-theme="light"] .monitor-head h2{color:#183441}
+:root[data-theme="light"] .monitor-head{border-color:var(--light-border)}
+:root[data-theme="light"] .monitor-button{background:#e3eff1;border-color:var(--light-border);color:#4c6571}
+:root[data-theme="light"] .monitor-button[aria-pressed="true"]{border-color:var(--light-accent);color:var(--light-accent)}
+:root[data-theme="light"] .monitor-edge{background:var(--light-panel);border-color:var(--light-border);color:#4c6571}
+:root[data-theme="light"] .monitor-edge:hover{color:#134846;border-color:var(--light-accent)}
 :root[data-theme="light"] .monitor-section{border-color:var(--light-border)}
 :root[data-theme="light"] .monitor-section h3{color:#45616c}
 :root[data-theme="light"] .monitor-item{background:var(--light-surface);border-color:var(--light-border);color:#203744}

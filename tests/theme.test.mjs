@@ -133,7 +133,8 @@ test('the shell surfaces added after the first light pass have light counterpart
   for (const selector of [
     '.left-shell', '.shell-head', '.rail', '.rail-tab', '.rail-tab.selected',
     '.terminal-drawer', '.terminal-head', '.tools-menu',
-    '.task-monitor', '.monitor-section', '.monitor-section h3',
+    '.task-monitor', '.monitor-head', '.monitor-button', '.monitor-edge',
+    '.monitor-section', '.monitor-section h3',
     '.monitor-item', '.monitor-item strong', '.monitor-item span', '.monitor-item.error',
     '.monitor-item.running', '.monitor-artifact', '.monitor-artifact:hover',
   ]) {

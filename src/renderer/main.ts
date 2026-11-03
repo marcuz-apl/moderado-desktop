@@ -1009,13 +1009,16 @@ async function refreshSchedules(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
-function setTaskMonitor(open: boolean): void {
+function setTaskMonitor(open: boolean, focus = false): void {
   taskMonitorOpen = open;
   document.querySelector<HTMLElement>('.app')?.classList.toggle('task-monitor-open', open);
   $('task-monitor').toggleAttribute('hidden', !open);
+  $('task-monitor-open').toggleAttribute('hidden', open);
+  closeToolsMenu();
   try { localStorage.setItem('moderado-task-monitor', String(open)); } catch { /* applies for this run */ }
   syncToolMenu();
   if (open) renderTaskMonitor();
+  if (focus) (open ? $('task-monitor-close') : $('task-monitor-open')).focus();
 }
 
 function monitorEmpty(text: string): HTMLParagraphElement {
@@ -1213,11 +1216,13 @@ function syncToolMenu(): void {
     button.disabled = reason !== null;
     button.toggleAttribute('aria-disabled', reason !== null);
     button.title = reason ?? '';
-    if (button.getAttribute('role') === 'menuitemcheckbox') {
-      const checked = action === 'task-monitor' ? taskMonitorOpen : action === 'terminal-panel' ? terminalOpen : false;
-      button.setAttribute('aria-checked', String(checked));
-    }
   }
+  const terminal = $<HTMLButtonElement>('terminal-panel');
+  const terminalReason = toolDisabledReason('terminal-panel', context);
+  terminal.disabled = terminalReason !== null;
+  terminal.setAttribute('aria-disabled', String(terminalReason !== null));
+  terminal.title = terminalReason ?? (terminalOpen ? 'Close terminal panel' : 'Open terminal panel');
+  terminal.setAttribute('aria-pressed', String(terminalOpen));
 }
 
 function openToolsMenu(): void {
@@ -1244,18 +1249,13 @@ function moveToolsFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
 function runTool(action: ToolAction): void {
   closeToolsMenu(true);
   if (action === 'files') { selectLeftView('files'); return; }
-  if (action === 'task-monitor') { setTaskMonitor(!taskMonitorOpen); return; }
-  if (action === 'terminal-panel') { void setTerminalOpen(!terminalOpen); return; }
   if (action === 'vscode') {
     void invoke('open_in_editor', browserArgs()).catch((error) => setStatus(String(error)));
     return;
   }
   if (action === 'system-terminal') {
     void invoke('open_system_terminal', browserArgs()).catch((error) => setStatus(String(error)));
-    return;
   }
-  if (action === 'settings') { switchPage('settings'); return; }
-  if (action === 'docs') { switchPage('docs'); return; }
 }
 
 async function selectProject(workspace: string): Promise<void> {
@@ -1877,7 +1877,9 @@ document.querySelectorAll<HTMLButtonElement>('.rail-pages .rail-tab').forEach((b
 });
 $('preview-back').addEventListener('click', closePreview);
 $('terminal-close').addEventListener('click', () => { void setTerminalOpen(false); });
-$('task-monitor-close').addEventListener('click', () => setTaskMonitor(false));
+$('task-monitor-close').addEventListener('click', () => setTaskMonitor(false, true));
+$('task-monitor-open').addEventListener('click', () => setTaskMonitor(true, true));
+$('terminal-panel').addEventListener('click', () => { void setTerminalOpen(!terminalOpen); });
 $('tools-toggle').addEventListener('click', () => {
   if (toolsOpen) closeToolsMenu(true);
   else openToolsMenu();
