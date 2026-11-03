@@ -56,6 +56,9 @@ test('page mode drops the sidebar and the conversation', async () => {
   assert.match(style, /\.app\.page-mode\{grid-template-columns:minmax\(0,1fr\)\}/);
   assert.match(style, /\.app\.page-mode \.sidebar\{display:none\}/);
   assert.match(style, /\.main\.page-mode>\.topbar,\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
+  // The drawer is a direct child of .main too, so it must hide with the rest of
+  // page mode instead of leaving a live terminal strip under Settings and Docs.
+  assert.match(style, /\.main\.page-mode>\.terminal-drawer\{display:none\}/, 'page mode hides the terminal drawer');
   assert.match(style, /\.page\.active\{display:block\}/);
 });
 

@@ -120,3 +120,14 @@ test('a light override out-specifies the dark rule it replaces', async () => {
   assert.ok(outranks(':root[data-theme="light"] .composer-stop .stop-play', '.composer-stop .stop-play'));
   assert.ok(outranks(':root[data-theme="light"] .mention-item:hover', '.mention-item:hover'));
 });
+
+test('the shell surfaces added after the first light pass have light counterparts', async () => {
+  const theme = await readTheme();
+  // Each surface the rail removal, drawer and tools menu introduced ships dark first;
+  // without a light rule it keeps its dark chip or ink in the default daytime theme.
+  for (const selector of ['.sidebar-tab', '.terminal-drawer', '.terminal-head', '.tools-menu', '.topbar-toggle']) {
+    const escaped = selector.replace(/\./g, '\\.');
+    assert.match(theme, new RegExp(`:root\\[data-theme="light"\\] ${escaped}(?![\\w-])`), `${selector} has no light rule`);
+  }
+  assert.doesNotMatch(theme, /:root\[data-theme="light"\] \.activity-(?:bar|button)/, 'the removed rail left no light rules behind');
+});
