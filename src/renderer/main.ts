@@ -1230,6 +1230,9 @@ function openToolsMenu(): void {
   $('tools-menu').toggleAttribute('hidden', false);
   $('tools-toggle').setAttribute('aria-expanded', 'true');
   syncToolMenu();
+  // The trigger is not a menu item, so this lands on the first enabled item;
+  // an empty menu leaves focus where it is.
+  moveToolsFocus('ArrowDown');
 }
 
 function closeToolsMenu(returnFocus = false): void {

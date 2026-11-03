@@ -40,6 +40,15 @@ test('choosing a menu item returns focus to the trigger', async () => {
   assert.match(main, /function runTool\(action: ToolAction\): void \{\s*closeToolsMenu\(true\);/);
 });
 
+test('opening the menu moves focus to the first enabled item', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const open = main.slice(main.indexOf('function openToolsMenu()'), main.indexOf('function closeToolsMenu'));
+  assert.match(open, /moveToolsFocus\('ArrowDown'\)/, 'arrow keys work without tabbing first');
+  // moveToolsFocus returns early on an empty list, so a closed-out menu keeps focus.
+  assert.match(main, /const items = menuToolButtons\(\)\.filter\(\(button\) => !button\.disabled\);\s*if \(!items\.length\) return;/);
+});
+
 test('the right header renders the three controls and the three-item menu', async () => {
   const { readFile } = await import('node:fs/promises');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');

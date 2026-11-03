@@ -107,3 +107,13 @@ test('the Right Pane is the Task Monitor behind three controls', async () => {
   assert.match(main, /function renderTaskMonitor\(\): void/);
   assert.match(main, /HTMLButtonElement>\('terminal-panel'\)/, 'the terminal toggle reflects the drawer');
 });
+
+test('the edge tab mirrors the monitor open state, which survives a restart', async () => {
+  const [html, main] = await Promise.all([read('index.html'), read('src/renderer/main.ts')]);
+  assert.match(html, /id="terminal-panel"[^>]*aria-label="Terminal panel"/, 'the label names the panel instead of announcing a stale action');
+  assert.doesNotMatch(html, /aria-label="Open terminal panel"/, 'a static open label would contradict aria-pressed');
+  assert.match(main, /\$\('task-monitor-open'\)\.toggleAttribute\('hidden', open\)/, 'the edge tab hides while the monitor is open');
+  assert.match(main, /\$\('task-monitor'\)\.toggleAttribute\('hidden', !open\)/, 'the monitor shows when it is open');
+  assert.match(main, /localStorage\.setItem\('moderado-task-monitor', String\(open\)\)/, 'the open state is stored under one key');
+  assert.match(main, /localStorage\.getItem\('moderado-task-monitor'\) !== 'false'/, 'and restored on boot, open unless closed');
+});
