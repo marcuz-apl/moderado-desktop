@@ -63,7 +63,8 @@ test('typing reaches the shell the backend actually created', async () => {
   assert.doesNotMatch(keyCode, /activeSessionId/, 'the key must mirror what browserArgs sends');
   assert.match(keyFn, /browserArgs\(\)/);
   assert.match(main, /pty\.key = await invoke<string>\('terminal_open'/, 'the id the backend returns is adopted');
-  assert.match(lib, /fn terminal_open\([\s\S]*?\) -> Result<String, String>/, 'the backend reports its key');
+  const body = lib.slice(lib.indexOf('fn terminal_open('), lib.indexOf('fn terminal_write('));
+  assert.match(body, /\) -> Result<String, String>/, 'the backend reports its key');
   assert.match(lib, /terminal::key\(session_id, project_workspace, &root\)/, 'one place owns the rule');
   assert.match(terminal, /pub fn key\(/);
   assert.doesNotMatch(main, /invoke\('terminal_write'[^\n]*\.catch\(\(\) => \{\}\)/, 'a failed write is not silent');
