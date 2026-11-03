@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "moderado-desktop"
-version = "0.4.32"
+version = "0.4.33"
 dependencies = [
  "cap-std",
  "dirs 5.0.1",
