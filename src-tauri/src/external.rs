@@ -1,4 +1,4 @@
-//! Launch the workspace in an external editor or terminal.
+//! Launch the workspace in an external editor, terminal, or file browser.
 //!
 //! Programs are fixed candidates; the webview never supplies one. The workspace
 //! is passed as an argv entry, never interpolated into a shell command.
@@ -74,6 +74,25 @@ pub fn terminal_candidates(root: &Path) -> Vec<Launch> {
     candidates
 }
 
+pub fn file_browser_candidates(root: &Path) -> Vec<Launch> {
+    let arg = path_arg(root);
+    #[cfg(windows)]
+    {
+        vec![Launch::new("explorer.exe", vec![arg])]
+    }
+    #[cfg(target_os = "macos")]
+    {
+        vec![Launch::new("open", vec![arg])]
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        vec![
+            Launch::new("xdg-open", vec![arg.clone()]),
+            Launch::new("gio", vec!["open".into(), arg]),
+        ]
+    }
+}
+
 fn launch(candidates: &[Launch], missing: &str) -> Result<(), String> {
     for candidate in candidates {
         let mut command = Command::new(&candidate.program);
@@ -113,6 +132,13 @@ pub fn open_terminal(root: &Path) -> Result<(), String> {
     )
 }
 
+pub fn open_file_browser(root: &Path) -> Result<(), String> {
+    launch(
+        &file_browser_candidates(root),
+        "No supported file browser was found.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +168,26 @@ mod tests {
         }
         #[cfg(target_os = "macos")]
         assert_eq!(candidates[0].program, PathBuf::from("open"));
+    }
+
+    #[test]
+    fn file_browser_candidates_open_the_platform_file_manager() {
+        let root = Path::new("workspace");
+        let candidates = file_browser_candidates(root);
+        assert!(!candidates.is_empty());
+        #[cfg(windows)]
+        assert_eq!(candidates[0].program, PathBuf::from("explorer.exe"));
+        #[cfg(target_os = "macos")]
+        assert_eq!(candidates[0].program, PathBuf::from("open"));
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(candidates[0].program, PathBuf::from("xdg-open"));
+        for candidate in &candidates {
+            let mut expected = vec!["workspace".to_string()];
+            if candidate.program == Path::new("gio") {
+                expected.insert(0, "open".to_string());
+            }
+            assert_eq!(candidate.args, expected);
+            assert!(candidate.current_dir.is_none());
+        }
     }
 }

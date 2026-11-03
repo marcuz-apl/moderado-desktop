@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -261,6 +261,18 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
         tx.commit().map_err(|error| error.to_string())?;
     }
 
+    if version < 11 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        // The shell labels sessions by when they were created. Existing rows
+        // only know their last update, so that becomes the best available
+        // creation time instead of stamping them all with the upgrade time.
+        add_column_if_missing(&tx, "sessions", "created_at", "INTEGER NOT NULL DEFAULT 0")?;
+        tx.execute("UPDATE sessions SET created_at=updated_at WHERE created_at=0", [])
+            .map_err(|error| format!("Could not backfill session creation times: {error}"))?;
+        tx.pragma_update(None, "user_version", 11).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -473,6 +485,28 @@ mod tests {
             .unwrap()
             .iter()
             .any(|column| column == "search_json"));
+        assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn version_ten_sessions_gain_a_creation_time() {
+        let (_root, path) = temporary();
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(V1).unwrap();
+            db.execute_batch(
+                "INSERT INTO sessions (id,name,workspace,settings_json,history_json,updated_at) VALUES ('s1','Session 1','/tmp','{}','[]',1234);
+                 PRAGMA user_version=10;",
+            )
+            .unwrap();
+        }
+        let db = open(&path).unwrap();
+        let created: i64 = db
+            .query_row("SELECT created_at FROM sessions WHERE id='s1'", [], |row| row.get(0))
+            .unwrap();
+        // Older rows only know their last update, so the migration keeps that
+        // instead of stamping every session with the upgrade time.
+        assert_eq!(created, 1234);
         assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
     }
 }

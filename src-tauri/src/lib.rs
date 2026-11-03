@@ -366,6 +366,17 @@ fn open_system_terminal(
 }
 
 #[tauri::command]
+fn open_file_browser(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+) -> Result<(), String> {
+    let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
+    external::open_file_browser(&root)
+}
+
+#[tauri::command]
 fn list_project_entries(
     state: tauri::State<'_, AppState>,
     session_id: Option<String>,
@@ -1537,6 +1548,7 @@ pub fn run() {
             terminal_close,
             open_in_editor,
             open_system_terminal,
+            open_file_browser,
             rename_session,
             delete_session,
             create_schedule,

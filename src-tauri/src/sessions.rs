@@ -110,6 +110,7 @@ pub struct SessionRecord {
     pub settings: ProviderSettings,
     pub history: Vec<Value>,
     pub updated_at: i64,
+    pub created_at: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -123,6 +124,7 @@ pub struct SessionSummary {
     pub auto_approve: AutoApprovePolicy,
     pub settings: ProviderSettings,
     pub updated_at: i64,
+    pub created_at: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -308,6 +310,7 @@ impl SessionStore {
             self.connect()?.execute("INSERT OR IGNORE INTO work_tasks (id,name,workspace,updated_at) VALUES (?1,?2,?1,?3)", params![task_id, task_name, now()]).map_err(|error| format!("Could not register task folder: {error}"))?;
             Some(task_id)
         } else { None };
+        let stamp = now();
         let record = SessionRecord {
             id: new_id(),
             name: name.trim().to_owned(),
@@ -317,12 +320,13 @@ impl SessionStore {
             auto_approve: AutoApprovePolicy::for_new_session(kind),
             settings,
             history: Vec::new(),
-            updated_at: now(),
+            updated_at: stamp,
+            created_at: stamp,
         };
         let db = self.connect()?;
         db.execute(
-            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at,auto_approve_json,task_id) VALUES (?1,?2,?3,?4,?5,'[]',?6,?7,?8)",
-            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at, serde_json::to_string(&record.auto_approve).map_err(|error| error.to_string())?, task_id],
+            "INSERT INTO sessions (id,name,workspace,kind,settings_json,history_json,updated_at,auto_approve_json,task_id,created_at) VALUES (?1,?2,?3,?4,?5,'[]',?6,?7,?8,?9)",
+            params![record.id, record.name, record.workspace, record.kind.as_str(), serde_json::to_string(&record.settings).map_err(|error| error.to_string())?, record.updated_at, serde_json::to_string(&record.auto_approve).map_err(|error| error.to_string())?, task_id, record.created_at],
         ).map_err(|error| format!("Could not create session: {error}"))?;
         Ok(record)
     }
@@ -357,7 +361,7 @@ impl SessionStore {
 
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
         let db = self.connect()?;
-        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind,auto_approve_json,task_id FROM sessions ORDER BY updated_at DESC, id DESC")
+        let mut query = db.prepare("SELECT id,name,workspace,settings_json,updated_at,kind,auto_approve_json,task_id,created_at FROM sessions ORDER BY updated_at DESC, id DESC")
             .map_err(|error| error.to_string())?;
         let rows = query
             .query_map([], |row| {
@@ -370,11 +374,12 @@ impl SessionStore {
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, Option<String>>(7)?,
+                    row.get::<_, i64>(8)?,
                 ))
             })
             .map_err(|error| error.to_string())?;
         rows.map(|row| {
-            let (id, name, workspace, settings_json, updated_at, kind, auto_approve_json, task_id) =
+            let (id, name, workspace, settings_json, updated_at, kind, auto_approve_json, task_id, created_at) =
                 row.map_err(|error| error.to_string())?;
             let settings = serde_json::from_str(&settings_json)
                 .map_err(|_| "Invalid saved provider settings")?;
@@ -387,6 +392,7 @@ impl SessionStore {
                 auto_approve: serde_json::from_str(&auto_approve_json).map_err(|_| "Invalid saved approval policy")?,
                 settings,
                 updated_at,
+                created_at,
             })
         })
         .collect()
@@ -395,9 +401,9 @@ impl SessionStore {
     pub fn get(&self, id: &str) -> Result<SessionRecord, String> {
         let db = self.connect()?;
         let row = db.query_row(
-            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json,task_id FROM sessions WHERE id=?1",
+            "SELECT id,name,workspace,settings_json,history_json,updated_at,kind,auto_approve_json,task_id,created_at FROM sessions WHERE id=?1",
             [id],
-            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?)),
+            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,i64>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?, row.get::<_,i64>(9)?)),
         ).optional().map_err(|error| error.to_string())?.ok_or("Session not found")?;
         Ok(SessionRecord {
             id: row.0,
@@ -409,6 +415,7 @@ impl SessionStore {
             updated_at: row.5,
             kind: SessionKind::from_db(&row.6),
             task_id: row.8,
+            created_at: row.9,
             auto_approve: serde_json::from_str(&row.7).map_err(|_| "Invalid saved approval policy")?,
         })
     }
@@ -691,6 +698,21 @@ mod tests {
         assert_eq!(created.kind, SessionKind::Code);
         assert_eq!(created.workspace, source.workspace);
         assert_eq!(created.name, "New Session");
+    }
+
+    #[test]
+    fn a_new_session_records_its_creation_time() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("project");
+        std::fs::create_dir(&workspace).unwrap();
+        let store = SessionStore::open(root.path().join("sessions.sqlite")).unwrap();
+
+        let created = store.create(&workspace, "Project", settings()).unwrap();
+
+        assert!(created.created_at > 0);
+        assert_eq!(created.created_at, created.updated_at);
+        assert_eq!(store.get(&created.id).unwrap().created_at, created.created_at);
+        assert_eq!(store.list().unwrap()[0].created_at, created.created_at);
     }
 
     #[test]

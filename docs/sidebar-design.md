@@ -14,10 +14,10 @@ Workspace, and Right Pane.
   plus the Work/Code segmented control. Below the header the rail and the Left Pane
   are separate columns.
 - The rail's top group selects the Left Pane contents: Workspaces, Files, Git, and
-  Schedules. Its bottom group — Settings, Docs, and User (Profile) — opens each as a
+  Schedules. Its bottom group — User (Profile), Docs, and Settings — opens each as a
   full-width page; activating the active page button returns to the conversation.
-- The conversation column owns the 56 px topbar (session title, workspace context,
-  actions, Plan/Act, theme), the transcript, the composer, and a terminal drawer
+- The conversation column owns the 56 px topbar (session stamp, project or task
+  context, actions, Plan/Act (hidden in Work mode), theme), the transcript, the composer, and a terminal drawer
   below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
 - The Right Pane is the Task Monitor, open by default. At 1200 px and wider it is a
   320 px grid column; below 1200 px it overlays the workspace's right edge as
@@ -25,7 +25,7 @@ Workspace, and Right Pane.
   and the grid has no third column while overlaying. It leaves the grid when
   collapsed, and page mode also closes its column. Its 56 px header has exactly three
   controls: Tools
-  (File browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
+  (Open File Browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
   and the collapse triangle. Collapsing leaves a 24 x 64 px edge tab that reopens it.
 - Page mode hides the conversation (topbar and transcript), the composer, the drawer
   and the Right Pane, and closes the pane column, leaving the rail and Left Pane
@@ -46,7 +46,9 @@ Workspace, and Right Pane.
 
 ### Workspaces
 
-The Workspaces rail tab keeps the existing session list and New session action. Show the active session, a running indicator, and its workspace path. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
+The Workspaces rail tab keeps the existing session list and New session action. Session rows are labelled with their creation time as `YY-MM-DD HH:MM:SS` in the local zone instead of the generated `Session N` name; a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
+
+The conversation topbar reads `AGENT SESSION` above the same creation stamp. Its secondary line names the project or task, never the full folder path; the full path remains in the line's tooltip and in the Files view.
 
 ### Workspace / Project Browser
 

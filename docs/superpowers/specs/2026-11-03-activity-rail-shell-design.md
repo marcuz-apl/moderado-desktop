@@ -58,9 +58,9 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 | Button | Icon | Opens |
 | --- | --- | --- |
-| Settings | `icon-settings` | Settings page |
-| Docs | `icon-book` | Docs page |
 | User | `icon-user` | Profile page |
+| Docs | `icon-book` | Docs page |
+| Settings | `icon-settings` | Settings page |
 
 - The active page's button carries `aria-current="page"` and the selected styling.
 - Activating the already-active bottom button returns to the conversation.
@@ -70,7 +70,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 - Width 260 px by default, resizable 200-560 px with the existing 7 px handle; double-click resets to 260; arrow keys step 16 px; persists in `moderado-sidebar-width`.
 - One view at a time, selected solely by the rail. The selected rail tab is the only navigation state.
-- **Workspaces**: the current library list and its actions (New Task, Rename, Delete in Work mode; New, Open, Rename, Remove in Code mode). Heading "Workspaces".
+- **Workspaces**: the current library list and its actions (New Task, Rename, Delete in Work mode; New, Open, Rename, Remove in Code mode). Heading "Workspaces". Session rows are labelled with their creation time (`YY-MM-DD HH:MM:SS`, local zone) rather than `Session N`; a name typed through Rename wins over the stamp. The row tooltip keeps the workspace path.
 - **Files**: the current Explorer view without the Explorer/Changes/Checkpoints tab row. Selecting a file opens the Preview sub-view, which keeps the Files tab selected and offers "Back to files".
 - **Git**: branch name, Changes list, commit/push controls, Recent commits, and Checkpoints. The Changes/Checkpoints switch is a two-tab row persisted in `moderado-git-view`. A non-repository workspace keeps the current explanation.
 - **Schedules**: the current schedule list and Import transcript.
@@ -78,10 +78,10 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 ## Workspace (`.main`)
 
-- **Topbar** (56 px): session title and eyebrow, workspace context, session actions, Plan/Act control, theme toggle. The Work/Code selector, the sidebar toggle, and the Tools menu are removed from it.
+- **Topbar** (56 px): the `AGENT SESSION` eyebrow above the session's creation stamp, a secondary line naming the project or task (never the full path, which stays in its tooltip), session actions, Plan/Act control (hidden in Work mode), theme toggle. The Work/Code selector, the sidebar toggle, and the Tools menu are removed from it.
 - Transcript, empty state, composer, status, auto-approve bar, and model usage are unchanged.
 - The terminal drawer stays below the composer, Code-only, PTY kept alive while hidden. The Right Pane's terminal icon toggles the same drawer.
-- The topbar compacts below 1000 px: the workspace context line hides, while session actions stay reachable at every width so New, Rename, and Delete never disappear; the title, Plan/Act, and theme remain.
+- The topbar compacts below 1000 px: the project or task context line hides, while session actions stay reachable at every width so New, Rename, and Delete never disappear; the stamp, Plan/Act, and theme remain.
 
 ## Right Pane (`.task-monitor`)
 
@@ -90,7 +90,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
   2. **Terminal** toggle (`>_`).
   3. **Collapse** triangle (`⧉`).
 - No title text in the header. Each control is a 32 px icon button with an accessible name and tooltip.
-- **Tools menu**: File browser, Open system terminal, Open in VS Code. File browser selects the Files rail tab. Settings and Docs are not in this menu; they live at the rail bottom.
+- **Tools menu**: Open File Browser, Open system terminal, Open in VS Code. Each launches the operating system's file manager (Explorer, Finder, or the Linux file manager), terminal, or editor at the workspace root. Settings and Docs are not in this menu; they live at the rail bottom.
 - **Terminal**: toggles the drawer below the composer and reflects its state with `aria-pressed`.
 - **Collapse**: closes the pane, removes its column, and shows the edge tab. The edge tab reopens the pane and returns focus to the collapse control.
 - Body, unchanged in derivation and rendering: **Updates** (turn completion, completed tools, errors, checkpoints, newest-first), **Background processes**, **Artifacts**. Artifact rows still open the Preview sub-view.
@@ -181,6 +181,6 @@ Manual smoke:
 2. Work/Code in the merged header switches modes and panes; it is absent from the topbar.
 3. Each rail tab opens its view; Git shows Changes and Checkpoints; Files has no tab row.
 4. Settings, Docs, and Profile open as pages with the rail and Left Pane still visible; Back returns.
-5. The Right Pane's Tools menu launches VS Code and the system terminal; File browser selects Files.
+5. The Right Pane's Tools menu opens the OS file browser, VS Code, and the system terminal at the workspace root.
 6. The terminal icon toggles the drawer; the triangle collapses the pane and the edge tab reopens it after a restart.
 7. At 1180 px the Right Pane overlays; below 1000 px the topbar compacts; at 800 px the Left Pane stays at 220 px and the rail never disappears.

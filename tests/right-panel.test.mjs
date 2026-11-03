@@ -9,7 +9,7 @@ test('the shell is a rail, a Left Pane, and a Right Pane', async () => {
   const tabs = [...html.matchAll(/data-rail="([a-z-]+)"/g)].map((match) => match[1]);
   assert.deepEqual(tabs, ['workspaces', 'files', 'git', 'schedules']);
   const pages = [...html.matchAll(/data-page-link="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(pages, ['settings', 'docs', 'profile']);
+  assert.deepEqual(pages, ['profile', 'docs', 'settings']);
   const views = [...html.matchAll(/data-left-view="([a-z-]+)"/g)].map((match) => match[1]);
   assert.deepEqual(views, ['workspaces', 'files', 'git', 'schedules']);
   assert.match(html, /class="left-shell">[\s\S]*class="shell-head"/);

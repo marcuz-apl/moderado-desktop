@@ -26,6 +26,15 @@ test('Work is the default session kind and the selector toggles both ways', () =
   assert.equal(nextSessionKind('code'), 'work');
 });
 
+test('the Plan/Act selector hides in Work mode', async () => {
+  const [html, main] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.match(html, /id="agent-mode" class="mode-control"/);
+  assert.match(main, /\$\('agent-mode'\)\.toggleAttribute\('hidden', work\)/);
+});
+
 test('new session action names the selected session kind', () => {
   assert.equal(newSessionLabel('work'), '+ New Work session');
   assert.equal(newSessionLabel('code'), '+ New Code session');
@@ -52,7 +61,8 @@ test('the merged shell header holds Work/Code and the topbar does not', async ()
   const topbar = html.slice(html.indexOf('<header class="topbar">'), html.indexOf('</header>', html.indexOf('<header class="topbar">')));
   assert.doesNotMatch(topbar, /id="kind-work"|id="kind-code"|class="kind-segment"|id="sidebar-toggle"/);
   assert.match(html, /class="rail-tabs"[^>]*role="tablist"[^>]*aria-orientation="vertical"[\s\S]*data-rail="workspaces"[\s\S]*data-rail="files"[\s\S]*data-rail="git"[\s\S]*data-rail="schedules"/);
-  assert.match(html, /class="rail-pages"[\s\S]*data-page-link="settings"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="profile"/);
+  const railPages = html.slice(html.indexOf('class="rail-pages"'), html.indexOf('</aside>'));
+  assert.match(railPages, /data-page-link="profile"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="settings"/);
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
   assert.match(main, /radio\.type = 'radio'/);

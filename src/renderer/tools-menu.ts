@@ -1,10 +1,10 @@
-export type ToolAction = 'files' | 'terminal-panel' | 'vscode' | 'system-terminal';
+export type ToolAction = 'file-browser' | 'terminal-panel' | 'vscode' | 'system-terminal';
 export type ToolContext = { kind: 'work' | 'code'; hasWorkspace: boolean };
 export type ToolItem = { action: ToolAction; label: string };
 
 /** The Right Pane menu: the three things that are not rail destinations. */
 export const TOOL_ITEMS: readonly ToolItem[] = [
-  { action: 'files', label: 'File browser' },
+  { action: 'file-browser', label: 'Open File Browser' },
   { action: 'system-terminal', label: 'Open system terminal' },
   { action: 'vscode', label: 'Open in VS Code' },
 ];
@@ -14,7 +14,7 @@ export function toolDisabledReason(action: ToolAction, context: ToolContext): st
   if (action === 'terminal-panel' && context.kind !== 'code') {
     return 'Commands run in Code sessions only.';
   }
-  if ((action === 'vscode' || action === 'system-terminal') && !context.hasWorkspace) {
+  if ((action === 'vscode' || action === 'system-terminal' || action === 'file-browser') && !context.hasWorkspace) {
     return 'Select a project or task folder first.';
   }
   return null;

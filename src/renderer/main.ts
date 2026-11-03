@@ -17,7 +17,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
+import { folderContextLabel, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, sessionLabel, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
 import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
 import {
   artifactsFromActivity,
@@ -38,7 +38,7 @@ type ModelUsage = { inputTokens: number | null; outputTokens: number | null; tot
 type LocalProviderStatus = { id: ProviderId; available: boolean };
 type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'text' | 'image'; bytes: number };
 type HistoryMessage = { role: string; content?: string | Array<{ type?: string; text?: string; name?: string }>; tool_call_id?: string; tool_calls?: Array<{ id: string; function?: { name?: string } }> };
-type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; taskId: string | null; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number };
+type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; taskId: string | null; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number; createdAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
 type DisplayMessage = { role: string; content: string; toolName?: string; toolId?: string; activityState?: 'working' | 'completed' | 'attention'; createdAt?: number };
 type TurnEvent = { kind: 'text' | 'tool_started' | 'tool' | 'usage' | 'error' | 'done' | 'cancelled'; session_id: string; tool_id?: string; name?: string; value?: string; usage?: ModelUsage };
@@ -471,11 +471,11 @@ function sessionRow(session: SessionSummary, group: string): HTMLElement {
   row.className = 'selectable-session-row';
   const radio = document.createElement('input');
   radio.type = 'radio'; radio.name = group; radio.checked = session.id === activeSessionId;
-  radio.setAttribute('aria-label', `Select ${session.name}`);
+  radio.setAttribute('aria-label', `Select ${sessionLabel(session)}`);
   radio.addEventListener('change', () => { void selectSession(session.id); });
   const button = document.createElement('button'); button.type = 'button';
   button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
-  button.textContent = `${running.has(session.id) ? '● ' : ''}${session.name}`;
+  button.textContent = `${running.has(session.id) ? '● ' : ''}${sessionLabel(session)}`;
   button.title = session.workspace;
   button.addEventListener('click', () => { void selectSession(session.id); });
   row.append(button, radio); return row;
@@ -581,6 +581,9 @@ function applyKindUi(): void {
   }
   // One list holds both kinds, so only the action row follows what is selected.
   applyLibraryActions();
+  // Plan/Act changes what the agent may do in a workspace; Work tasks have no
+  // command execution, so the selector is hidden rather than disabled.
+  $('agent-mode').toggleAttribute('hidden', work);
   $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
   $('approve-command-option').toggleAttribute('hidden', work);
   $('approve-mcp-option').toggleAttribute('hidden', work);
@@ -738,7 +741,7 @@ function updateFolderContext(): void {
   const folder = currentFolder();
   const project = projects.find((item) => item.workspace === folder);
   const task = workTasks.find((item) => item.id === selectedWorkTaskId);
-  $('workspace-context').textContent = folder ?? (activeKind === 'work' ? 'Select a task to start a session.' : 'Create or open a project folder.');
+  $('workspace-context').textContent = folderContextLabel(activeKind, folder, project?.name, task?.name);
   $('workspace-context').title = folder ?? '';
   $('project-root-name').textContent = activeKind === 'work' ? task?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No task selected') : project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Project files') : 'No project selected');
 }
@@ -827,7 +830,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     rememberNavigation();
     applySessionSettings(record.settings); applyAutoApprove(record.autoApprove);
     setMode(record.kind === 'work' ? 'act' : modeBySession.get(id) ?? 'act');
-    $('session-title').textContent = record.name; $('profile-session').textContent = record.name;
+    $('session-title').textContent = sessionLabel(record); $('profile-session').textContent = sessionLabel(record);
     $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
@@ -1254,7 +1257,10 @@ function moveToolsFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
 
 function runTool(action: ToolAction): void {
   closeToolsMenu(true);
-  if (action === 'files') { selectLeftView('files'); return; }
+  if (action === 'file-browser') {
+    void invoke('open_file_browser', browserArgs()).catch((error) => setStatus(String(error)));
+    return;
+  }
   if (action === 'vscode') {
     void invoke('open_in_editor', browserArgs()).catch((error) => setStatus(String(error)));
     return;
@@ -2376,7 +2382,7 @@ $('rename-session').addEventListener('click', async () => {
   try {
     await invoke('rename_session', { sessionId: session.id, name });
     session.name = name.trim();
-    if (activeSessionId === session.id) { $('session-title').textContent = session.name; updateFolderContext(); }
+    if (activeSessionId === session.id) { $('session-title').textContent = sessionLabel(session); updateFolderContext(); }
     await refreshSummaries();
   } catch (error) { setStatus(String(error)); }
 });

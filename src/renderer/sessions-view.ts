@@ -69,6 +69,39 @@ export function projectNameFromWorkspace(workspace: string, fallback: string): s
   return name || fallback;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/** Session identity stamps use the local clock so they match the device. */
+export function sessionStamp(at: number): string {
+  const date = new Date(at * 1000);
+  return `${pad2(date.getFullYear() % 100)}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} `
+    + `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
+/** Names the shell generates are replaced by the creation stamp. */
+const AUTO_SESSION_NAME = /^(Session \d+|New Session)$/;
+
+/** A user-typed name wins; automatic names read as the creation stamp. */
+export function sessionLabel(session: { name: string; createdAt?: number }): string {
+  if (!session.createdAt) return session.name;
+  return AUTO_SESSION_NAME.test(session.name) ? sessionStamp(session.createdAt) : session.name;
+}
+
+/** The topbar names the project or task; the full path stays in its tooltip. */
+export function folderContextLabel(
+  kind: SessionKind,
+  folder: string | null,
+  projectName?: string,
+  taskName?: string,
+): string {
+  if (kind === 'work') {
+    return taskName ?? (folder ? projectNameFromWorkspace(folder, 'Task folder') : 'Select a task to start a session.');
+  }
+  return projectName ?? (folder ? projectNameFromWorkspace(folder, 'Project folder') : 'Create or open a project folder.');
+}
+
 export function projectsForSessions<T extends ProjectSessionLike>(sessions: T[]): ProjectSummary[] {
   const projects = new Map<string, ProjectSummary>();
   for (const session of sessions) {

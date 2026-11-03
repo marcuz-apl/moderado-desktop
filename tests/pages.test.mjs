@@ -46,7 +46,7 @@ test('the About card carries the copyright on its bottom edge', async () => {
 test('the rail bottom opens the Settings, Docs, and Profile pages', async () => {
   const html = await readHtml();
   const pages = html.slice(html.indexOf('class="rail-pages"'), html.indexOf('</aside>'));
-  assert.match(pages, /data-page-link="settings"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="profile"/);
+  assert.match(pages, /data-page-link="profile"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="settings"/);
   assert.match(html, /<h1>Docs<\/h1>/);
   assert.match(html, /<h1>Settings<\/h1>/);
   assert.match(html, /<h1>Profile<\/h1>/);
