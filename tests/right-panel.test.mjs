@@ -83,3 +83,18 @@ test('selecting a file opens the Preview panel instead of a dialog', async () =>
   assert.match(main, /switchPanel\('preview'\)/);
   assert.match(main, /pty\.terminal\.options\.theme = terminalTheme\(\)/, 'a theme switch repaints the shell');
 });
+
+test('the task monitor is the only right-hand surface', async () => {
+  const [html, style, main] = await Promise.all([read('index.html'), read('src/renderer/style.css'), read('src/renderer/main.ts')]);
+  assert.match(html, /<aside id="task-monitor" class="task-monitor"[^>]*hidden/);
+  const monitor = html.slice(html.indexOf('id="task-monitor"'), html.indexOf('</aside>', html.indexOf('id="task-monitor"')));
+  assert.match(monitor, /<h3>Updates<\/h3>/);
+  assert.match(monitor, /<h3>Background processes<\/h3>/);
+  assert.match(monitor, /<h3>Artifacts<\/h3>/);
+  assert.ok(monitor.indexOf('Updates') < monitor.indexOf('Background processes'));
+  assert.ok(monitor.indexOf('Background processes') < monitor.indexOf('Artifacts'));
+  assert.match(html, /data-tool="task-monitor"/);
+  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:var\(--sidebar-width,280px\) minmax\(0,1fr\) var\(--task-monitor-width,320px\)\}/);
+  assert.match(main, /function setTaskMonitor\(open: boolean\)/);
+  assert.match(main, /function renderTaskMonitor\(\): void/);
+});

@@ -19,6 +19,15 @@ import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
 import { defaultPanel, parseSessionKind, parseWorkspaceView, profileModeDescription, projectNameFromWorkspace, sessionForMode, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type SidebarPanel, type WorkspaceView, type AppPage } from './sessions-view';
 import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
+import {
+  artifactsFromActivity,
+  backgroundRows,
+  checkpointUpdates,
+  mergeUpdates,
+  shortText,
+  updatesFromActivity,
+  type MonitorRun,
+} from './task-monitor';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
@@ -136,6 +145,13 @@ const sessions = new Map<string, SessionRecord>();
 const views = new Map<string, DisplayMessage[]>();
 const running = new Set<string>();
 const scheduledPending = new Map<string, number>();
+/** What each running session is doing, for the task monitor's process rows. */
+const runInfo = new Map<string, MonitorRun>();
+/** The last list each refresh saw, so the monitor renders without a second invoke. */
+const schedulesBySession = new Map<string, Schedule[]>();
+const checkpointsBySession = new Map<string, Checkpoint[]>();
+/** The right-hand monitor, closed until the Tools menu or a stored preference asks for it. */
+let taskMonitorOpen = false;
 const approvalQueue: ApprovalEvent[] = [];
 const modeBySession = new Map<string, 'plan' | 'act'>();
 const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>();
@@ -808,6 +824,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
       else void ensureTerminal();
     }
     await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingExplorer() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
+    renderTaskMonitor();
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
   finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
@@ -908,6 +925,8 @@ async function refreshCheckpoints(): Promise<void> {
   try {
     const checkpoints = await invoke<Checkpoint[]>('list_checkpoints', { sessionId: id });
     if (id !== activeSessionId) return;
+    checkpointsBySession.set(id, checkpoints);
+    renderTaskMonitor();
     if (!checkpoints.length) { list.textContent = 'No checkpoints yet.'; return; }
     list.replaceChildren(...checkpoints.map((checkpoint) => {
       const button = document.createElement('button');
@@ -935,6 +954,8 @@ async function refreshSchedules(): Promise<void> {
   try {
     const schedules = await invoke<Schedule[]>('list_schedules', { sessionId: id });
     if (id !== activeSessionId) return;
+    schedulesBySession.set(id, schedules);
+    renderTaskMonitor();
     if (!schedules.length) { list.textContent = 'No scheduled tasks.'; return; }
     list.replaceChildren(...schedules.map((schedule) => {
       const item = document.createElement('div');
@@ -986,6 +1007,91 @@ function setSidebarCollapsed(collapsed: boolean): void {
   toggle.setAttribute('aria-label', collapsed ? 'Open side panel' : 'Close side panel');
   try { localStorage.setItem('moderado-sidebar-collapsed', String(collapsed)); } catch { /* applies for this run */ }
 }
+
+function setTaskMonitor(open: boolean): void {
+  taskMonitorOpen = open;
+  document.querySelector<HTMLElement>('.app')?.classList.toggle('task-monitor-open', open);
+  $('task-monitor').toggleAttribute('hidden', !open);
+  try { localStorage.setItem('moderado-task-monitor', String(open)); } catch { /* applies for this run */ }
+  syncToolMenu();
+  if (open) renderTaskMonitor();
+}
+
+function monitorEmpty(text: string): HTMLParagraphElement {
+  const empty = document.createElement('p');
+  empty.className = 'hint';
+  empty.textContent = text;
+  return empty;
+}
+
+function renderTaskMonitor(): void {
+  if (!taskMonitorOpen) return;
+  const id = activeSessionId;
+  const updatesList = $('monitor-updates');
+  const processesList = $('monitor-processes');
+  const artifactsList = $('monitor-artifacts');
+  if (!id) {
+    updatesList.replaceChildren(monitorEmpty('Select a session.'));
+    processesList.replaceChildren(monitorEmpty('Select a session.'));
+    artifactsList.replaceChildren(monitorEmpty('Select a session.'));
+    return;
+  }
+  const now = Date.now();
+  const updates = mergeUpdates([
+    updatesFromActivity(views.get(id) ?? [], now),
+    checkpointUpdates(checkpointsBySession.get(id) ?? []),
+  ]);
+  const artifacts = artifactsFromActivity(views.get(id) ?? [], now);
+  const processes = backgroundRows(runInfo.get(id), schedulesBySession.get(id) ?? [], now);
+
+  updatesList.replaceChildren(...(updates.length ? updates.map((update) => {
+    const item = document.createElement('div');
+    item.className = `monitor-item ${update.kind === 'error' ? 'error' : ''}`.trim();
+    const label = document.createElement('strong');
+    label.textContent = update.label;
+    const detail = document.createElement('span');
+    detail.textContent = update.detail || new Date(update.at).toLocaleTimeString();
+    item.append(label, detail);
+    return item;
+  }) : [monitorEmpty('No activity yet in this session.')]));
+
+  processesList.replaceChildren(...(processes.length ? processes.map((process) => {
+    const item = document.createElement('div');
+    item.className = `monitor-item ${process.state === 'running' ? 'running' : ''}`.trim();
+    const label = document.createElement('strong');
+    label.textContent = process.label;
+    const detail = document.createElement('span');
+    detail.textContent = process.detail;
+    item.append(label, detail);
+    return item;
+  }) : [monitorEmpty('No background work.')]));
+
+  artifactsList.replaceChildren(...(artifacts.length ? artifacts.map((artifact) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'monitor-item monitor-artifact';
+    item.textContent = artifact.path;
+    item.title = `${artifact.action} · ${artifact.path}`;
+    item.addEventListener('click', () => {
+      void previewProjectFile({ name: artifact.path.split('/').pop() ?? artifact.path, path: artifact.path, isDir: false });
+    });
+    return item;
+  }) : [monitorEmpty('No files changed yet.')]));
+}
+
+/** A running turn is both a busy flag and a labelled row; the two never drift apart. */
+function markRunning(id: string, label: string, scheduled = false, scheduleId?: string): void {
+  running.add(id);
+  runInfo.set(id, { label, startedAt: Date.now(), scheduled, scheduleId });
+  renderTaskMonitor();
+}
+
+function clearRunning(id: string): void {
+  running.delete(id);
+  runInfo.delete(id);
+  renderTaskMonitor();
+}
+
 function setPageMode(page: AppPage | null): void {
   activePage = page;
   const open = page !== null;
@@ -1059,7 +1165,7 @@ function syncToolMenu(): void {
     button.toggleAttribute('aria-disabled', reason !== null);
     button.title = reason ?? '';
     if (button.getAttribute('role') === 'menuitemcheckbox') {
-      const checked = action === 'terminal-panel' ? terminalOpen : false;
+      const checked = action === 'task-monitor' ? taskMonitorOpen : action === 'terminal-panel' ? terminalOpen : false;
       button.setAttribute('aria-checked', String(checked));
     }
   }
@@ -1089,6 +1195,7 @@ function moveToolsFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
 function runTool(action: ToolAction): void {
   closeToolsMenu();
   if (action === 'files') { switchPanel('workspace'); switchWorkspaceView('explorer'); return; }
+  if (action === 'task-monitor') { setTaskMonitor(!taskMonitorOpen); return; }
   if (action === 'terminal-panel') { void setTerminalOpen(!terminalOpen); return; }
   if (action === 'settings') { switchPage('settings'); return; }
   if (action === 'docs') { switchPage('docs'); return; }
@@ -1626,6 +1733,8 @@ async function initialize(): Promise<void> {
     const sidebarWasCollapsed = localStorage.getItem('moderado-sidebar-collapsed') === 'true';
     switchPanel(defaultPanel());
     if (sidebarWasCollapsed) setSidebarCollapsed(true);
+    const storedMonitor = localStorage.getItem('moderado-task-monitor') === 'true';
+    setTaskMonitor(storedMonitor);
     if (activeKind === 'work') {
       const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
       if (restoredTask) await selectWorkTask(restoredTask.id, false);
@@ -1697,6 +1806,7 @@ $('sidebar-toggle').addEventListener('click', () => {
 });
 $('preview-back').addEventListener('click', () => { switchPanel('workspace'); switchWorkspaceView('explorer'); });
 $('terminal-close').addEventListener('click', () => { void setTerminalOpen(false); });
+$('task-monitor-close').addEventListener('click', () => setTaskMonitor(false));
 $('tools-toggle').addEventListener('click', () => {
   if (toolsOpen) closeToolsMenu(true);
   else openToolsMenu();
@@ -2046,7 +2156,7 @@ async function removeWorkTask(task: WorkTaskRecord): Promise<void> {
   const wasSelected = selectedWorkTaskId === task.id;
   try {
     const removed = await invoke<string[]>('delete_work_task', { taskId: task.id });
-    for (const id of removed) { sessions.delete(id); views.delete(id); conversationBindings.delete(id); composerDrafts.delete(id); usageBySession.delete(id); running.delete(id); }
+    for (const id of removed) { sessions.delete(id); views.delete(id); conversationBindings.delete(id); composerDrafts.delete(id); usageBySession.delete(id); clearRunning(id); }
     lastSessionByTask.delete(task.id);
     if (removed.includes(lastSessionByKind.get('work') ?? '')) lastSessionByKind.delete('work');
     await refreshSummaries();
@@ -2223,10 +2333,10 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
     return;
   }
   if (payload.kind === 'text') addDisplay(id, 'Agent', payload.value ?? '', true);
-  else if (payload.kind === 'tool_started') setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', 'working');
-  else if (payload.kind === 'tool') setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', payload.value?.startsWith('Error:') ? 'attention' : 'completed', payload.value ?? '');
+  else if (payload.kind === 'tool_started') { setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', 'working'); renderTaskMonitor(); }
+  else if (payload.kind === 'tool') { setToolActivity(id, payload.tool_id ?? '', payload.name ?? '', payload.value?.startsWith('Error:') ? 'attention' : 'completed', payload.value ?? ''); renderTaskMonitor(); }
   else if (payload.kind === 'error') {
-    if (!scheduledPending.has(id)) running.delete(id);
+    if (!scheduledPending.has(id)) clearRunning(id);
     if (id === activeSessionId) setStatus(explainProviderError(payload.value ?? 'Turn failed.', providers.find((provider) => provider.id === activeProvider)));
   } else {
     if (payload.kind === 'cancelled') {
@@ -2238,7 +2348,7 @@ const turnListenerReady = listen<TurnEvent>('turn-event', ({ payload }) => {
         approvalDialog.close();
       }
     }
-    if (!scheduledPending.has(id)) running.delete(id);
+    if (!scheduledPending.has(id)) clearRunning(id);
     mentionFiles.clear();
     if (id === activeSessionId) setStatus(payload.kind === 'cancelled' ? 'Task stopped.' : 'Ready.');
     void refreshSession(id, true).then(async () => {
@@ -2272,20 +2382,22 @@ const checkpointListenerReady = listen<Checkpoint>('checkpoint-created', ({ payl
 
 const scheduleStartedReady = listen<ScheduleStarted>('schedule-started', ({ payload }) => {
   scheduledPending.set(payload.sessionId, (scheduledPending.get(payload.sessionId) ?? 0) + 1);
-  running.add(payload.sessionId);
+  markRunning(payload.sessionId, `Scheduled: ${shortText(payload.prompt, 60)}`, true, payload.scheduleId);
   addDisplay(payload.sessionId, 'You', `[Scheduled] ${payload.prompt}`);
   if (payload.sessionId === activeSessionId) setStatus('Scheduled task is running…');
   renderSessions();
+  renderTaskMonitor();
   updateControls();
 });
 
 const scheduleRunReady = listen<ScheduleRun>('schedule-run', ({ payload }) => {
   const remaining = (scheduledPending.get(payload.sessionId) ?? 1) - 1;
   if (remaining > 0) scheduledPending.set(payload.sessionId, remaining);
-  else { scheduledPending.delete(payload.sessionId); running.delete(payload.sessionId); }
+  else { scheduledPending.delete(payload.sessionId); clearRunning(payload.sessionId); }
   if (payload.sessionId === activeSessionId) {
     setStatus(payload.error ? `Scheduled task failed: ${payload.error}` : 'Scheduled task completed.');
     void refreshSchedules();
+    renderTaskMonitor();
   }
   renderSessions();
   updateControls();
@@ -2390,7 +2502,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
   try { id = await sessionForSubmit(activeSessionId, () => createSession(settings)); }
   catch (error) { setStatus(String(error) === 'No workspace selected' ? 'Choose a workspace to send your message.' : String(error)); return; }
   rememberPrompt(id, text);
-  running.add(id);
+  markRunning(id, `Turn: ${shortText(text, 60)}`);
   updateControls();
   renderSessions();
   try {
@@ -2432,7 +2544,7 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     if (!detail.includes('stopped by user')) addDisplay(id, 'Error', detail);
     if (id === activeSessionId) setStatus(detail.includes('stopped by user') ? 'Side question stopped.' : detail);
   } finally {
-    if (!scheduledPending.has(id)) running.delete(id);
+    if (!scheduledPending.has(id)) clearRunning(id);
     renderSessions();
     updateControls();
     if (id === activeSessionId) prompt.focus();

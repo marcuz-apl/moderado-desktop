@@ -55,6 +55,7 @@
               <div id="tools-menu" class="tools-menu" role="menu" aria-label="Tools" hidden>
                 <p class="menu-label" role="presentation">Panels</p>
                 <button type="button" role="menuitem" data-tool="files">File browser</button>
+                <button type="button" role="menuitemcheckbox" data-tool="task-monitor" aria-checked="false">Task monitor</button>
                 <button type="button" role="menuitemcheckbox" data-tool="terminal-panel" aria-checked="false">Terminal panel</button>
                 <p class="menu-label" role="presentation">App</p>
                 <button type="button" role="menuitem" data-tool="settings">Settings</button>
@@ -112,7 +113,24 @@
 </div>
 </div></section><section class="page" data-page="docs" id="page-docs"><header class="page-head"><div><p class="eyebrow">MANUAL</p><h1>Docs</h1><p class="hint">Getting started, reference, and license for this build.</p></div><button id="close-docs" class="text-button" type="button">Back to conversation</button></header><div class="page-body docs-body"><article id="docs-content" class="markdown-body"></article></div></section>
       </main>
-      
+      <aside id="task-monitor" class="task-monitor" aria-label="Task monitor" hidden>
+        <header class="monitor-head">
+          <div><p class="eyebrow">TASK</p><h2>Monitor</h2></div>
+          <button id="task-monitor-close" class="icon-action" type="button" aria-label="Close task monitor" title="Close task monitor">×</button>
+        </header>
+        <section class="monitor-section monitor-updates">
+          <header><h3>Updates</h3></header>
+          <div id="monitor-updates" class="monitor-list"></div>
+        </section>
+        <section class="monitor-section monitor-processes">
+          <header><h3>Background processes</h3></header>
+          <div id="monitor-processes" class="monitor-list"></div>
+        </section>
+        <section class="monitor-section monitor-artifacts">
+          <header><h3>Artifacts</h3></header>
+          <div id="monitor-artifacts" class="monitor-list"></div>
+        </section>
+      </aside>
     </div>
     <div id="explorer-context-menu" class="explorer-context-menu" role="menu" aria-label="File and folder actions" hidden>
       <button type="button" role="menuitem" data-explorer-action="new-file">New File</button>
