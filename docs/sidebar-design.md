@@ -1,4 +1,4 @@
-# Activity Bar, Project Browser, and Source Control Design
+# Workbench Layout, Project Browser, and Source Control Design
 
 ## Intent
 
@@ -9,7 +9,7 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 - Revised 2026-11-03: the 52 px Activity Bar is removed. The left panel is the only
   navigation surface and carries a compact tab row: Sessions, Files, Schedules, and
   Profile. Preview opens from Files and keeps the Files tab selected.
-- The left panel is resizable from 240 to 420 px and collapses from the topbar toggle.
+- The left panel is resizable from 200 to 560 px (260 px default) and collapses from the topbar toggle.
 - The conversation column owns the transcript, composer, and a terminal drawer below
   the composer. The drawer is Code-only and keeps its PTY alive while hidden.
 - The right Task Monitor is a collapsible sidecar with Updates, Background processes,
@@ -47,7 +47,7 @@ Keep the Profile panel available in both modes. In Work mode, show a local profi
 
 ### Settings
 
-Group Connection and Web Search controls under the bottom gear icon, followed by an About section with the app's version and build. Both existing settings sections retain their validation, keychain handling, and per-session behavior. Navigating away must not silently discard typed provider drafts; secret input fields remain transient and are cleared after saving or changing sessions.
+Settings opens as a full-width page from the Tools menu; group the Connection and Web Search controls there with an About section that carries the app's version and build. Both existing settings sections retain their validation, keychain handling, and per-session behavior. Navigating away must not silently discard typed provider drafts; secret input fields remain transient and are cleared after saving or changing sessions.
 
 ## Backend contracts
 
@@ -58,7 +58,7 @@ Group Connection and Web Search controls under the bottom gear icon, followed by
 ## Verification
 
 - Rust tests cover folder ordering, workspace path and symlink rejection, file preview bounds, a local Git repository with a commit and a dirty file, and rejection of a nested workspace in a parent repository.
-- Frontend checks cover Activity Bar selection and keyboard labels, tree expand/collapse, file preview, Settings visibility, empty states, and source control history rendering. `tests/tools-menu.test.mjs` covers the Tools menu actions and keyboard navigation, and `tests/task-monitor.test.mjs` covers the monitor sections and their update merging.
+- Frontend checks cover the left-panel tabs and the sidebar toggle, Tools menu actions and keyboard navigation, terminal drawer placement and page-mode hiding, Task Monitor derivation and its surfaces, and the theme counterparts of the new surfaces. `tests/right-panel.test.mjs` and `tests/pages.test.mjs` cover the shell geometry and page mode, `tests/tools-menu.test.mjs` covers the Tools menu actions and keyboard navigation, `tests/task-monitor.test.mjs` covers the monitor sections and their update merging, and `tests/theme.test.mjs` covers the light counterparts.
 - Run `npm test`, `npm run lint`, `npm run build`, and a Tauri startup check. Inspect the layout at the minimum window width and at a wide desktop width.
 
 ## Reference
