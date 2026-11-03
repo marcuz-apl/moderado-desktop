@@ -19,6 +19,9 @@ impl Launch {
         Self { program: program.into(), args, current_dir: None, new_console: false }
     }
 
+    // Only the terminal fallbacks that cannot take a working-directory flag use
+    // this; macOS launches Terminal.app by path, so the method is absent there.
+    #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
     fn in_dir(mut self, root: &Path) -> Self {
         self.current_dir = Some(root.to_path_buf());
         self
@@ -44,9 +47,11 @@ pub fn editor_candidates(root: &Path) -> Vec<Launch> {
         candidates.push(Launch::new("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", vec![arg.clone()]));
         candidates.push(Launch::new("/Applications/Cursor.app/Contents/Resources/app/bin/cursor", vec![arg.clone()]));
     }
-    candidates.push(Launch::new("code", vec![arg.clone()]));
-    candidates.push(Launch::new("code-insiders", vec![arg.clone()]));
-    candidates.push(Launch::new("cursor", vec![arg]));
+    candidates.extend([
+        Launch::new("code", vec![arg.clone()]),
+        Launch::new("code-insiders", vec![arg.clone()]),
+        Launch::new("cursor", vec![arg]),
+    ]);
     candidates
 }
 
