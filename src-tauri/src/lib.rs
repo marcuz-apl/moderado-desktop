@@ -4,6 +4,7 @@ pub mod approval_policy;
 pub mod checkpoints;
 pub mod command;
 pub mod db;
+pub mod external;
 pub mod lsp;
 pub mod mcp;
 pub mod provider;
@@ -340,6 +341,28 @@ fn browser_workspace(state: &AppState, session_id: Option<String>, project_works
     }
     let id = session_id.ok_or("Select a task or project first")?;
     Ok(PathBuf::from(state.store.get(&id)?.workspace))
+}
+
+#[tauri::command]
+fn open_in_editor(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+) -> Result<(), String> {
+    let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
+    external::open_editor(&root)
+}
+
+#[tauri::command]
+fn open_system_terminal(
+    state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    project_workspace: Option<String>,
+    work_task_id: Option<String>,
+) -> Result<(), String> {
+    let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
+    external::open_terminal(&root)
 }
 
 #[tauri::command]
@@ -1512,6 +1535,8 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_close,
+            open_in_editor,
+            open_system_terminal,
             rename_session,
             delete_session,
             create_schedule,
