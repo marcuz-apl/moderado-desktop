@@ -5,16 +5,23 @@ import { folderContextLabel, sessionLabel, sessionStamp } from '../src/renderer/
 
 const stamp = new Date(2020, 9, 29, 10, 23, 54).getTime() / 1000;
 
-test('session stamps read as a local YY-MM-DD HH:MM:SS clock time', () => {
-  assert.equal(sessionStamp(stamp), '20-10-29 10:23:54');
+test('session stamps read as a local YYYY-MM-DD HH:MM:SS clock time', () => {
+  assert.equal(sessionStamp(stamp), '2020-10-29 10:23:54');
   const early = new Date(2024, 0, 2, 3, 4, 5).getTime() / 1000;
-  assert.equal(sessionStamp(early), '24-01-02 03:04:05');
+  assert.equal(sessionStamp(early), '2024-01-02 03:04:05');
 });
 
 test('automatic session names read as their creation stamp', () => {
-  assert.equal(sessionLabel({ name: 'Session 1', createdAt: stamp }), '20-10-29 10:23:54');
-  assert.equal(sessionLabel({ name: 'Session 12', createdAt: stamp }), '20-10-29 10:23:54');
-  assert.equal(sessionLabel({ name: 'New Session', createdAt: stamp }), '20-10-29 10:23:54');
+  assert.equal(sessionLabel({ name: 'Session 1', createdAt: stamp }), '2020-10-29 10:23:54');
+  assert.equal(sessionLabel({ name: 'Session 12', createdAt: stamp }), '2020-10-29 10:23:54');
+  assert.equal(sessionLabel({ name: 'New Session', createdAt: stamp }), '2020-10-29 10:23:54');
+});
+
+test('a session created with its stamp keeps that stamp as its name', () => {
+  assert.equal(
+    sessionLabel({ name: '2026-11-04 07:16:23', createdAt: stamp }),
+    '2026-11-04 07:16:23',
+  );
 });
 
 test('a renamed session keeps the name the user typed', () => {
@@ -41,7 +48,23 @@ test('the Workspaces rows and the topbar headline show the session stamp', async
   assert.match(main, /\$\('session-title'\)\.textContent = sessionLabel\(record\)/);
 });
 
-test('the topbar keeps the AGENT SESSION eyebrow above the stamp', async () => {
+test('a new Code session sends its creation stamp as the session name', async () => {
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(
+    main,
+    /invoke<SessionRecord>\('create_session_in_project', \{ projectWorkspace: workspace, settings, name: sessionStamp\(Date\.now\(\) \/ 1000\) \}\)/,
+  );
+});
+
+test('the topbar markup keeps the label attached to the session title', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /<p class="eyebrow">AGENT SESSION<\/p><h1 id="session-title">/);
+});
+
+test('the topbar lays the label and the stamp out on one row', async () => {
+  const css = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.topbar \.topbar-title\{display:flex;align-items:baseline;gap:10px/);
+  assert.match(css, /\.topbar \.topbar-title \.eyebrow\{[^}]*font-size:12px/);
+  assert.match(css, /\.topbar \.topbar-title \.eyebrow::after\{content:":"\}/);
+  assert.match(css, /\.topbar \.topbar-title h1\{[^}]*font-size:13px/);
 });

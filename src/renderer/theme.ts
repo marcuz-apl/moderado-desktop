@@ -15,6 +15,8 @@ export function resolveTheme(preference: ThemePreference, now: Date): Theme {
   return hour >= LIGHT_FROM_HOUR && hour < LIGHT_UNTIL_HOUR ? 'light' : 'dark';
 }
 
-export function oppositeTheme(theme: Theme): Theme {
-  return theme === 'light' ? 'dark' : 'light';
+/** The topbar control cycles auto → light → dark → auto, like Lomora's. */
+export function nextThemePreference(preference: ThemePreference): ThemePreference {
+  if (preference === 'auto') return 'light';
+  return preference === 'light' ? 'dark' : 'auto';
 }

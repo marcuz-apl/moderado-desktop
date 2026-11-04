@@ -46,7 +46,7 @@ Workspace, and Right Pane.
 
 ### Workspaces
 
-The Workspaces rail tab keeps the existing session list and New session action. Session rows are labelled with their creation time as `YY-MM-DD HH:MM:SS` in the local zone instead of the generated `Session N` name; a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
+The Workspaces rail tab keeps the existing session list and New session action. A new Code session is named with its creation time as `YYYY-MM-DD HH:MM:SS` in the local zone; older auto-named sessions are labelled the same way, and a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
 
 The conversation topbar reads `AGENT SESSION` above the same creation stamp. Its secondary line names the project or task, never the full folder path; the full path remains in the line's tooltip and in the Files view.
 

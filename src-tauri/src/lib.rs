@@ -183,16 +183,14 @@ async fn create_session(
 fn create_session_in_project(
     state: tauri::State<'_, AppState>,
     project_workspace: String,
+    name: String,
     settings: ProviderSettings,
 ) -> Result<SessionRecord, String> {
-    let existing = state.store.list()?;
-    let mut number = 1;
-    while existing.iter().any(|session| session.workspace == project_workspace && session.name == format!("Session {number}")) { number += 1; }
-    state.store.create_session_for_project(
-        &project_workspace,
-        &format!("Session {number}"),
-        settings,
-    )
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Session name cannot be empty".into());
+    }
+    state.store.create_session_for_project(&project_workspace, name, settings)
 }
 
 #[tauri::command]

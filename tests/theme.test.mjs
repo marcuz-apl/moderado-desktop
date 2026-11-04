@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { oppositeTheme, parseThemePreference, resolveTheme } from '../src/renderer/theme.ts';
+import { nextThemePreference, parseThemePreference, resolveTheme } from '../src/renderer/theme.ts';
 
 test('auto theme follows local morning and evening boundaries', () => {
   assert.equal(resolveTheme('auto', new Date(2026, 9, 26, 6, 59)), 'dark');
@@ -23,10 +23,23 @@ test('unknown saved preference falls back to auto', () => {
   assert.equal(parseThemePreference(null), 'auto');
 });
 
-test('the icon toggle flips between light and dark', () => {
-  assert.equal(oppositeTheme('light'), 'dark');
-  assert.equal(oppositeTheme('dark'), 'light');
-  assert.equal(oppositeTheme(oppositeTheme('light')), 'light');
+test('the icon toggle cycles auto, light, and dark', () => {
+  assert.equal(nextThemePreference('auto'), 'light');
+  assert.equal(nextThemePreference('light'), 'dark');
+  assert.equal(nextThemePreference('dark'), 'auto');
+  assert.equal(nextThemePreference(nextThemePreference(nextThemePreference('auto'))), 'auto');
+});
+
+test('the header button shows one icon per mode, auto by default', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const toggle = html.match(/<button id="theme-toggle"[\s\S]*?<\/button>/)?.[0] ?? '';
+  assert.match(toggle, /data-theme-mode="auto"/, 'auto is the first-paint mode');
+  for (const icon of ['theme-auto', 'theme-sun', 'theme-moon']) {
+    assert.match(toggle, new RegExp(`class="${icon}"`), `${icon} is present`);
+  }
+  assert.match(main, /themeToggle\.dataset\.themeMode = themePreference/, 'the button follows the stored preference');
+  assert.match(main, /themePreference = nextThemePreference\(themePreference\)/, 'clicking cycles the modes');
 });
 
 test('auto is selectable again after a manual choice', async () => {

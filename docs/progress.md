@@ -68,6 +68,14 @@
 - Browser check: 36x36 icon 10 px right of the Plan/Act group on the same row, no button text, initial state light at 12:15 with the sun icon, click flipped to the moon and persisted across reload, second click returned to light.
 - `npm test`: 58 Rust tests and 4 frontend suites passed offline; `npm run lint` and `npm run build` passed.
 
+## Three-State Theme Control
+
+- The topbar toggle now carries one icon per mode and cycles Auto → Light → Dark → Auto, following Lomora's theme button: a half-filled circle for Auto, a sun for Light, and a moon for Dark. Auto is the default with nothing saved.
+- The icon reflects the stored preference, not the resolved theme, so Auto stays visible while the page follows local time (light 07:00–18:59, re-checked every minute and on focus). The accessible name and tooltip name the active mode, the effective theme, and the mode the next click selects.
+- The Settings select still offers Auto, Light, and Dark, and both controls write the same `moderado-theme` key.
+- `nextThemePreference` replaces `oppositeTheme` in `theme.ts`; unit tests cover the cycle and the per-mode icon markup.
+- `npm test`: 137 Rust tests and 112 offline Node tests passed; `npm run lint` and `npm run build` passed.
+
 ## Versioning: Patch to 99, Minor on Request
 
 - Commits no longer move the patch digit. The pre-commit hook advances only the daily build counter, so a docs or chore commit keeps the same semver and only `+YYMMDD<n>` changes.

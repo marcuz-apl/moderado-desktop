@@ -76,7 +76,7 @@ function pad2(value: number): string {
 /** Session identity stamps use the local clock so they match the device. */
 export function sessionStamp(at: number): string {
   const date = new Date(at * 1000);
-  return `${pad2(date.getFullYear() % 100)}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} `
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} `
     + `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
 }
 

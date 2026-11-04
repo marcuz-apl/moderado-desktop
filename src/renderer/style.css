@@ -133,9 +133,10 @@
 .rail-tab svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .sidebar{grid-area:pane}
 .topbar{height:56px;padding:0 20px;flex:none}
-.topbar .topbar-title{min-width:0}
-.topbar .topbar-title .eyebrow{margin-bottom:2px}
-.topbar .topbar-title h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar .topbar-title{display:flex;align-items:baseline;gap:10px;min-width:0}
+.topbar .topbar-title .eyebrow{flex:none;margin:0;font-size:12px;letter-spacing:.14em}
+.topbar .topbar-title .eyebrow::after{content:":"}
+.topbar .topbar-title h1{min-width:0;font-size:13px;font-weight:500;letter-spacing:0;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .topbar #workspace-context{margin:0;max-width:min(38vw,520px)}
 .topbar .session-actions{margin-top:0;flex:none}
 

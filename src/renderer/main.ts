@@ -14,10 +14,10 @@ import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
 import { applyMention, filterFiles, mentionQuery } from './mention';
 import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
-import { oppositeTheme, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
+import { LIGHT_FROM_HOUR, LIGHT_UNTIL_HOUR, nextThemePreference, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { folderContextLabel, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, sessionLabel, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
+import { folderContextLabel, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, sessionLabel, sessionStamp, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
 import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
 import {
   artifactsFromActivity,
@@ -182,14 +182,16 @@ catch (error) { setStatus(`Theme preference could not be loaded: ${String(error)
 
 function applyTheme(): void {
   const theme = resolveTheme(themePreference, new Date());
+  const next = nextThemePreference(themePreference);
   themeSelect.value = themePreference;
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   if (pty) pty.terminal.options.theme = terminalTheme();
-  const next = oppositeTheme(theme);
-  themeToggle.setAttribute('aria-label', `Switch to ${next} theme`);
-  themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
-  themeToggle.title = `${theme === 'light' ? 'Light' : 'Dark'}${themePreference === 'auto' ? ', follows local time' : ''} — switch to ${next}`;
+  themeToggle.dataset.themeMode = themePreference;
+  themeToggle.setAttribute('aria-label', `Theme: ${themePreference}${themePreference === 'auto' ? `, ${theme} now` : ''}. Switch to ${next} theme.`);
+  themeToggle.title = themePreference === 'auto'
+    ? `Theme: auto — ${theme} now (light ${LIGHT_FROM_HOUR}:00–${LIGHT_UNTIL_HOUR}:00) — switch to light`
+    : `Theme: ${themePreference} — switch to ${next}`;
 }
 
 $<HTMLSelectElement>('display-size').value = String(displaySize);
@@ -209,7 +211,7 @@ for (const id of ['close-page', 'close-docs', 'close-profile']) {
   $(id).addEventListener('click', leavePage);
 }
 themeToggle.addEventListener('click', () => {
-  themePreference = oppositeTheme(resolveTheme(themePreference, new Date()));
+  themePreference = nextThemePreference(themePreference);
   applyTheme();
   try { localStorage.setItem(themeStorageKey, themePreference); }
   catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
@@ -2204,7 +2206,7 @@ async function createSession(settings: ProviderSettings, kind: SessionKind = act
   try {
     const record = kind === 'work'
       ? taskId ? await invoke<SessionRecord>('create_work_session_for_task', { taskId, settings }) : await invoke<SessionRecord>('create_default_session', { settings, kind })
-      : await invoke<SessionRecord>('create_session_in_project', { projectWorkspace: workspace, settings });
+      : await invoke<SessionRecord>('create_session_in_project', { projectWorkspace: workspace, settings, name: sessionStamp(Date.now() / 1000) });
     sessions.set(record.id, record); views.set(record.id, []);
     if (record.taskId) selectedWorkTaskId = record.taskId;
     await refreshSummaries();

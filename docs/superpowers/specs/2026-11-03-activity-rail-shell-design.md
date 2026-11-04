@@ -70,7 +70,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 - Width 260 px by default, resizable 200-560 px with the existing 7 px handle; double-click resets to 260; arrow keys step 16 px; persists in `moderado-sidebar-width`.
 - One view at a time, selected solely by the rail. The selected rail tab is the only navigation state.
-- **Workspaces**: the current library list and its actions (New Task, Rename, Delete in Work mode; New, Open, Rename, Remove in Code mode). Heading "Workspaces". Session rows are labelled with their creation time (`YY-MM-DD HH:MM:SS`, local zone) rather than `Session N`; a name typed through Rename wins over the stamp. The row tooltip keeps the workspace path.
+- **Workspaces**: the current library list and its actions (New Task, Rename, Delete in Work mode; New, Open, Rename, Remove in Code mode). Heading "Workspaces". A new Code session is named with its creation time (`YYYY-MM-DD HH:MM:SS`, local zone); older auto-named sessions are labelled the same way, and a name typed through Rename wins over the stamp. The row tooltip keeps the workspace path.
 - **Files**: the current Explorer view without the Explorer/Changes/Checkpoints tab row. Selecting a file opens the Preview sub-view, which keeps the Files tab selected and offers "Back to files".
 - **Git**: branch name, Changes list, commit/push controls, Recent commits, and Checkpoints. The Changes/Checkpoints switch is a two-tab row persisted in `moderado-git-view`. A non-repository workspace keeps the current explanation.
 - **Schedules**: the current schedule list and Import transcript.
@@ -78,7 +78,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 ## Workspace (`.main`)
 
-- **Topbar** (56 px): the `AGENT SESSION` eyebrow above the session's creation stamp, a secondary line naming the project or task (never the full path, which stays in its tooltip), session actions, Plan/Act control (hidden in Work mode), theme toggle. The Work/Code selector, the sidebar toggle, and the Tools menu are removed from it.
+- **Topbar** (56 px): a single baseline row where the `AGENT SESSION` label (12 px, letter-spaced, followed by a colon) sits beside the session's creation stamp (13 px, medium weight, ellipsised), a secondary line naming the project or task (never the full path, which stays in its tooltip), session actions, Plan/Act control (hidden in Work mode), and a three-state theme button cycling Auto → Light → Dark → Auto with a half-filled circle, sun, and moon icon. Auto is the default. The Work/Code selector, the sidebar toggle, and the Tools menu are removed from it.
 - Transcript, empty state, composer, status, auto-approve bar, and model usage are unchanged.
 - The terminal drawer stays below the composer, Code-only, PTY kept alive while hidden. The Right Pane's terminal icon toggles the same drawer.
 - The topbar compacts below 1000 px: the project or task context line hides, while session actions stay reachable at every width so New, Rename, and Delete never disappear; the stamp, Plan/Act, and theme remain.
