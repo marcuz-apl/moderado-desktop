@@ -64,7 +64,6 @@
 :root[data-theme="light"] #composer:focus-within{border-color:var(--light-accent)}
 :root[data-theme="light"] .queued-turn{background:var(--light-surface);border-color:var(--light-border)}
 :root[data-theme="light"] .queued-text{color:#203744}
-:root[data-theme="light"] .queued-turn.steering{background:#e5f3f0;border-color:var(--light-accent)}
 :root[data-theme="light"] .queued-steer{color:#175f58;border-color:var(--light-accent)}
 :root[data-theme="light"] .queued-remove{color:#667e88}
 :root[data-theme="light"] textarea{color:#203744}

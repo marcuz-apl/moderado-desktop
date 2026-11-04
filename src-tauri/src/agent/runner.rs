@@ -26,6 +26,29 @@ pub struct RunConfig<'a> {
     pub mcp: Option<&'a crate::mcp::McpRegistry>,
     /// Language servers connected for this turn; only Code sessions use them.
     pub lsp: Option<&'a crate::lsp::LspRegistry>,
+    /// Questions the user steered in while this turn runs. The loop drains them
+    /// before each request and keeps the turn alive when the model would stop.
+    pub steer: Option<&'a SteerQueue>,
+}
+
+/// Questions typed while a turn runs wait here until the agent loop reads them.
+#[derive(Default)]
+pub struct SteerQueue(std::sync::Mutex<std::collections::VecDeque<Value>>);
+
+impl SteerQueue {
+    pub fn push(&self, content: Value) {
+        self.0.lock().expect("steer queue").push_back(content);
+    }
+    pub fn pop(&self) -> Option<Value> {
+        self.0.lock().expect("steer queue").pop_front()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.lock().expect("steer queue").is_empty()
+    }
+    /// A fresh turn never inherits questions aimed at an earlier one.
+    pub fn clear(&self) {
+        self.0.lock().expect("steer queue").clear();
+    }
 }
 
 /// Safety net against a model that never stops calling tools. It is deliberately
@@ -119,7 +142,8 @@ where
              inside this task's managed folder using relative paths. Use Markdown, plain text, \
              CSV, or HTML for deliverables; do not claim to create native Office or PDF files \
              with text tools. Attached files have editable copies under attachments/. \
-             You cannot execute commands or access files outside the task folder."
+             Commands run sandboxed inside this task folder when approved; you cannot access \
+             files outside the task folder."
         }
         SessionKind::Code => match config.mode {
             Mode::Plan => "Plan mode: inspect the workspace and explain a plan. File mutations are unavailable.",
@@ -132,6 +156,12 @@ where
     };
     let summary_instruction = "When the turn is complete, finish your final response with a concise Markdown section headed `## Turn summary`. Summarize the completed work and important results as bullets. If no files were changed, summarize the answer or guidance provided. Do not claim unfinished work as complete.";
     for _ in 0..MAX_TOOL_ROUNDS {
+        // A steered question joins the conversation before the next request, so
+        // the model answers it inside this turn instead of after it.
+        while let Some(content) = config.steer.and_then(|queue| queue.pop()) {
+            history.push(json!({"role":"user","content":content}));
+            persist(history)?;
+        }
         let mut messages = vec![
             json!({"role":"system","content":format!("{persona} Report tool errors honestly. {mode_instruction} {summary_instruction}")}),
         ];
@@ -174,6 +204,12 @@ where
         let calls = completion.tool_calls;
         if calls.is_empty() {
             history.push(json!({"role":"assistant","content":completion.content}));
+            // A question steered in while the model was answering keeps the turn
+            // running, so the agent answers it now rather than after the turn.
+            if !config.steer.map(|queue| queue.is_empty()).unwrap_or(true) {
+                persist(history)?;
+                continue;
+            }
             persist(history)?;
             return Ok(());
         }
@@ -344,6 +380,7 @@ mod tests {
             RunConfig {
                 workspace: root.path(), base_url: &base, model: "test-model", api_key: "", mode: Mode::Act,
                 kind: SessionKind::Code, auto_approve: policy, attachments: &[], attachments_root: root.path(), session_id: "web-approval", mcp: None, lsp: None,
+ steer: None,
             },
             &mut history,
             "Search for this",
@@ -378,6 +415,7 @@ mod tests {
                 workspace: root.path(), base_url: &base, model: "m", api_key: "", mode: Mode::Act,
                 kind: SessionKind::Code, auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
                 attachments: &[], attachments_root: root.path(), session_id: "loop", mcp: None, lsp: None,
+ steer: None,
             },
             &mut history,
             "go",
@@ -395,6 +433,51 @@ mod tests {
 
     fn respond(socket: &mut TcpStream, body: &str) {
         write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_steer_joins_the_running_turn_and_keeps_it_alive() {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            let request = read_request(&mut first);
+            assert_eq!(request["messages"].as_array().unwrap().last().unwrap()["content"], "go");
+            respond(&mut first, "data: {\"choices\":[{\"delta\":{\"content\":\"First answer\"}}]}\n\ndata: [DONE]\n\n");
+            let (mut second, _) = listener.accept().unwrap();
+            let request = read_request(&mut second);
+            // The steered question is the newest user message in round two.
+            assert_eq!(request["messages"].as_array().unwrap().last().unwrap()["content"], "Steered question");
+            respond(&mut second, "data: {\"choices\":[{\"delta\":{\"content\":\"Steered answer\"}}]}\n\ndata: [DONE]\n\n");
+        });
+        let steer = SteerQueue::default();
+        // The question arrives while the model is answering round one, exactly
+        // like a user pressing Steer mid-turn.
+        let steered = std::sync::atomic::AtomicBool::new(false);
+        let mut history = Vec::new();
+        run_turn(
+            RunConfig {
+                workspace: root.path(), base_url: &base, model: "m", api_key: "", mode: Mode::Act,
+                kind: SessionKind::Code, auto_approve: AutoApprovePolicy::for_new_session(SessionKind::Code),
+                attachments: &[], attachments_root: root.path(), session_id: "steer", mcp: None, lsp: None,
+                steer: Some(&steer),
+            },
+            &mut history,
+            "go",
+            |_request| async { None },
+            |event| {
+                if matches!(event, AgentEvent::Text(_))
+                    && !steered.swap(true, std::sync::atomic::Ordering::Relaxed)
+                {
+                    steer.push(json!("Steered question"));
+                }
+            },
+        ).await.unwrap();
+        server.join().unwrap();
+        let contents: Vec<&str> = history.iter().map(|message| message["content"].as_str().unwrap()).collect();
+        assert_eq!(contents, ["go", "First answer", "Steered question", "Steered answer"]);
+        assert!(steer.is_empty());
     }
 
     #[tokio::test]
@@ -436,6 +519,7 @@ mod tests {
                 session_id: "test-session",
                 mcp: None,
                 lsp: None,
+                steer: None,
             },
             &mut history,
             "Create hello.txt",
@@ -497,6 +581,7 @@ mod tests {
                 session_id: "test-session",
                 mcp: None,
                 lsp: None,
+                steer: None,
             },
             &mut history,
             "Write a.txt",
@@ -548,6 +633,7 @@ mod tests {
                 session_id: "test-session",
                 mcp: None,
                 lsp: None,
+                steer: None,
             },
             &mut history,
             "Plan a change",
@@ -622,6 +708,7 @@ mod tests {
                     session_id: "test-session",
                 mcp: None,
                 lsp: None,
+                steer: None,
                 },
                 &mut history,
                 "Create m2.txt",
@@ -694,6 +781,7 @@ mod tests {
                 session_id: "test-session",
                 mcp: None,
                 lsp: None,
+                steer: None,
             },
             &mut history,
             "Change file.txt",
@@ -805,6 +893,7 @@ mod tests {
                 session_id: "test-session",
                 mcp: None,
                 lsp: None,
+                steer: None,
             },
             &mut history,
             &due[0].prompt,
@@ -884,6 +973,7 @@ mod tests {
                 session_id: "mcp-test",
                 mcp: Some(&registry),
                 lsp: None,
+                steer: None,
             },
             &mut history,
             "Use the echo tool",
@@ -932,6 +1022,7 @@ mod tests {
                 session_id: "mcp-plan",
                 mcp: None,
                 lsp: None,
+                steer: None,
             },
             &mut history,
             "Plan with an MCP tool",

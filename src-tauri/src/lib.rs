@@ -17,7 +17,7 @@ pub mod source_control;
 pub mod transcript;
 pub mod workspace;
 
-use agent::runner::{run_turn_with_hooks, AgentEvent, RunConfig};
+use agent::runner::{run_turn_with_hooks, AgentEvent, RunConfig, SteerQueue};
 use agent::{ApprovalRequest, Mode};
 use provider::settings::ProviderSettings;
 use provider::ProviderId;
@@ -37,6 +37,8 @@ struct SessionRuntime {
     turn_lock: AsyncMutex<()>,
     next_approval: AtomicU64,
     cancel_turn: watch::Sender<bool>,
+    /// Questions the user steered into the running turn.
+    steer: SteerQueue,
 }
 
 impl Default for SessionRuntime {
@@ -47,6 +49,7 @@ impl Default for SessionRuntime {
             turn_lock: AsyncMutex::new(()),
             next_approval: AtomicU64::new(0),
             cancel_turn,
+            steer: SteerQueue::default(),
         }
     }
 }
@@ -1088,6 +1091,47 @@ async fn stop_turn(state: tauri::State<'_, AppState>, session_id: String) -> Res
     Ok(())
 }
 
+/// Injects a question into the running turn. The agent loop reads it before the
+/// next request, so the model answers it inside this turn instead of after it.
+#[tauri::command]
+async fn steer_turn(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    prompt: String,
+    attachments: Option<Vec<AttachmentRef>>,
+) -> Result<(), String> {
+    if prompt.trim().is_empty() || prompt.len() > 64_000 {
+        return Err("Prompt must be 1–64,000 characters".into());
+    }
+    let runtime = state.runtime(&session_id)?;
+    // Acquiring the lock would mean the session is idle; steering is for a turn
+    // that is running right now, and an idle session takes a normal turn.
+    if runtime.turn_lock.try_lock().is_ok() {
+        return Err("This session is not running a turn to steer".into());
+    }
+    let attachment_refs: Vec<serde_json::Value> = attachments
+        .unwrap_or_default()
+        .iter()
+        .map(|attachment| {
+            serde_json::json!({
+                "type": "attachment",
+                "id": attachment.id,
+                "name": attachment.name,
+                "kind": attachment.kind,
+            })
+        })
+        .collect();
+    let content = if attachment_refs.is_empty() {
+        serde_json::json!(prompt)
+    } else {
+        let mut blocks = vec![serde_json::json!({"type":"text","text":prompt})];
+        blocks.extend(attachment_refs);
+        serde_json::Value::Array(blocks)
+    };
+    runtime.steer.push(content);
+    Ok(())
+}
+
 #[tauri::command]
 async fn ask_btw(
     state: tauri::State<'_, AppState>,
@@ -1108,6 +1152,7 @@ async fn ask_btw(
         .try_lock()
         .map_err(|_| "This session is already running")?;
     runtime.cancel_turn.send_replace(false);
+    runtime.steer.clear();
     let mut cancel = runtime.cancel_turn.subscribe();
     let (base_url, api_key) = (
         settings.provider_id.base_url(&settings.base_url)?,
@@ -1268,6 +1313,7 @@ async fn execute_turn(
             .map_err(|_| "This session is already running")?
     };
     runtime.cancel_turn.send_replace(false);
+    runtime.steer.clear();
     let mut cancel = runtime.cancel_turn.subscribe();
     let record = state.store.get(&session_id)?;
     let workspace = PathBuf::from(&record.workspace);
@@ -1351,6 +1397,7 @@ async fn execute_turn(
             session_id: &session_id,
             mcp: mcp_registry.as_ref(),
             lsp: lsp_registry.as_ref(),
+            steer: Some(&runtime.steer),
         },
         &mut messages,
         &prompt,
@@ -1645,6 +1692,7 @@ pub fn run() {
             add_attachments,
             list_project_files,
             stop_turn,
+            steer_turn,
             ask_btw
         ])
         .run(tauri::generate_context!())

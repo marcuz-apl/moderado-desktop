@@ -195,7 +195,6 @@ test('questions typed during a turn wait in a Steer queue above the composer', a
   const [html, main, style] = await Promise.all([readHtml(), readMain(), read('src/renderer/style.css')]);
   assert.match(html, /<div id="queued-turns" class="queued-turns" aria-label="Queued questions" aria-live="polite" hidden><\/div>/);
   assert.match(style, /\.queued-steer\{/);
-  assert.match(style, /\.queued-turn\.steering\{/);
   // Sending stays available while a turn runs; only setup gates it now.
   assert.match(main, /send\.disabled = !canSend\(initialized, creatingSession \|\| selectingContext\)/);
   assert.doesNotMatch(main, /send\.disabled = !canSend\(initialized, busy \|\|/);
@@ -205,11 +204,13 @@ test('questions typed during a turn wait in a Steer queue above the composer', a
   assert.match(main, /const queuedTurns = new Map<string, QueuedTurn\[\]>\(\)/);
   // Every queued row leads with its Steer button.
   assert.match(main, /steer\.className = 'queued-steer'/);
-  assert.match(main, /steer\.textContent = item\.steer \? 'Next' : 'Steer'/);
+  assert.match(main, /steer\.textContent = 'Steer'/);
   assert.match(main, /row\.append\(steer, text, remove\)/);
-  // Steer promotes a question to the front of the queue.
-  assert.match(main, /function steerQueuedTurn\(index: number\): void/);
-  assert.match(main, /item\.steer = true;\s*queue\.unshift\(item\)/);
+  // Steer injects the question into the running turn instead of reordering.
+  assert.match(main, /function steerRunningTurn\(id: string, item: QueuedTurn\): Promise<void>/);
+  assert.match(main, /await invoke\('steer_turn', \{/);
+  assert.match(main, /addDisplay\(id, 'You', item\.attachments\.length \? `/);
+  assert.doesNotMatch(main, /steer\.textContent = .*'Next'/);
   // The next question starts only after the running turn has finished.
   assert.match(main, /async function drainQueuedTurn\(id: string\): Promise<void>/);
   assert.match(main, /if \(!fromQueue\) void drainQueuedTurn\(id\)/);

@@ -249,6 +249,15 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
   assert.match(main, /session\.taskId === entry\.key/);
 });
 
+test('Library rows sit at half the former inter-row spacing between tasks/projects and their sessions', async () => {
+  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  assert.match(style, /\.task-sessions\{padding:1px 0 4px 34px\}/);
+  assert.match(style, /\.project-sessions\{padding:1px 0 4px 23px\}/);
+  assert.match(style, /\.task-group\{padding:2px 0;border:0\}/);
+  assert.match(style, /\.project-group\{padding:2px 0;border-bottom:1px solid #2a4258\}/);
+  assert.match(style, /#library-list\{gap:2px\}/);
+});
+
 test('About displays the VERSION value without its BUILD metadata or an extra label', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');

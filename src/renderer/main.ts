@@ -100,7 +100,7 @@ const lastKindKey = 'moderado-last-kind';
 let activeKind: SessionKind = parseSessionKind(localStorage.getItem(lastKindKey));
 let pendingAttachments: AttachmentRecord[] = [];
 /** Questions typed while a turn runs wait here, one queue per session. */
-type QueuedTurn = { key: string; text: string; attachments: AttachmentRecord[]; steer: boolean };
+type QueuedTurn = { key: string; text: string; attachments: AttachmentRecord[] };
 const queuedTurns = new Map<string, QueuedTurn[]>();
 /** A drain is in flight for these sessions, so two events cannot dispatch twice. */
 const dispatchingQueuedTurn = new Set<string>();
@@ -2845,12 +2845,12 @@ function renderQueuedTurns(): void {
   const queue = activeSessionId ? queuedTurns.get(activeSessionId) ?? [] : [];
   host.replaceChildren(...queue.map((item, index) => {
     const row = document.createElement('div');
-    row.className = `queued-turn${item.steer ? ' steering' : ''}`;
+    row.className = 'queued-turn';
     const steer = document.createElement('button');
     steer.type = 'button';
     steer.className = 'queued-steer';
-    steer.textContent = item.steer ? 'Next' : 'Steer';
-    steer.title = 'Send this question next, ahead of the rest of the queue.';
+    steer.textContent = 'Steer';
+    steer.title = 'Send this question into the running turn right now.';
     steer.setAttribute('aria-label', `Steer: ${item.text}`);
     steer.addEventListener('click', () => steerQueuedTurn(index));
     const text = document.createElement('span');
@@ -2879,27 +2879,39 @@ function renderQueuedTurns(): void {
 
 function enqueueTurn(id: string, text: string, attachments: AttachmentRecord[]): void {
   const queue = queuedTurns.get(id) ?? [];
-  queue.push({ key: queuedTurnKey(), text, attachments, steer: false });
+  queue.push({ key: queuedTurnKey(), text, attachments });
   queuedTurns.set(id, queue);
   if (id === activeSessionId) renderQueuedTurns();
 }
 
-/** Steer moves a question to the front, so the agent reads it before the rest. */
+/** Steer injects the question into the turn that is running right now. */
 function steerQueuedTurn(index: number): void {
   const id = activeSessionId;
   if (!id) return;
   const queue = queuedTurns.get(id) ?? [];
   const [item] = queue.splice(index, 1);
   if (!item) return;
-  item.steer = true;
-  queue.unshift(item);
   queuedTurns.set(id, queue);
   renderQueuedTurns();
-  if (running.has(id)) {
-    setStatus('Steering: this question goes next, as soon as the current turn ends.');
-    return;
+  void steerRunningTurn(id, item);
+}
+
+async function steerRunningTurn(id: string, item: QueuedTurn): Promise<void> {
+  try {
+    await invoke('steer_turn', {
+      sessionId: id,
+      prompt: item.text,
+      attachments: item.attachments.map(({ id: attachmentId, name, kind }) => ({ id: attachmentId, name, kind })),
+    });
+    // The backend history carries the question; the transcript mirrors it.
+    addDisplay(id, 'You', item.attachments.length ? `${item.text}\n\n[${item.attachments.map((attachment) => attachment.name).join(', ')}]` : item.text);
+    if (id === activeSessionId) setStatus('Steered: the agent answers this inside the running turn.');
+  } catch (error) {
+    // The turn may have finished first; the question still gets answered.
+    enqueueTurn(id, item.text, item.attachments);
+    if (id === activeSessionId) setStatus(`Steer failed: ${String(error)}`);
+    if (!running.has(id)) void drainQueuedTurn(id);
   }
-  void drainQueuedTurn(id);
 }
 
 /** A running turn cannot take a second prompt, so the queue feeds the next one. */
