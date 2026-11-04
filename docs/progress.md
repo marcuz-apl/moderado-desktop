@@ -76,6 +76,15 @@
 - `nextThemePreference` replaces `oppositeTheme` in `theme.ts`; unit tests cover the cycle and the per-mode icon markup.
 - `npm test`: 137 Rust tests and 112 offline Node tests passed; `npm run lint` and `npm run build` passed.
 
+## Work Mode Task Language
+
+- The topbar label follows the mode: `AGENT TASKLIST` in Work and `AGENT SESSION` in Code.
+- The topbar action reads **New Task** in Work mode and **New Session** in Code mode. In Work mode it creates a numbered task (`work-task-01`, `work-task-02`, …) with no selection required; Code mode still creates a session in the selected project.
+- New Work task folders and labels use `work-task-##` instead of `work-sessionN`; existing `work-sessionN` tasks are untouched.
+- The empty Work context line now reads "Select a task to start." instead of "Select a task to start a session."
+- The empty-state logo no longer keeps a dark chip in the light theme; it uses the accent glyph and a light border.
+- The Auto-approve row no longer collapses when no session exists. Its checkboxes stay visible but disabled, with a "Start with the next task." tooltip, so the footer keeps its shape in both modes before and after a session starts.
+
 ## Versioning: Patch to 99, Minor on Request
 
 - Commits no longer move the patch digit. The pre-commit hook advances only the daily build counter, so a docs or chore commit keeps the same semver and only `+YYMMDD<n>` changes.

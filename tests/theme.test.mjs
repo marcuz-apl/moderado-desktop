@@ -124,6 +124,12 @@ test('every dark surface on the settings page has a light counterpart', async ()
   assert.deepEqual(gaps, [], `settings page surfaces with no light rule:\n${gaps.join('\n')}`);
 });
 
+test('the empty-state logo follows the light theme', async () => {
+  const theme = await readTheme();
+  assert.match(theme, /:root\[data-theme="light"\] \.empty-symbol\{color:var\(--light-accent\);border-color:#8ab8b7\}/);
+  assert.doesNotMatch(theme, /:root\[data-theme="light"\] \.empty-symbol\{background:#[0-9a-f]{6}/, 'the logo keeps no dark chip in the light theme');
+});
+
 test('the focus ring stays visible in the light theme', async () => {
   const theme = await readTheme();
   assert.match(theme, /:root\[data-theme="light"\] button:focus-visible\{outline-color:#08766d\}/);

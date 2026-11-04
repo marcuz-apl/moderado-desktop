@@ -38,7 +38,7 @@ test('the topbar context names the project or task instead of the full path', ()
   assert.equal(folderContextLabel('work', '/docs/Task 7', undefined, 'Research'), 'Research');
   assert.equal(folderContextLabel('work', '/docs/Task 7'), 'Task 7');
   assert.equal(folderContextLabel('code', null), 'Create or open a project folder.');
-  assert.equal(folderContextLabel('work', null), 'Select a task to start a session.');
+  assert.equal(folderContextLabel('work', null), 'Select a task to start.');
 });
 
 test('the Workspaces rows and the topbar headline show the session stamp', async () => {
@@ -58,7 +58,7 @@ test('a new Code session sends its creation stamp as the session name', async ()
 
 test('the topbar markup keeps the label attached to the session title', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /<p class="eyebrow">AGENT SESSION<\/p><h1 id="session-title">/);
+  assert.match(html, /<p id="session-eyebrow" class="eyebrow">AGENT SESSION<\/p><h1 id="session-title">/);
 });
 
 test('the topbar lays the label and the stamp out on one row', async () => {

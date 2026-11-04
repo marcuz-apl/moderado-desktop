@@ -583,10 +583,17 @@ function applyKindUi(): void {
   }
   // One list holds both kinds, so only the action row follows what is selected.
   applyLibraryActions();
+  // Work mode is a task list; Code mode keeps the session vocabulary.
+  $('session-eyebrow').textContent = work ? 'AGENT TASKLIST' : 'AGENT SESSION';
+  $('new-session').textContent = work ? 'New Task' : 'New Session';
   // Plan/Act changes what the agent may do in a workspace; Work tasks have no
   // command execution, so the selector is hidden rather than disabled.
   $('agent-mode').toggleAttribute('hidden', work);
-  $('auto-approve-group').toggleAttribute('hidden', !activeSessionId);
+  // The approval toggles keep the footer's shape before a session exists;
+  // they stay visible, disabled, and say when they take effect.
+  const approvals = $('auto-approve-group');
+  approvals.removeAttribute('hidden');
+  approvals.title = activeSessionId ? '' : work ? 'Start with the next task.' : 'Start with the next session.';
   $('approve-command-option').toggleAttribute('hidden', work);
   $('approve-mcp-option').toggleAttribute('hidden', work);
   // "+" attaches a file's content in both modes; "@" references a project file.
@@ -907,7 +914,8 @@ function updateControls(): void {
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
-  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession || (activeKind === 'code' ? !selectedProjectWorkspace : !selectedWorkTaskId);
+  // A Work task needs no selection to be created; a Code session needs a project.
+  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession || (activeKind === 'code' && !selectedProjectWorkspace);
   const selectedProject = projects.find((project) => project.workspace === selectedProjectWorkspace);
   const projectSessions = selectedProject ? sessionsForProject(summaries, selectedProject.workspace) : [];
   const selectedTask = activeKind === 'work' ? workTasks.find((task) => task.id === selectedWorkTaskId) : undefined;
@@ -2219,17 +2227,19 @@ async function createSession(settings: ProviderSettings, kind: SessionKind = act
   } finally { creatingSession = false; renderSessions(); updateControls(); }
 }
 
-$('workspace-button').addEventListener('click', async () => {
+/** The Tasks panel and the Work topbar both create a numbered `work-task-##`. */
+async function createWorkTask(): Promise<void> {
   if (creatingSession) return;
   saveComposerDraft(); creatingSession = true; updateControls();
   try {
     const task = await invoke<WorkTaskRecord>('create_work_task');
     await refreshSummaries(); selectedWorkTaskId = task.id; expandedWorkTasks.add(task.id); lastSessionByTask.delete(task.id); rememberNavigation();
     prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); selectLeftView('workspaces');
-    setStatus(`Task “${task.name}” created. Create a session in the workspace to begin.`);
+    setStatus(`Task “${task.name}” created.`);
   } catch (error) { setStatus(String(error)); }
   finally { creatingSession = false; renderSessions(); updateControls(); }
-});
+}
+$('workspace-button').addEventListener('click', () => { void createWorkTask(); });
 
 async function renameWorkTask(task: WorkTaskRecord): Promise<void> {
   const name = window.prompt('Task name', task.name);
@@ -2283,9 +2293,8 @@ async function newProjectSession(workspace: string): Promise<void> {
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
 $('new-session').addEventListener('click', () => {
-  if (activeKind === 'work') {
-    if (selectedWorkTaskId) void createSession(currentSettings(), 'work', null, selectedWorkTaskId).catch((error) => setStatus(String(error)));
-  } else if (selectedProjectWorkspace) void newProjectSession(selectedProjectWorkspace);
+  if (activeKind === 'work') void createWorkTask();
+  else if (selectedProjectWorkspace) void newProjectSession(selectedProjectWorkspace);
 });
 async function renameProject(project: ProjectRecord): Promise<void> {
   const name = window.prompt('Project display name (folder name stays the same)', project.name); if (name === null) return;

@@ -31,26 +31,28 @@ pub fn create_scratch_workspace(base: &Path) -> Result<PathBuf, String> {
 }
 
 pub fn create_default_workspace(documents: &Path) -> Result<PathBuf, String> {
-    create_numbered_workspace(documents, "session")
+    create_numbered_workspace(documents, "session", 0, 1)
 }
 
+/// Work tasks are named `work-task-01`, `work-task-02`, … so the folder and
+/// the task label agree and never use the word "session".
 pub fn create_default_work_workspace(documents: &Path) -> Result<PathBuf, String> {
-    create_numbered_workspace(documents, "work-session")
+    create_numbered_workspace(documents, "work-task-", 1, 2)
 }
 
-fn create_numbered_workspace(documents: &Path, prefix: &str) -> Result<PathBuf, String> {
+fn create_numbered_workspace(documents: &Path, prefix: &str, first: u32, digits: usize) -> Result<PathBuf, String> {
     let root = documents.join("Moderado-Desktop");
     std::fs::create_dir_all(&root)
-        .map_err(|error| format!("Could not create session folder in Documents: {error}"))?;
-    for number in 0..=u32::MAX {
-        let path = root.join(format!("{prefix}{number}"));
+        .map_err(|error| format!("Could not create the managed folder in Documents: {error}"))?;
+    for number in first..=u32::MAX {
+        let path = root.join(format!("{prefix}{number:0digits$}"));
         match std::fs::create_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(format!("Could not create session folder: {error}")),
+            Err(error) => return Err(format!("Could not create the managed folder: {error}")),
         }
     }
-        Err("No available session folder name in Documents".into())
+        Err("No available managed folder name in Documents".into())
 }
 
 pub fn new_id() -> String {
@@ -818,11 +820,11 @@ mod tests {
         let second = create_default_work_workspace(documents.path()).unwrap();
         assert_eq!(
             first,
-            documents.path().join("Moderado-Desktop").join("work-session0")
+            documents.path().join("Moderado-Desktop").join("work-task-01")
         );
         assert_eq!(
             second,
-            documents.path().join("Moderado-Desktop").join("work-session1")
+            documents.path().join("Moderado-Desktop").join("work-task-02")
         );
     }
 }

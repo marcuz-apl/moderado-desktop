@@ -97,7 +97,7 @@ export function folderContextLabel(
   taskName?: string,
 ): string {
   if (kind === 'work') {
-    return taskName ?? (folder ? projectNameFromWorkspace(folder, 'Task folder') : 'Select a task to start a session.');
+    return taskName ?? (folder ? projectNameFromWorkspace(folder, 'Task folder') : 'Select a task to start.');
   }
   return projectName ?? (folder ? projectNameFromWorkspace(folder, 'Project folder') : 'Create or open a project folder.');
 }

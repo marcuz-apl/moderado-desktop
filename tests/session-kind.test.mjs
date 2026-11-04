@@ -26,6 +26,36 @@ test('Work is the default session kind and the selector toggles both ways', () =
   assert.equal(nextSessionKind('code'), 'work');
 });
 
+test('Auto-approve stays visible but disabled before a session starts', async () => {
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(main, /\$\('auto-approve-group'\)\.toggleAttribute\('hidden'/, 'the footer never collapses to a blank row');
+  assert.match(main, /approvals\.removeAttribute\('hidden'\)/);
+  assert.match(main, /approvals\.title = activeSessionId \? '' : work \? 'Start with the next task\.' : 'Start with the next session\.'/);
+  assert.ok(main.includes("for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;"), 'the checkboxes are disabled without a session');
+});
+
+test('the topbar speaks in tasks for Work and sessions for Code', async () => {
+  const [html, main] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.match(html, /<p id="session-eyebrow" class="eyebrow">AGENT SESSION<\/p>/, 'Code keeps the session label by default');
+  assert.match(main, /\$\('session-eyebrow'\)\.textContent = work \? 'AGENT TASKLIST' : 'AGENT SESSION'/);
+  assert.match(main, /\$\('new-session'\)\.textContent = work \? 'New Task' : 'New Session'/);
+});
+
+test('the Work New Task action creates a numbered task, not a session', async () => {
+  const [main, rust] = await Promise.all([
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/sessions.rs', import.meta.url), 'utf8'),
+  ]);
+  assert.match(main, /if \(activeKind === 'work'\) void createWorkTask\(\)/, 'Work never reaches the session creator');
+  assert.match(main, /const task = await invoke<WorkTaskRecord>\('create_work_task'\)/);
+  assert.match(main, /activeKind === 'code' && !selectedProjectWorkspace/, 'a Work task needs no selection');
+  assert.ok(rust.includes('create_numbered_workspace(documents, "work-task-", 1, 2)'), 'task folders start at 01');
+  assert.ok(rust.includes('format!("{prefix}{number:0digits$}")'), 'the counter is zero-padded to two digits');
+});
+
 test('the Plan/Act selector hides in Work mode', async () => {
   const [html, main] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),

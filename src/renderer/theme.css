@@ -110,7 +110,6 @@
 :root[data-theme="light"] .schedule-item button{color:var(--light-accent)}
 :root[data-theme="light"] .key-apply-link{color:var(--light-accent)}
 
-:root[data-theme="light"] .empty-symbol{background:#14233a;border-color:transparent}
 :root[data-theme="light"] .model-usage-row #model-usage{color:#5d7480}
 :root[data-theme="light"] .project-group{border-color:var(--light-border)}
 :root[data-theme="light"] .tree-row.selected{background:#d5e9e8;color:#134846}
