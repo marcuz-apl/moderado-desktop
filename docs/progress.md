@@ -389,3 +389,17 @@
 - The **Run commands** auto-approve toggle shows in Work mode as well (the label was "Command"; it now says what it does and carries a tooltip). MCP servers remain Code-only, and Plan mode still blocks commands.
 - New Work sessions default every category except MCP to enabled; migration 12 flips `executeCommand` on for Work sessions still sitting on the shipped default while leaving any saved custom policy untouched. The migration guards `add_column_if_missing` because a database that skipped version 4 would otherwise fail the update.
 - Tests: tool list and dispatch for Work/Act, a Work auto-approve command run, the prompt-all rejection path, the new policy default, and the migration's flip-vs-preserve behaviour.
+
+## Questions queue behind a running turn (0.4.41)
+
+- The composer no longer goes quiet while the agent works: prompts sent mid-turn wait in a per-session queue above the composer (`#queued-turns`), each row led by a Steer button.
+- A sent question sits two tab stops in from the transcript edge (`.message.you{padding-left:calc(2*40px)}`) so it reads apart from the agent's replies.
+- `submitTurn(text, sent, fromQueue)` was extracted from the 75-line submit body; the queue reuses it and never clears the draft being typed. The drain loops until the queue is empty — the first version stopped after one item, caught by the browser check.
+- Verified in real Chromium (`.playwright-cli/check-queue.mjs`, mocked Tauri bridge, Vite on localhost:1420 — Vite does not bind 127.0.0.1).
+
+## Real steer injection and tighter Library rows (0.4.43)
+
+- The user rejected the first Steer behavior (it promoted the question to "Next" and waited for the turn to finish). Steer is now genuine: `SteerQueue` on the session runtime, a `steer_turn` command (validates 1–64,000 chars, refuses idle sessions via `turn_lock.try_lock()`), and the runner drains the queue into `history` before every model request. When the model would stop with steers pending, the turn stays alive and answers them — the question joins the live conversation, not a deferred follow-up. A fresh turn clears the queue so it never inherits questions aimed at an earlier one.
+- Proven by `a_steer_joins_the_running_turn_and_keeps_it_alive`: a mock provider receives the steered message as the newest message in round 2 while the turn never ended.
+- Library pane spacing between a task/project row and its session rows halved: group padding 5→2px, session-list padding 3/8→1/4px, `#library-list` gap 5→2px.
+- Tests: 147 Rust + 143 node pass, clippy `-D warnings` clean; browser check 3/3.

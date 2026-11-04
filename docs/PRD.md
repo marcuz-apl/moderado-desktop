@@ -97,6 +97,10 @@ Windows command execution uses a disposable workspace copy inside a unique AppCo
 - F18 — A sun/moon toggle beside the Plan/Act selector switches between light and dark. Until the user picks one, the theme follows local time (light between 07:00 and 18:59) and re-checks while the app runs; an explicit choice persists across restarts.
 - F19 — Each provider in Settings links to where the user obtains it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and an installer page for the local Ollama and LM Studio runtimes. The link opens in the system browser, never inside the app webview.
 
+### 6.8 Steer & Queued Prompts (P1)
+- F20 — The composer stays usable while a turn runs: further questions wait in a per-session queue above the composer instead of being dropped, and drain one by one when the turn finishes.
+- F21 — Each queued question carries a **Steer** button that injects it into the running turn immediately: the agent reads it before its next model request, keeps the turn alive to answer it, and the steered question becomes part of the same conversation rather than a deferred follow-up. A new turn never inherits questions aimed at an earlier one.
+
 ## 7. Non-Functional Requirements
 
 | ID | Requirement |

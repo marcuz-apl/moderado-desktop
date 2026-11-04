@@ -29,6 +29,8 @@ Type in the composer and press **Enter**. Use **Shift+Enter** for a new line, an
 
 The agent works in steps. Each step that changes files waits for your approval unless that category is auto-approved.
 
+You don't have to wait for an answer before asking again. Questions sent while the agent is running wait in a queue above the composer. Each queued row has a **Steer** button: press it and the question is sent into the running turn right away — the agent reads it before its next step and answers it inside the same conversation, without restarting. Questions without Steer are answered one by one when the current turn finishes.
+
 ### 4. Review what it did
 
 - **Checkpoints** lists every snapshot taken before a change; open one to see a diff and roll back.
