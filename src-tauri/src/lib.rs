@@ -1,3 +1,4 @@
+pub mod account;
 pub mod agent;
 pub mod attachments;
 pub mod approval_policy;
@@ -1628,6 +1629,8 @@ pub fn run() {
             activate_approval,
             list_pending_approvals,
             save_provider_key,
+            account::moderado_sign_in,
+            account::moderado_sign_out,
             discover_models,
             load_mcp_config,
             save_mcp_config,

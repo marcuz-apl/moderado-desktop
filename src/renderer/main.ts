@@ -13,7 +13,8 @@ import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLab
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
 import { applyMention, filterFiles, mentionQuery } from './mention';
-import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
+import { parseFontFamily, parseTextSize, parseUiScale, zoomFor, type FontFamily, type TextSize, type UiScale } from './appearance';
+import { applyLanguage, DEFAULT_LANGUAGE, parseLanguage, t, translateTree, type Language } from './i18n';
 import { LIGHT_FROM_HOUR, LIGHT_UNTIL_HOUR, nextThemePreference, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
@@ -85,7 +86,12 @@ const approvalDialog = $<HTMLDialogElement>('approval-dialog');
 const restoreDialog = $<HTMLDialogElement>('restore-dialog');
 const scheduleDialog = $<HTMLDialogElement>('schedule-dialog');
 const importDialog = $<HTMLDialogElement>('import-dialog');
-const emptyState = $('empty-state').cloneNode(true);
+// Captured in English before the active language is applied; each clone is
+// translated for the language that is active when it is shown.
+const emptyState = $('empty-state').cloneNode(true) as HTMLElement;
+const languageStorageKey = 'moderado-language';
+let language: Language = parseLanguage(localStorage.getItem(languageStorageKey));
+applyLanguage(language);
 
 let providers: ProviderPreset[] = [];
 const usageBySession = new Map<string, ModelUsage>();
@@ -170,14 +176,25 @@ const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>
 const conversationBindings = new Map<string, string>();
 const btwHistory = new Map<string, Array<{ question: string; answer: string }>>();
 
-function setStatus(message: string): void { status.textContent = message; }
-const displaySizeKey = 'moderado-display-size';
-let displaySize: DisplaySize = parseDisplaySize(localStorage.getItem(displaySizeKey));
-/** One zoom on the root scales the whole window: text, controls and layout. */
-function applyDisplaySize(): void {
-  document.documentElement.style.zoom = zoomFor(displaySize);
+function setStatus(message: string): void {
+  status.textContent = message;
+  translateTree(status);
 }
-applyDisplaySize();
+const fontFamilyKey = 'moderado-font-family';
+const textSizeKey = 'moderado-text-size';
+const uiScaleKey = 'moderado-ui-scale';
+let fontFamily: FontFamily = parseFontFamily(localStorage.getItem(fontFamilyKey));
+let textSize: TextSize = parseTextSize(localStorage.getItem(textSizeKey));
+/** The retired Display size stored a percentage; parseUiScale keeps its intent. */
+let uiScale: UiScale = parseUiScale(localStorage.getItem(uiScaleKey) ?? localStorage.getItem('moderado-display-size'));
+/** Font and text size reach CSS as root attributes; one zoom scales the window. */
+function applyAppearance(): void {
+  const root = document.documentElement;
+  root.dataset.font = fontFamily;
+  root.dataset.textSize = textSize;
+  root.style.zoom = zoomFor(uiScale);
+}
+applyAppearance();
 const themeStorageKey = 'moderado-theme';
 let themePreference: ThemePreference = 'auto';
 try { themePreference = parseThemePreference(localStorage.getItem(themeStorageKey)); }
@@ -203,12 +220,45 @@ function applyTheme(): void {
     : `Theme: ${themePreference} — switch to ${next}`;
 }
 
-$<HTMLSelectElement>('display-size').value = String(displaySize);
-$('display-size').addEventListener('change', () => {
-  displaySize = parseDisplaySize($<HTMLSelectElement>('display-size').value);
-  try { localStorage.setItem(displaySizeKey, String(displaySize)); } catch { /* the setting still applies for this run */ }
-  applyDisplaySize();
+const fontSelect = $<HTMLSelectElement>('font-family');
+fontSelect.value = fontFamily;
+fontSelect.addEventListener('change', () => {
+  fontFamily = parseFontFamily(fontSelect.value);
+  try { localStorage.setItem(fontFamilyKey, fontFamily); } catch { /* the setting still applies for this run */ }
+  applyAppearance();
 });
+const textSizeSelect = $<HTMLSelectElement>('text-size');
+textSizeSelect.value = textSize;
+textSizeSelect.addEventListener('change', () => {
+  textSize = parseTextSize(textSizeSelect.value);
+  try { localStorage.setItem(textSizeKey, textSize); } catch { /* the setting still applies for this run */ }
+  applyAppearance();
+});
+const uiScaleSelect = $<HTMLSelectElement>('ui-scale');
+uiScaleSelect.value = uiScale;
+uiScaleSelect.addEventListener('change', () => {
+  uiScale = parseUiScale(uiScaleSelect.value);
+  try { localStorage.setItem(uiScaleKey, uiScale); } catch { /* the setting still applies for this run */ }
+  applyAppearance();
+});
+const languageSelect = $<HTMLSelectElement>('language');
+languageSelect.value = language;
+languageSelect.addEventListener('change', () => {
+  language = parseLanguage(languageSelect.value);
+  try { localStorage.setItem(languageStorageKey, language); } catch { /* the switch still applies for this run */ }
+  applyLanguage(language);
+  refreshLanguageUi();
+});
+/** Rebuilds the copy that render code writes, in the newly chosen language. */
+function refreshLanguageUi(): void {
+  applyKindUi();
+  renderSessions();
+  updateFolderContext();
+  updateControls();
+  applyAccount();
+  // The render code writes English; one pass converts everything it rebuilt.
+  translateTree(document.body);
+}
 themeSelect.addEventListener('change', () => {
   themePreference = parseThemePreference(themeSelect.value);
   applyTheme();
@@ -450,11 +500,18 @@ function setToolActivity(sessionId: string, toolId: string, toolName: string, ac
   }
 }
 
+/** A fresh English template clone, shown in the active language. */
+function emptyStateNode(): Node {
+  const node = emptyState.cloneNode(true) as HTMLElement;
+  translateTree(node);
+  return node;
+}
+
 function renderTranscript(keepReadingPosition = false): void {
   const previousScrollTop = transcript.scrollTop;
   const stickToBottom = !keepReadingPosition || shouldAutoScroll(transcript.scrollTop, transcript.scrollHeight, transcript.clientHeight);
   const messages = activeSessionId ? views.get(activeSessionId) ?? [] : [];
-  transcript.replaceChildren(...(messages.length ? messages.map((item) => messageElement(item)) : [emptyState.cloneNode(true)]));
+  transcript.replaceChildren(...(messages.length ? messages.map((item) => messageElement(item)) : [emptyStateNode()]));
   transcript.scrollTop = stickToBottom ? transcript.scrollHeight : previousScrollTop;
 }
 
@@ -769,6 +826,8 @@ function updateFolderContext(): void {
 }
 function enterDraft(kind: SessionKind, workspace: string | null = selectedProjectWorkspace): void {
   selectionRevision++; selectingContext = false; activeSessionId = null; activeKind = kind; closeMention();
+  // Settle the view before any refresh reads it: Work cannot show Git.
+  if (kind === 'work' && activeLeftView === 'git') activeLeftView = 'library';
   if (kind === 'code') selectedProjectWorkspace = workspace;
   rememberNavigation();
   $('session-title').textContent = kind === 'work' && !selectedWorkTaskId ? 'Select a task' : 'New Session';
@@ -1176,9 +1235,21 @@ function leavePage(): void {
 
 const viewingFiles = (): boolean => activeLeftView === 'files' && !previewOpen;
 const viewingChanges = (): boolean => activeLeftView === 'git' && gitView === 'changes';
+/** Git inspects a repository, and only Code mode owns one. */
+const gitAvailable = (): boolean => activeKind === 'code';
 
 /** Shows one rail destination and loads the data it needs. */
 function applyLeftView(): void {
+  // Work has no repository, so its Git entry is disabled and the Library takes over.
+  const enabled = gitAvailable();
+  if (!enabled && activeLeftView === 'git') activeLeftView = 'library';
+  const gitRail = document.querySelector<HTMLButtonElement>('.rail-tabs .rail-tab[data-rail="git"]');
+  if (gitRail) {
+    gitRail.setAttribute('aria-disabled', String(!enabled));
+    gitRail.classList.toggle('unavailable', !enabled);
+    gitRail.title = enabled ? 'Git' : 'Git is available in Code mode';
+    gitRail.setAttribute('aria-label', enabled ? 'Git' : 'Git (Code mode only)');
+  }
   document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab, .rail-pages .rail-tab[data-rail]').forEach((button) => {
     const selected = button.dataset.rail === activeLeftView;
     button.classList.toggle('selected', selected);
@@ -1888,6 +1959,8 @@ async function initialize(): Promise<void> {
       const option = Array.from(providerSelect.options).find((candidate) => candidate.value === item.id);
       if (preset && option) option.textContent = `${preset.name} (${item.available ? 'available' : 'offline'})`;
     }
+    // Startup renders rebuilt some copy after the first pass; translate what stands now.
+    if (language !== DEFAULT_LANGUAGE) translateTree(document.body);
   } catch (error) { setStatus(`Session setup failed: ${String(error)}`); }
 }
 
@@ -1930,10 +2003,40 @@ keyApplyLink.addEventListener('click', async (event) => {
   try { await openUrl(url); }
   catch (error) { setStatus(`Could not open apply page: ${String(error)}`); }
 });
-const accountUrl = 'https://modr.alfazen.org/account?mode=signin';
+const accountEmailKey = 'moderado-account-email';
+let accountEmail = '';
+try { accountEmail = localStorage.getItem(accountEmailKey) ?? ''; } catch { /* the pane still offers sign-in */ }
+function applyAccount(): void {
+  $('user-account-name').textContent = accountEmail || t('Not signed in');
+  $('user-signin').toggleAttribute('hidden', Boolean(accountEmail));
+  $('user-signout').toggleAttribute('hidden', !accountEmail);
+}
+applyAccount();
 $('user-signin').addEventListener('click', async () => {
-  try { await openUrl(accountUrl); }
-  catch (error) { setStatus(`Could not open the account page: ${String(error)}`); }
+  const button = $<HTMLButtonElement>('user-signin');
+  button.disabled = true;
+  setStatus('Waiting for the browser to finish signing in…');
+  try {
+    // The browser authorizes on the website; the loopback callback mints the
+    // key, stores it in the OS keychain, and reports the signed-in email.
+    const identity = await invoke<{ email: string }>('moderado_sign_in');
+    accountEmail = identity.email;
+    try { localStorage.setItem(accountEmailKey, accountEmail); } catch { /* the pane shows it for this run */ }
+    applyAccount();
+    setStatus(`Signed in as ${accountEmail}.`);
+  } catch (error) {
+    setStatus(`Sign-in failed: ${String(error)}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+$('user-signout').addEventListener('click', async () => {
+  try { await invoke('moderado_sign_out'); }
+  catch (error) { setStatus(`Sign-out failed: ${String(error)}`); return; }
+  accountEmail = '';
+  try { localStorage.removeItem(accountEmailKey); } catch { /* nothing else caches it */ }
+  applyAccount();
+  setStatus('Signed out. Local work is unchanged.');
 });
 $<HTMLSelectElement>('plan-model').addEventListener('change', updateSelectedModel);
 $<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel);
@@ -1941,13 +2044,15 @@ document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((but
   button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
 });
 function moveRailFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
-  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab'));
+  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab'))
+    .filter((button) => button.getAttribute('aria-disabled') !== 'true');
   if (!tabs.length) return;
   const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
   tabs[nextMenuIndex(current, tabs.length, key)]?.focus();
 }
 document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab').forEach((button) => {
   button.addEventListener('click', () => {
+    if (button.dataset.rail === 'git' && !gitAvailable()) { setStatus('Git is available in Code mode.'); return; }
     // Choosing a destination is a request to see it, even from the rail-only state.
     if (sidebarCollapsed) setSidebarCollapsed(false);
     selectLeftView(parseLeftView(button.dataset.rail ?? null));
@@ -2012,10 +2117,10 @@ function setSidebarCollapsed(collapsed: boolean): void {
 }
 $('sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!sidebarCollapsed));
 if (localStorage.getItem(sidebarCollapsedKey) === 'true') setSidebarCollapsed(true);
-let sidebarWidth = 300;
+let sidebarWidth = 272;
 function applySidebarWidth(px: number): number {
   // The floor keeps the wordmark, the mode slider and the collapse button on one line.
-  const clamped = Math.max(300, Math.min(560, Math.round(px)));
+  const clamped = Math.max(272, Math.min(560, Math.round(px)));
   document.querySelector<HTMLElement>('.app')?.style.setProperty('--sidebar-width', `${clamped}px`);
   return clamped;
 }

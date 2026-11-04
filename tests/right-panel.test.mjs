@@ -21,13 +21,13 @@ test('the side panel can be widened by dragging its edge', async () => {
   const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src/renderer/style.css')]);
   assert.match(html, /id="sidebar-resizer"[^>]*role="separator"/);
   // The width is a variable so a drag is one property write, not a layout rewrite.
-  assert.match(style, /\.left-shell\{grid-area:1\/1;display:grid;grid-template-columns:52px var\(--sidebar-width,300px\)/);
+  assert.match(style, /\.left-shell\{grid-area:1\/1;display:grid;grid-template-columns:52px var\(--sidebar-width,272px\)/);
   assert.match(style, /\.left-shell\{[^}]*grid-template-rows:56px minmax\(0,1fr\)/);
   assert.match(style, /\.rail\{grid-area:rail;[^}]*border-right:1px solid #2a4258/);
   assert.match(style, /\.sidebar-resizer\{position:absolute;[^}]*cursor:col-resize/);
   assert.match(main, /--sidebar-width/);
   assert.match(main, /localStorage\.setItem\(sidebarWidthKey/, 'the width is remembered');
-  assert.match(main, /Math\.max\(300, Math\.min\(560/, 'clamped so it cannot swallow the window');
+  assert.match(main, /Math\.max\(272, Math\.min\(560/, 'clamped so it cannot swallow the window');
   assert.match(main, /ArrowRight/, 'keyboard resizing');
 });
 
@@ -121,7 +121,7 @@ test('the Right Pane is the Task Monitor behind three controls', async () => {
   const controls = [...monitor.matchAll(/id="(tools-toggle|terminal-panel|task-monitor-close)"/g)].map((match) => match[1]);
   assert.deepEqual(controls, ['tools-toggle', 'terminal-panel', 'task-monitor-close']);
   assert.match(html, /id="task-monitor-open"[^>]*aria-label="Open task monitor"[^>]*hidden/);
-  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\) 320px\}/);
+  assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\) 288px\}/);
   assert.match(style, /\.monitor-head\{[^}]*justify-content:flex-end/);
   assert.match(main, /function setTaskMonitor\(open: boolean, focus = false, pin\?: boolean\): void/);
   assert.match(main, /function renderTaskMonitor\(\): void/);
@@ -150,9 +150,9 @@ test('the shell degrades without hiding the rail', async () => {
   const [style, theme] = await Promise.all([read('src/renderer/style.css'), read('src/renderer/theme.css')]);
   assert.match(style, /@media\(max-width:1199px\)\{\s*\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/);
   // The overlay starts below the topbar, so Plan/Act and the theme toggle stay clickable.
-  assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.task-monitor\{position:absolute;right:0;top:56px;bottom:0;width:min\(340px,calc\(100vw - 60px\)\)/);
+  assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.task-monitor\{position:absolute;right:0;top:56px;bottom:0;width:min\(308px,calc\(100vw - 60px\)\)/);
   // The composer reserves the overlay footprint; Send/stop must stay reachable.
-  assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.app\.task-monitor-open \.composer-wrap\{padding-right:calc\(min\(340px,calc\(100vw - 60px\)\) \+ 12px\)\}/);
+  assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.app\.task-monitor-open \.composer-wrap\{padding-right:calc\(min\(308px,calc\(100vw - 60px\)\) \+ 12px\)\}/);
   assert.match(style, /@media\(max-width:999px\)\{\s*\.left-shell\{grid-template-columns:52px 220px\}/);
   assert.match(style, /@media\(max-width:999px\)\{[^@]*?\.sidebar-resizer\{display:none\}/);
   assert.match(style, /@media\(max-width:999px\)\{[^@]*?\.topbar #workspace-context\{display:none\}/);

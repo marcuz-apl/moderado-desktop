@@ -9,7 +9,7 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 Revised 2026-11-03: the window is four vertical regions — Activity Rail, Left Pane,
 Workspace, and Right Pane.
 
-- The 52 px Activity Rail and the resizable Left Pane (300-560 px, 300 px default)
+- The 52 px Activity Rail and the resizable Left Pane (272-560 px, 272 px default)
   share one 56 px merged header. The header carries the "Moderado Desktop" wordmark
   plus the Work/Code segmented control; the OS window icon carries the brand mark.
   Below the header the rail and the Left Pane are separate columns.
@@ -21,8 +21,8 @@ Workspace, and Right Pane.
   context, actions, Plan/Act (hidden in Work mode), theme), the transcript, the composer, and a terminal drawer
   below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
 - The Right Pane is the Task Monitor. At 1200 px and wider it is a
-  320 px grid column; below 1200 px it overlays the workspace's right edge as
-  `min(340px, calc(100vw - 60px))`, so the rail, Left Pane and workspace stay visible
+  288 px grid column; below 1200 px it overlays the workspace's right edge as
+  `min(308px, calc(100vw - 60px))`, so the rail, Left Pane and workspace stay visible
   and the grid has no third column while overlaying. It leaves the grid when
   collapsed, and page mode also closes its column. Switching to Code opens it, since
   that mode's work lives in the monitor; switching back to Work closes it unless the
@@ -31,8 +31,8 @@ Workspace, and Right Pane.
   (Open File Browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
   and the collapse triangle. Collapsing leaves a 24 x 64 px edge tab that reopens it.
 - Page mode hides the conversation (topbar and transcript), the composer, the drawer
-  and the Right Pane, and closes the pane column, leaving the rail and Left Pane
-  beside the page.
+  and the Right Pane, and collapses the Left Pane, leaving only the activity rail
+  beside a full-width page.
 - At 999 px and below the Left Pane is clamped to 220 px, the resizer is hidden, and
   the workspace context line in the topbar hides. Session actions stay reachable at
   every width, so New, Rename, and Delete never disappear. The rail never hides, and
@@ -41,7 +41,7 @@ Workspace, and Right Pane.
 - The rail selection persists in `moderado-left-view` (`library`, `files`, `git`,
   `schedules`; default `library`), the Git switch in `moderado-git-view`
   (`changes` or `checkpoints`; default `changes`), the Left Pane width in
-  `moderado-sidebar-width` (300-560 px; default 300), the Left Pane collapse state
+  `moderado-sidebar-width` (272-560 px; default 272), the Left Pane collapse state
   in `moderado-sidebar-collapsed` (`true` hides the pane, leaving the rail; default
   expanded), the Right Pane in
   `moderado-task-monitor`, open unless stored as `false`, and a manual Right Pane
@@ -64,7 +64,7 @@ The renderer obtains entries and previews only through Tauri commands that call 
 
 ### Checkpoints and Schedules
 
-The Checkpoints and Schedules views keep the existing lists and actions without changing their behavior: Checkpoints under the Git rail tab, Schedules under its own tab. Checkpoint restore keeps its diff preview and confirmation. Scheduled runs and approval dialogs continue to work regardless of which rail tab is selected.
+The Checkpoints and Schedules views keep the existing lists and actions without changing their behavior: Checkpoints under the Git rail tab, Schedules under its own tab. Checkpoint restore keeps its diff preview and confirmation. Scheduled runs and approval dialogs continue to work regardless of which rail tab is selected. Git is Code-only: in Work the rail entry is disabled, explains that it needs Code mode, and the Left Pane falls back to the Library, so Work cannot open Git or Checkpoints.
 
 ### Source Control
 

@@ -145,6 +145,24 @@ test('both modes share one Left Pane and one rail', async () => {
   assert.match(html, /<aside class="sidebar" id="sidebar" role="tabpanel" aria-label="Left pane">/);
 });
 
+test('Git is Code-only, so Work disables its rail entry and pane', async () => {
+  const [main, style, theme] = await Promise.all([
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/theme.css', import.meta.url), 'utf8'),
+  ]);
+  assert.match(main, /const gitAvailable = \(\): boolean => activeKind === 'code';/, 'only Code owns a repository');
+  assert.match(main, /if \(kind === 'work' && activeLeftView === 'git'\) activeLeftView = 'library';/, 'the view settles before any refresh reads it');
+  assert.match(main, /if \(!enabled && activeLeftView === 'git'\) activeLeftView = 'library';/, 'Work falls back to the Library');
+  assert.match(main, /gitRail\.setAttribute\('aria-disabled', String\(!enabled\)\)/, 'the rail entry announces its state');
+  assert.match(main, /gitRail\.title = enabled \? 'Git' : 'Git is available in Code mode'/, 'hovering explains how to reach it');
+  assert.match(main, /button\.dataset\.rail === 'git' && !gitAvailable\(\)/, 'a disabled entry explains itself instead of switching');
+  assert.match(main, /Git is available in Code mode\.'\); return;/, 'the click names the mode');
+  assert.match(main, /\.filter\(\(button\) => button\.getAttribute\('aria-disabled'\) !== 'true'\)/, 'arrow keys skip the disabled entry');
+  assert.match(style, /\.rail-tab\[aria-disabled="true"\],\.rail-tab\[aria-disabled="true"\]:hover\{background:transparent/, 'it never looks hovered');
+  assert.match(theme, /:root\[data-theme="light"\] \.rail-tab\[aria-disabled="true"\]/, 'the light rail carries the same state');
+});
+
 test('Library lists tasks and projects in one badged list', async () => {
   const [html, main, style] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -254,13 +272,14 @@ test('Code Explorer exposes manual file operations from its context menu', async
   }
 });
 
-test('all five Auto-Approve options default on and MCP is marked as a placeholder', async () => {
+test('all five Auto-Approve options default on and MCP is usable in Code mode', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command', 'approve-mcp']) {
     assert.match(html, new RegExp(`<input id="${id}" type="checkbox" checked`));
   }
-  assert.match(html, /id="approve-mcp" type="checkbox" checked disabled/);
-  assert.match(html, /MCP server support is a placeholder/);
+  assert.match(html, /id="approve-mcp" type="checkbox" checked \/>/, 'the option is enabled; MCP tools are supported');
+  assert.doesNotMatch(html, /MCP server support is a placeholder/);
+  assert.match(html, /MCP tools from servers configured in Settings/);
 });
 
 test('Auto-Approve controls sit directly above the message composer', async () => {
@@ -318,7 +337,7 @@ test('token usage sits beside Auto-approve, outside the composer box', async () 
   assert.ok(topbar.indexOf('id="auto-approve-group"') < topbar.indexOf('id="model-usage"'));
   const form = composer.match(/<form id="composer">([\s\S]*?)<\/form>/)?.[1] ?? '';
   assert.doesNotMatch(form, /id="model-usage"/);
-  assert.match(style, /\.model-usage\{[^}]*font-size:11px/);
+  assert.match(style, /\.model-usage\{[^}]*font-size:calc\(11px\*var\(--text-scale\)\)/);
 });
 
 test('Explorer root uses the project folder name on Windows and Unix paths', () => {

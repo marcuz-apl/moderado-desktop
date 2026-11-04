@@ -64,7 +64,7 @@ test('the topbar markup keeps the label attached to the session title', async ()
 test('the topbar lays the label and the stamp out on one row', async () => {
   const css = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
   assert.match(css, /\.topbar \.topbar-title\{display:flex;align-items:baseline;gap:10px/);
-  assert.match(css, /\.topbar \.topbar-title \.eyebrow\{[^}]*font-size:12px/);
+  assert.match(css, /\.topbar \.topbar-title \.eyebrow\{[^}]*font-size:calc\(12px\*var\(--text-scale\)\)/);
   assert.match(css, /\.topbar \.topbar-title \.eyebrow::after\{content:":"\}/);
-  assert.match(css, /\.topbar \.topbar-title h1\{[^}]*font-size:13px/);
+  assert.match(css, /\.topbar \.topbar-title h1\{[^}]*font-size:calc\(13px\*var\(--text-scale\)\)/);
 });

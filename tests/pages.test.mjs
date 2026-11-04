@@ -64,15 +64,19 @@ test('the rail bottom opens Docs and Settings, and User lives in the Left Pane',
   assert.match(html, /<h1>Settings<\/h1>/);
   assert.doesNotMatch(html, /id="page-profile"/);
   assert.match(main, /\$\('user-signin'\)\.addEventListener\('click'/);
-  assert.match(main, /https:\/\/modr\.alfazen\.org\/account\?mode=signin/, 'the account page is the one place to sign in');
+  assert.match(main, /invoke<\{ email: string \}>\('moderado_sign_in'\)/, 'sign-in hands off to the browser and returns the email');
+  assert.match(main, /\$\('user-account-name'\)\.textContent = accountEmail \|\| t\('Not signed in'\)/);
+  assert.doesNotMatch(main, /account\?mode=signin/, 'the pane no longer sends the user to a page that forgets them');
 });
 
-test('page mode keeps the rail and Left Pane and drops the conversation', async () => {
+test('page mode keeps the rail, collapses both panes, and drops the conversation', async () => {
   const style = await read('src/renderer/style.css');
   assert.match(style, /\.app\.page-mode\{grid-template-columns:auto minmax\(0,1fr\)\}/);
   // Without this guard, page mode at 1200px and wider keeps the hidden monitor's column.
   assert.match(style, /\.app\.page-mode\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/, 'page mode wins over an open monitor');
-  assert.doesNotMatch(style, /\.app\.page-mode \.sidebar\{display:none\}/);
+  assert.match(style, /\.app\.page-mode \.left-shell\{grid-template-columns:52px 0;grid-template-rows:0 minmax\(0,1fr\)\}/, 'the Left Pane gives its width to the page');
+  assert.match(style, /\.app\.page-mode \.shell-head,\.app\.page-mode \.sidebar,\.app\.page-mode \.sidebar-resizer\{display:none\}/, 'the merged header and pane leave with the workspace');
+  assert.match(style, /\.app\.page-mode \.task-monitor\{display:none\}/, 'the Right Pane leaves too');
   assert.match(style, /\.main\.page-mode>\.topbar,\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
   assert.match(style, /\.main\.page-mode>\.terminal-drawer\{display:none\}/, 'page mode hides the terminal drawer');
   assert.match(style, /\.page\.active\{display:block\}/);
@@ -98,9 +102,9 @@ test('settings pairs its cards on shared rows so their heights match', async () 
 
 test('the Settings and Docs body text share one size', async () => {
   const style = await read('src/renderer/style.css');
-  assert.match(style, /\.markdown-body\{white-space:normal;font-size:13px;line-height:1\.65/, 'Docs body matches the settings scale');
-  assert.match(style, /\.markdown-body h2\{font-size:16px\}/);
-  assert.match(style, /\.page \.settings-group \.hint\{font-size:12px\}/, 'settings hints step up toward the Docs size');
+  assert.match(style, /\.markdown-body\{white-space:normal;font-size:calc\(13px\*var\(--text-scale\)\);line-height:1\.65/, 'Docs body matches the settings scale');
+  assert.match(style, /\.markdown-body h2\{font-size:calc\(16px\*var\(--text-scale\)\)\}/);
+  assert.match(style, /\.page \.settings-group \.hint\{font-size:calc\(12px\*var\(--text-scale\)\)\}/, 'settings hints step up toward the Docs size');
 });
 
 test('Settings and Docs end with a footer carrying the current year', async () => {

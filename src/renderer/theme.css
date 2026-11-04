@@ -22,6 +22,8 @@
 :root[data-theme="light"] .rail{border-color:var(--light-border)}
 :root[data-theme="light"] .rail-tab{color:#45616c}
 :root[data-theme="light"] .rail-tab:hover{background:#dbeaec;color:#123f42}
+:root[data-theme="light"] .rail-tab[aria-disabled="true"],
+:root[data-theme="light"] .rail-tab[aria-disabled="true"]:hover{background:transparent;color:#9bb0b6}
 :root[data-theme="light"] .rail-tab.selected,
 :root[data-theme="light"] .rail-tab[aria-current="page"]{background:#d5e9e8;color:#134846}
 :root[data-theme="light"] .main{background:radial-gradient(circle at 80% 0%,#e9f4f5 0%,#f8fbfc 55%)}
