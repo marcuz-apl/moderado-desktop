@@ -4,7 +4,7 @@
 
 1. `feat:` work moves the patch digit: `npm run version:patch` (for example 0.4.6 → 0.4.7). `fix:`, `docs:`, and `build:` commits keep the semver and only advance the `+YYMMDD<n>` build counter. A minor bump is explicit (`npm run version:minor`) and the patch is capped at 99.
 2. Land the change on `master`; the pre-commit hook syncs `package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock` with `VERSION`.
-3. Tag the release: `git tag v0.4.6 && git push origin v0.4.6`. The tag triggers `.github/workflows/release.yml`.
+3. Tag the release: `git tag v0.4.40 && git push origin v0.4.40`. The tag triggers `.github/workflows/release.yml`.
 
 ## Pre-flight
 
@@ -23,13 +23,23 @@
 
 Bundle metadata (publisher, category, descriptions, copyright) lives in `src-tauri/tauri.conf.json`.
 
-## Signing (blocked on credentials)
+## Signing (deferred — releases ship unsigned)
 
-Unsigned installers trigger SmartScreen and Gatekeeper warnings. To sign, add these repository secrets and the matching workflow steps:
+Releases are published unsigned by decision on 2026-11-04: there is no certificate budget yet, and the installers still work with a one-time warning.
 
-- Windows: `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` (Authenticode).
-- macOS: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, plus `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` for notarization.
-- Linux: no signing required for AppImage or deb.
+| OS | What an unsigned build does |
+| --- | --- |
+| Windows | SmartScreen says "Windows protected your PC" with an unknown publisher. **More info → Run anyway** installs; AppLocker or Smart App Control policies may refuse outright. |
+| macOS | Gatekeeper blocks the first launch ("Apple could not verify…"). Right-click the app → **Open** once, or run `xattr -dr com.apple.quarantine "/Applications/Moderado Desktop.app"`. |
+| Linux | Nothing — `.AppImage`, `.deb`, and `.rpm` install without warnings. |
+
+When a certificate budget exists, in priority order:
+
+- **macOS** — required for a clean install: Apple Developer Program, a Developer ID Application certificate, hardened runtime, notarization, and stapling. CI supplies `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, plus either an App Store Connect API key (`APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH`) or `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` for `notarytool`.
+- **Windows** — strongly recommended: an OV or EV certificate held in a cloud HSM (Azure Trusted Signing, DigiCert KeyLocker, SSL.com eSigner). File-based `.pfx` signing is no longer accepted since June 2023. Configure `bundle.windows.certificateThumbprint` with `timestampUrl`, or a `signCommand` for the signing service, and keep only the provider credentials in repository secrets.
+- **Linux** — no artifact signature is needed for GitHub Release downloads; GPG repository signing only matters if an apt or dnf repository is hosted.
+
+The purchase decision and install workarounds are also recorded in project memory, so a future session does not treat the missing signature as a regression.
 
 ## Auto-update (not configured)
 
@@ -47,6 +57,7 @@ The Profile panel's GitHub sign-in needs a GitHub App client ID and secret suppl
 
 ## Current status
 
-- Installers: built by the tag workflow.
+- Installers: built by the tag workflow for Windows, macOS, and Linux.
+- Signing: deferred; installers are unsigned and the documented workarounds apply.
 - CI: Ubuntu, Windows, and macOS, including Clippy on each.
-- Signing, auto-update, and GitHub sign-in: pending external credentials.
+- Auto-update and GitHub sign-in: pending external credentials.

@@ -53,6 +53,10 @@ cd moderado-desktop
 npm install
 ```
 
+### Installing a release
+
+Download the installers from the [GitHub Releases page](https://github.com/marcuz-apl/moderado-desktop/releases). Builds are unsigned for now, so expect a one-time warning: macOS Gatekeeper blocks the first launch (right-click the app → **Open**, or run `xattr -dr com.apple.quarantine "/Applications/Moderado Desktop.app"`), Windows SmartScreen asks for **More info → Run anyway**, and Linux `.AppImage`/`.deb` install without warnings.
+
 ### Development
 
 ```bash

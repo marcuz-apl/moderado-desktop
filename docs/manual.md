@@ -101,6 +101,8 @@ No telemetry is sent anywhere.
 ### If something looks wrong
 
 - **"Enter an endpoint, choose a model"** — Settings is missing a provider URL or model.
+- **Windows says "Windows protected your PC"** — the build is unsigned; choose **More info → Run anyway**.
+- **macOS will not open the app** — the build is unsigned; right-click the app → **Open** once, or run `xattr -dr com.apple.quarantine "/Applications/Moderado Desktop.app"`.
 - **A turn stops early** — the agent hit its step limit; send `continue` to keep going from where it stopped.
 - **A tool was refused** — check the Auto-approve row above the composer; that category is set to ask first.
 - **A page of the manual looks wrong** — this file is `docs/manual.md`; edit it and rebuild.
