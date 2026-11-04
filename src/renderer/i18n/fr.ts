@@ -89,6 +89,7 @@ export const fr: Record<string, string> = {
   'Not signed in': 'Non connecté',
   'Sign in to link your Moderado account, plan, and API key. This device keeps working locally without one.': 'Connectez-vous pour lier votre compte Moderado, votre offre et votre clé API. Cet appareil continue de fonctionner localement sans compte.',
   'Sign in at modr.alfazen.org': 'Se connecter sur modr.alfazen.org',
+  'Sign in at 127.0.0.1:4788': 'Se connecter sur 127.0.0.1:4788',
   'GIT IDENTITY': 'IDENTITÉ GIT',
   'Not a repository': 'Pas un dépôt',
 

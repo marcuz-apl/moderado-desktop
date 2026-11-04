@@ -12,12 +12,12 @@ use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 use tauri_plugin_opener::OpenerExt;
 
-const AUTHORIZE_ENDPOINT: &str = "https://modr.alfazen.org/authorize";
-const TOKEN_ENDPOINT: &str = "https://modr.alfazen.org/oauth/token";
+/// The two gateways this app can sign in against. Anything else is refused so a
+/// compromised renderer cannot send an account token to an arbitrary endpoint.
+const PROD_GATEWAY: &str = "https://modr.alfazen.org/v1";
+const DEV_GATEWAY: &str = "http://127.0.0.1:4788/v1";
 const CLIENT_ID: &str = "moderado-desktop";
 const KEYCHAIN_SERVICE: &str = "com.moderado.desktop";
-/// The same keychain entry the provider layer reads, so the key applies at once.
-const KEYCHAIN_ACCOUNT: &str = "https://modr.alfazen.org/v1";
 /// The Gateway keeps the authorization code for five minutes.
 const WAIT_LIMIT: Duration = Duration::from_secs(5 * 60);
 
@@ -32,9 +32,17 @@ struct TokenResponse {
     email: Option<String>,
 }
 
-/// Opens the Gateway consent page and waits for its loopback callback.
+/// Opens the selected Gateway's consent page and waits for its loopback callback.
+/// The key is stored under the same base URL the provider layer reads, so a dev
+/// sign-in applies to the dev provider and a prod sign-in to prod.
 #[tauri::command]
-pub async fn moderado_sign_in(app: tauri::AppHandle) -> Result<AccountIdentity, String> {
+pub async fn moderado_sign_in(
+    app: tauri::AppHandle,
+    base_url: String,
+) -> Result<AccountIdentity, String> {
+    let base = gateway_base(&base_url)?;
+    let authorize_endpoint = gateway_endpoint(base, "/authorize")?;
+    let token_endpoint = gateway_endpoint(base, "/oauth/token")?;
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|_| "Could not open a loopback port for sign-in".to_string())?;
     let port = listener
@@ -46,7 +54,7 @@ pub async fn moderado_sign_in(app: tauri::AppHandle) -> Result<AccountIdentity, 
     let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
     let state = random_token(24)?;
     let authorize = reqwest::Url::parse_with_params(
-        AUTHORIZE_ENDPOINT,
+        &authorize_endpoint,
         &[
             ("response_type", "code"),
             ("client_id", CLIENT_ID),
@@ -64,14 +72,15 @@ pub async fn moderado_sign_in(app: tauri::AppHandle) -> Result<AccountIdentity, 
     let code = tauri::async_runtime::spawn_blocking(move || wait_for_callback(listener, &expected_state))
         .await
         .map_err(|_| "Sign-in task failed".to_string())??;
-    exchange_code(code, verifier, redirect_uri).await
+    exchange_code(&token_endpoint, code, verifier, redirect_uri, base).await
 }
 
-/// Forgets the stored key; the account itself stays intact on the website.
+/// Forgets the selected Gateway's stored key; the account itself stays intact.
 #[tauri::command]
-pub async fn moderado_sign_out() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+pub async fn moderado_sign_out(base_url: String) -> Result<(), String> {
+    let base = gateway_base(&base_url)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, base)
             .map_err(|_| "Could not access the OS keychain".to_string())?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -82,13 +91,29 @@ pub async fn moderado_sign_out() -> Result<(), String> {
     .map_err(|_| "Keychain task failed".to_string())?
 }
 
+fn gateway_base(base_url: &str) -> Result<&'static str, String> {
+    match base_url.trim_end_matches('/') {
+        PROD_GATEWAY => Ok(PROD_GATEWAY),
+        DEV_GATEWAY => Ok(DEV_GATEWAY),
+        _ => Err("Sign-in is only available for the Moderado gateway".to_string()),
+    }
+}
+
+fn gateway_endpoint(base_url: &str, path: &str) -> Result<String, String> {
+    let base = gateway_base(base_url)?;
+    let origin = base.strip_suffix("/v1").unwrap_or(base);
+    Ok(format!("{origin}{path}"))
+}
+
 async fn exchange_code(
+    token_endpoint: &str,
     code: String,
     verifier: String,
     redirect_uri: String,
+    keychain_account: &str,
 ) -> Result<AccountIdentity, String> {
     let response = reqwest::Client::new()
-        .post(TOKEN_ENDPOINT)
+        .post(token_endpoint)
         .timeout(Duration::from_secs(30))
         .json(&serde_json::json!({
             "code": code,
@@ -114,8 +139,9 @@ async fn exchange_code(
         .filter(|value| !value.trim().is_empty())
         .ok_or("The Gateway did not return the account email")?;
     let api_key = token.access_token;
+    let keychain_account = keychain_account.to_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account)
             .map_err(|_| "Could not access the OS keychain".to_string())?;
         entry
             .set_password(&api_key)
@@ -284,5 +310,31 @@ mod tests {
         assert_eq!(request_target("GET /callback?code=a HTTP/1.1"), Some("/callback?code=a"));
         assert_eq!(request_target("POST /callback HTTP/1.1"), None);
         assert_eq!(request_target(""), None);
+    }
+
+    #[test]
+    fn sign_in_endpoints_follow_the_selected_gateway() {
+        assert_eq!(
+            gateway_endpoint(PROD_GATEWAY, "/authorize").unwrap(),
+            "https://modr.alfazen.org/authorize"
+        );
+        assert_eq!(
+            gateway_endpoint(DEV_GATEWAY, "/oauth/token").unwrap(),
+            "http://127.0.0.1:4788/oauth/token"
+        );
+        assert_eq!(gateway_endpoint("http://127.0.0.1:4788/v1/", "/authorize").unwrap(),
+            "http://127.0.0.1:4788/authorize");
+    }
+
+    #[test]
+    fn sign_in_refuses_gateways_outside_the_two_presets() {
+        for base in [
+            "https://evil.example/v1",
+            "http://127.0.0.1:9999/v1",
+            "http://modr.alfazen.org/v1",
+            "",
+        ] {
+            assert!(gateway_base(base).is_err(), "{base} must be refused");
+        }
     }
 }

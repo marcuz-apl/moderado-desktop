@@ -334,6 +334,11 @@ function setModelOptions(models: ModelInfo[], planValue: string, actValue: strin
 function setGatewayMode(next: GatewayMode, persistDraft = true): void {
   const changed = gatewayMode !== next;
   gatewayMode = next;
+  if (changed) {
+    // The User pane follows the gateway: each one has its own signed-in email.
+    accountEmail = storedAccountEmail();
+    applyAccount();
+  }
   endpoint.value = GATEWAY_URLS[next];
   document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
     const selected = button.dataset.gatewayMode === next;
@@ -2003,14 +2008,27 @@ keyApplyLink.addEventListener('click', async (event) => {
   try { await openUrl(url); }
   catch (error) { setStatus(`Could not open apply page: ${String(error)}`); }
 });
-const accountEmailKey = 'moderado-account-email';
+/** Each gateway keeps its own identity, so a dev sign-in never poses as the prod account. */
+const accountEmailKey = (mode: GatewayMode) => `moderado-account-email:${mode}`;
+/** Earlier builds stored the prod email without a mode; read it once so nobody seems signed out. */
+const legacyAccountEmailKey = 'moderado-account-email';
+const storedAccountEmail = (): string => {
+  try {
+    return localStorage.getItem(accountEmailKey(gatewayMode))
+      ?? (gatewayMode === 'prod' ? localStorage.getItem(legacyAccountEmailKey) : null)
+      ?? '';
+  } catch { return ''; }
+};
 let accountEmail = '';
-try { accountEmail = localStorage.getItem(accountEmailKey) ?? ''; } catch { /* the pane still offers sign-in */ }
 function applyAccount(): void {
   $('user-account-name').textContent = accountEmail || t('Not signed in');
   $('user-signin').toggleAttribute('hidden', Boolean(accountEmail));
   $('user-signout').toggleAttribute('hidden', !accountEmail);
+  $('user-signin').textContent = gatewayMode === 'dev'
+    ? t('Sign in at 127.0.0.1:4788')
+    : t('Sign in at modr.alfazen.org');
 }
+accountEmail = storedAccountEmail();
 applyAccount();
 $('user-signin').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('user-signin');
@@ -2019,9 +2037,9 @@ $('user-signin').addEventListener('click', async () => {
   try {
     // The browser authorizes on the website; the loopback callback mints the
     // key, stores it in the OS keychain, and reports the signed-in email.
-    const identity = await invoke<{ email: string }>('moderado_sign_in');
+    const identity = await invoke<{ email: string }>('moderado_sign_in', { baseUrl: GATEWAY_URLS[gatewayMode] });
     accountEmail = identity.email;
-    try { localStorage.setItem(accountEmailKey, accountEmail); } catch { /* the pane shows it for this run */ }
+    try { localStorage.setItem(accountEmailKey(gatewayMode), accountEmail); } catch { /* the pane shows it for this run */ }
     applyAccount();
     setStatus(`Signed in as ${accountEmail}.`);
   } catch (error) {
@@ -2031,10 +2049,13 @@ $('user-signin').addEventListener('click', async () => {
   }
 });
 $('user-signout').addEventListener('click', async () => {
-  try { await invoke('moderado_sign_out'); }
+  try { await invoke('moderado_sign_out', { baseUrl: GATEWAY_URLS[gatewayMode] }); }
   catch (error) { setStatus(`Sign-out failed: ${String(error)}`); return; }
   accountEmail = '';
-  try { localStorage.removeItem(accountEmailKey); } catch { /* nothing else caches it */ }
+  try {
+    localStorage.removeItem(accountEmailKey(gatewayMode));
+    if (gatewayMode === 'prod') localStorage.removeItem(legacyAccountEmailKey);
+  } catch { /* nothing else caches it */ }
   applyAccount();
   setStatus('Signed out. Local work is unchanged.');
 });
@@ -2117,10 +2138,10 @@ function setSidebarCollapsed(collapsed: boolean): void {
 }
 $('sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!sidebarCollapsed));
 if (localStorage.getItem(sidebarCollapsedKey) === 'true') setSidebarCollapsed(true);
-let sidebarWidth = 272;
+let sidebarWidth = 0; // 0 follows --pane-width; a drag pins an exact pixel width.
 function applySidebarWidth(px: number): number {
   // The floor keeps the wordmark, the mode slider and the collapse button on one line.
-  const clamped = Math.max(272, Math.min(560, Math.round(px)));
+  const clamped = Math.max(260, Math.min(560, Math.round(px)));
   document.querySelector<HTMLElement>('.app')?.style.setProperty('--sidebar-width', `${clamped}px`);
   return clamped;
 }
@@ -2150,11 +2171,17 @@ const endResize = (event: PointerEvent): void => {
 };
 resizer.addEventListener('pointerup', endResize);
 resizer.addEventListener('pointercancel', endResize);
-resizer.addEventListener('dblclick', () => { sidebarWidth = applySidebarWidth(300); saveSidebarWidth(); });
+resizer.addEventListener('dblclick', () => {
+  // Drop the pin so the pane returns to the width the window gives it.
+  try { localStorage.removeItem(sidebarWidthKey); } catch { /* applies for this run */ }
+  document.querySelector<HTMLElement>('.app')?.style.removeProperty('--sidebar-width');
+  sidebarWidth = 0;
+});
 resizer.addEventListener('keydown', (event) => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   event.preventDefault();
-  sidebarWidth = applySidebarWidth(sidebarWidth + (event.key === 'ArrowRight' ? 16 : -16));
+  const current = sidebarWidth || Math.round(document.querySelector<HTMLElement>('.sidebar')?.getBoundingClientRect().width ?? 260);
+  sidebarWidth = applySidebarWidth(current + (event.key === 'ArrowRight' ? 16 : -16));
   saveSidebarWidth();
 });
 $<HTMLButtonElement>('refresh-project').addEventListener('click', () => { void refreshProjectTree(); });

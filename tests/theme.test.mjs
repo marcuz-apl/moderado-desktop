@@ -124,6 +124,16 @@ test('every dark surface on the settings page has a light counterpart', async ()
   assert.deepEqual(gaps, [], `settings page surfaces with no light rule:\n${gaps.join('\n')}`);
 });
 
+test('the MCP server cards follow the light theme', async () => {
+  const theme = await readTheme();
+  // MCP rows are created at runtime, so the settings-page scanner above cannot see them.
+  for (const selector of ['.mcp-server-row', '.mcp-field', '.mcp-field input', '.mcp-field select', '.mcp-enabled', '.mcp-status-row', '.mcp-status-row span']) {
+    const escaped = selector.replace(/\./g, '\\.');
+    assert.match(theme, new RegExp(`:root\\[data-theme="light"\\] ${escaped}(?![\\w-])`), `${selector} has no light rule`);
+  }
+  assert.match(theme, /:root\[data-theme="light"\] \.mcp-enabled input\{accent-color:var\(--light-accent\)\}/);
+});
+
 test('the empty-state logo follows the light theme', async () => {
   const theme = await readTheme();
   assert.match(theme, /:root\[data-theme="light"\] \.empty-symbol\{color:var\(--light-accent\);border-color:#8ab8b7\}/);

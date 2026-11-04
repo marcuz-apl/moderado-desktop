@@ -64,7 +64,9 @@ test('the rail bottom opens Docs and Settings, and User lives in the Left Pane',
   assert.match(html, /<h1>Settings<\/h1>/);
   assert.doesNotMatch(html, /id="page-profile"/);
   assert.match(main, /\$\('user-signin'\)\.addEventListener\('click'/);
-  assert.match(main, /invoke<\{ email: string \}>\('moderado_sign_in'\)/, 'sign-in hands off to the browser and returns the email');
+  assert.match(main, /invoke<\{ email: string \}>\('moderado_sign_in', \{ baseUrl: GATEWAY_URLS\[gatewayMode\] \}\)/, 'sign-in uses the selected gateway and returns the email');
+  assert.match(main, /invoke\('moderado_sign_out', \{ baseUrl: GATEWAY_URLS\[gatewayMode\] \}\)/, 'sign-out revokes the key of the selected gateway');
+  assert.match(main, /`moderado-account-email:\$\{mode\}`/, 'each gateway keeps its own signed-in email');
   assert.match(main, /\$\('user-account-name'\)\.textContent = accountEmail \|\| t\('Not signed in'\)/);
   assert.doesNotMatch(main, /account\?mode=signin/, 'the pane no longer sends the user to a page that forgets them');
 });
@@ -85,15 +87,15 @@ test('page mode keeps the rail, collapses both panes, and drops the conversation
 test('settings pairs its cards on shared rows so their heights match', async () => {
   const [html, style] = await Promise.all([readHtml(), read('src/renderer/style.css')]);
   const settings = html.slice(html.indexOf('id="page-settings"'), html.indexOf('id="page-docs"'));
-  // Connection | Language over MCP | Appearance over About. Two grid rows give the
-  // pairs equal heights: Appearance matches Language, and About matches MCP.
+  // Connection | MCP over Language | Appearance over About. MCP sits in the top
+  // row so adding servers grows into the taller row instead of past the fold.
   assert.match(settings, /class="page-body settings-grid"/);
   const cards = [...settings.matchAll(/class="settings-group (?:[a-z-]+ )?([a-z-]+-card)"/g)].map((match) => match[1]);
-  assert.deepEqual(cards, ['connection-card', 'language-card', 'mcp-card', 'appearance-card', 'about-card']);
+  assert.deepEqual(cards, ['connection-card', 'mcp-card', 'language-card', 'appearance-card', 'about-card']);
   assert.match(style, /\.page-body\.settings-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-rows:auto auto/);
   assert.match(style, /\.settings-grid>\.connection-card\{grid-column:1;grid-row:1\/span 2\}/);
-  assert.match(style, /\.settings-grid>\.language-card\{grid-column:2;grid-row:1\}/);
-  assert.match(style, /\.settings-grid>\.mcp-card\{grid-column:2;grid-row:2\}/);
+  assert.match(style, /\.settings-grid>\.mcp-card\{grid-column:2;grid-row:1\}/);
+  assert.match(style, /\.settings-grid>\.language-card\{grid-column:2;grid-row:2\}/);
   assert.match(style, /\.settings-grid>\.appearance-card\{grid-column:3;grid-row:1\}/);
   assert.match(style, /\.settings-grid>\.about-card\{grid-column:3;grid-row:2\}/);
   // Below 1000px the three columns become one stack.

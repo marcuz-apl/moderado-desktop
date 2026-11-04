@@ -134,6 +134,17 @@
 :root[data-theme="light"] .muted{color:#536b77}
 :root[data-theme="light"] .page-footer{border-color:var(--light-border);color:var(--light-muted)}
 :root[data-theme="light"] #lsp-config{background:var(--light-surface);border-color:#a9bec5;color:#203744}
+:root[data-theme="light"] .mcp-server-row,
+:root[data-theme="light"] .mcp-status-row{background:var(--light-panel);border-color:var(--light-border)}
+:root[data-theme="light"] .mcp-field{color:#45616c}
+:root[data-theme="light"] .mcp-field input,
+:root[data-theme="light"] .mcp-field select{background:var(--light-surface);border-color:#a9bec5;color:#203744}
+:root[data-theme="light"] .mcp-field input::placeholder{color:#667e88}
+:root[data-theme="light"] .mcp-enabled{color:#294652}
+:root[data-theme="light"] .mcp-enabled input{accent-color:var(--light-accent)}
+:root[data-theme="light"] .mcp-status-row span{color:var(--light-muted)}
+:root[data-theme="light"] .mcp-status-row.ok strong{color:#0d6a5f}
+:root[data-theme="light"] .mcp-status-row.error strong{color:#a13631}
 :root[data-theme="light"] .markdown-body blockquote{border-color:#a9bec5;color:#45616c}
 :root[data-theme="light"] .markdown-body a{color:var(--light-accent)}
 :root[data-theme="light"] .composer-attach,

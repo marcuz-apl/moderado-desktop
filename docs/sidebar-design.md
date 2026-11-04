@@ -9,7 +9,8 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 Revised 2026-11-03: the window is four vertical regions — Activity Rail, Left Pane,
 Workspace, and Right Pane.
 
-- The 52 px Activity Rail and the resizable Left Pane (272-560 px, 272 px default)
+- The 52 px Activity Rail and the resizable Left Pane (260-560 px; it follows the
+  window at `max(260px, 18.06vw)` — 260 px at a 1440 px window — until dragged)
   share one 56 px merged header. The header carries the "Moderado Desktop" wordmark
   plus the Work/Code segmented control; the OS window icon carries the brand mark.
   Below the header the rail and the Left Pane are separate columns.
@@ -21,8 +22,9 @@ Workspace, and Right Pane.
   context, actions, Plan/Act (hidden in Work mode), theme), the transcript, the composer, and a terminal drawer
   below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
 - The Right Pane is the Task Monitor. At 1200 px and wider it is a
-  288 px grid column; below 1200 px it overlays the workspace's right edge as
-  `min(308px, calc(100vw - 60px))`, so the rail, Left Pane and workspace stay visible
+  `max(260px, 18.06vw)` grid column — 260 px at a 1440 px window, growing with the
+  window; below 1200 px it overlays the workspace's right edge as
+  `min(var(--pane-width), calc(100vw - 60px))`, so the rail, Left Pane and workspace stay visible
   and the grid has no third column while overlaying. It leaves the grid when
   collapsed, and page mode also closes its column. Switching to Code opens it, since
   that mode's work lives in the monitor; switching back to Work closes it unless the
@@ -41,7 +43,8 @@ Workspace, and Right Pane.
 - The rail selection persists in `moderado-left-view` (`library`, `files`, `git`,
   `schedules`; default `library`), the Git switch in `moderado-git-view`
   (`changes` or `checkpoints`; default `changes`), the Left Pane width in
-  `moderado-sidebar-width` (272-560 px; default 272), the Left Pane collapse state
+  `moderado-sidebar-width` (260-560 px; when unset the pane follows
+  `max(260px, 18.06vw)`, and double-clicking the resizer clears it), the Left Pane collapse state
   in `moderado-sidebar-collapsed` (`true` hides the pane, leaving the rail; default
   expanded), the Right Pane in
   `moderado-task-monitor`, open unless stored as `false`, and a manual Right Pane
