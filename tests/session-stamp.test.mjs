@@ -41,7 +41,7 @@ test('the topbar context names the project or task instead of the full path', ()
   assert.equal(folderContextLabel('work', null), 'Select a task to start.');
 });
 
-test('the Workspaces rows and the topbar headline show the session stamp', async () => {
+test('the Library rows and the topbar headline show the session stamp', async () => {
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   assert.match(main, /radio\.setAttribute\('aria-label', `Select \$\{sessionLabel\(session\)\}`\)/);
   assert.match(main, /button\.textContent = `\$\{running\.has\(session\.id\) \? '● ' : ''\}\$\{sessionLabel\(session\)\}`/);

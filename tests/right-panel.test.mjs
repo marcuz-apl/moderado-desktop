@@ -7,11 +7,11 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 test('the shell is a rail, a Left Pane, and a Right Pane', async () => {
   const html = await read('index.html');
   const tabs = [...html.matchAll(/data-rail="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(tabs, ['workspaces', 'files', 'git', 'schedules']);
+  assert.deepEqual(tabs, ['library', 'files', 'git', 'schedules']);
   const pages = [...html.matchAll(/data-page-link="([a-z-]+)"/g)].map((match) => match[1]);
   assert.deepEqual(pages, ['profile', 'docs', 'settings']);
   const views = [...html.matchAll(/data-left-view="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(views, ['workspaces', 'files', 'git', 'schedules']);
+  assert.deepEqual(views, ['library', 'files', 'git', 'schedules']);
   assert.match(html, /class="left-shell">[\s\S]*class="shell-head"/);
   assert.doesNotMatch(html, /id="sidebar-toggle"/);
   assert.match(html, /id="tools-toggle"[^>]*aria-haspopup="menu"/);

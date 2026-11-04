@@ -13,7 +13,7 @@ Workspace, and Right Pane.
   share one 56 px merged header. The header carries the Moderado mark and wordmark
   plus the Work/Code segmented control. Below the header the rail and the Left Pane
   are separate columns.
-- The rail's top group selects the Left Pane contents: Workspaces, Files, Git, and
+- The rail's top group selects the Left Pane contents: Library, Files, Git, and
   Schedules. Its bottom group — User (Profile), Docs, and Settings — opens each as a
   full-width page; activating the active page button returns to the conversation.
 - The conversation column owns the 56 px topbar (session stamp, project or task
@@ -34,8 +34,8 @@ Workspace, and Right Pane.
   the workspace context line in the topbar hides. Session actions stay reachable at
   every width, so New, Rename, and Delete never disappear. The rail never hides, and
   the window minimum stays 760 px.
-- The rail selection persists in `moderado-left-view` (`workspaces`, `files`, `git`,
-  `schedules`; default `workspaces`), the Git switch in `moderado-git-view`
+- The rail selection persists in `moderado-left-view` (`library`, `files`, `git`,
+  `schedules`; default `library`), the Git switch in `moderado-git-view`
   (`changes` or `checkpoints`; default `changes`), the Left Pane width in
   `moderado-sidebar-width` (200-560 px; default 260), and the Right Pane in
   `moderado-task-monitor`, open unless stored as `false`. The retired keys
@@ -44,9 +44,9 @@ Workspace, and Right Pane.
 
 ## Panels
 
-### Workspaces
+### Library
 
-The Workspaces rail tab keeps the existing session list and New session action. A new Code session is named with its creation time as `YYYY-MM-DD HH:MM:SS` in the local zone; older auto-named sessions are labelled the same way, and a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
+The Library rail tab keeps the existing task and project list and New session action; the name avoids colliding with the central workspace. Its view id is `library`; a stored `workspaces` value from before the rename still opens Library. A new Code session is named with its creation time as `YYYY-MM-DD HH:MM:SS` in the local zone; older auto-named sessions are labelled the same way, and a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
 
 The conversation topbar reads `AGENT TASKLIST` in Work mode and `AGENT SESSION` in Code mode beside the same creation stamp. In Work mode its **New Task** action creates a numbered `work-task-##` task; Code keeps **New Session**. Its secondary line names the project or task, never the full folder path; the full path remains in the line's tooltip and in the Files view.
 

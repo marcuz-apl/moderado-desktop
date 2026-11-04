@@ -83,6 +83,8 @@
 - New Work task folders and labels use `work-task-##` instead of `work-sessionN`; existing `work-sessionN` tasks are untouched.
 - The empty Work context line now reads "Select a task to start." instead of "Select a task to start a session."
 - The empty-state logo no longer keeps a dark chip in the light theme; it uses the accent glyph and a light border.
+- The first rail view and its Left Pane heading are now **Library** instead of Workspaces, so they no longer echo the central workspace's name. The view id is `library` in code, in `data-rail`/`data-left-view`, and in the stored `moderado-left-view` value; a stored `workspaces` value still opens Library.
+- The header's M tile is now 26 px with a 15 px glyph and a 7 px radius, so it no longer reads as a third 36 px rail button beside the 13 px wordmark.
 - The Auto-approve row no longer collapses when no session exists. Its checkboxes stay visible but disabled, with a "Start with the next task." tooltip, so the footer keeps its shape in both modes before and after a session starts.
 
 ## Versioning: Patch to 99, Minor on Request

@@ -45,7 +45,7 @@ Top group, `role="tablist" aria-orientation="vertical"`, top to bottom:
 
 | Tab | Icon | Left Pane shows |
 | --- | --- | --- |
-| Workspaces | `icon-projects` | Tasks in Work mode, projects in Code mode, with their New/Rename/Delete actions |
+| Library | `icon-projects` | Tasks in Work mode, projects in Code mode, with their New/Rename/Delete actions |
 | Files | `icon-folder` | Explorer only: root name, Refresh, folder tree, file preview sub-view |
 | Git | `icon-source` | Changes, Checkpoints, Git actions, and recent commits |
 | Schedules | `icon-clock` | Schedule list, + New, Import transcript |
@@ -70,7 +70,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 - Width 260 px by default, resizable 200-560 px with the existing 7 px handle; double-click resets to 260; arrow keys step 16 px; persists in `moderado-sidebar-width`.
 - One view at a time, selected solely by the rail. The selected rail tab is the only navigation state.
-- **Workspaces**: the current library list and its actions (New Task, Rename, Delete in Work mode; New, Open, Rename, Remove in Code mode). Heading "Workspaces". A new Code session is named with its creation time (`YYYY-MM-DD HH:MM:SS`, local zone); older auto-named sessions are labelled the same way, and a name typed through Rename wins over the stamp. The row tooltip keeps the workspace path.
+- **Library**: the current library list and its actions (New Task, Rename, Delete in Work mode; New, Open, Rename, Remove in Code mode). Heading "Library". A new Code session is named with its creation time (`YYYY-MM-DD HH:MM:SS`, local zone); older auto-named sessions are labelled the same way, and a name typed through Rename wins over the stamp. The row tooltip keeps the workspace path.
 - **Files**: the current Explorer view without the Explorer/Changes/Checkpoints tab row. Selecting a file opens the Preview sub-view, which keeps the Files tab selected and offers "Back to files".
 - **Git**: branch name, Changes list, commit/push controls, Recent commits, and Checkpoints. The Changes/Checkpoints switch is a two-tab row persisted in `moderado-git-view`. A non-repository workspace keeps the current explanation.
 - **Schedules**: the current schedule list and Import transcript.
@@ -118,7 +118,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 
 | Key | Values | Default |
 | --- | --- | --- |
-| `moderado-left-view` (new) | `workspaces` \| `files` \| `git` \| `schedules` | `workspaces` |
+| `moderado-left-view` (new) | `library` \| `files` \| `git` \| `schedules` | `library` |
 | `moderado-git-view` (new) | `changes` \| `checkpoints` | `changes` |
 | `moderado-sidebar-width` (kept) | 200-560 | 260 |
 | `moderado-task-monitor` (kept) | `true` = open | `true` |
@@ -150,7 +150,7 @@ Bottom group, pinned to the rail bottom, as plain buttons:
 ## Error handling
 
 - A failed or rejected action still surfaces in the status line; nothing is swallowed.
-- No session: Workspaces shows its empty state; Files, Git, and Schedules say to select a task or project; the monitor says to select a session.
+- No session: Library shows its empty state; Files, Git, and Schedules say to select a task or project; the monitor says to select a session.
 - Non-repository Git keeps the current explanation.
 - A failed external launch keeps its explicit status message.
 

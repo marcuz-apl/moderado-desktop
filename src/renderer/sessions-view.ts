@@ -1,7 +1,7 @@
 export type SessionKind = 'work' | 'code';
 /** The rail destinations that own the Left Pane. */
-export type LeftView = 'workspaces' | 'files' | 'git' | 'schedules';
-export const LEFT_VIEWS: readonly LeftView[] = ['workspaces', 'files', 'git', 'schedules'];
+export type LeftView = 'library' | 'files' | 'git' | 'schedules';
+export const LEFT_VIEWS: readonly LeftView[] = ['library', 'files', 'git', 'schedules'];
 /** Tabs inside the Git destination. */
 export type GitView = 'changes' | 'checkpoints';
 export const GIT_VIEWS: readonly GitView[] = ['changes', 'checkpoints'];
@@ -25,11 +25,15 @@ export type ProjectSummary = {
 };
 
 export const DEFAULT_SESSION_KIND: SessionKind = 'work';
-export const DEFAULT_LEFT_VIEW: LeftView = 'workspaces';
+export const DEFAULT_LEFT_VIEW: LeftView = 'library';
 
-/// Unknown or retired stored views open the default one.
+/// Unknown or retired stored views open the default one; `workspaces` is the
+/// pre-rename name of the Library view and keeps opening it.
 export function parseLeftView(value: string | null): LeftView {
-  return value === 'files' || value === 'git' || value === 'schedules' ? value : DEFAULT_LEFT_VIEW;
+  if (value === 'workspaces') return 'library';
+  return value === 'library' || value === 'files' || value === 'git' || value === 'schedules'
+    ? value
+    : DEFAULT_LEFT_VIEW;
 }
 
 export function parseGitView(value: string | null): GitView {

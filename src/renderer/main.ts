@@ -1282,7 +1282,7 @@ function runTool(action: ToolAction): void {
 
 async function selectProject(workspace: string): Promise<void> {
   if (!projects.some((project) => project.workspace === workspace)) { setStatus('Open this project first.'); return; }
-  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); selectLeftView('workspaces');
+  saveComposerDraft(); enterDraft('code', workspace); expandedProjects.add(workspace); selectLeftView('library');
   const next = sessionForMode(summaries, 'code', lastSessionByProject.get(workspace), workspace);
   if (next) await selectSession(next.id, false);
   else renderSessions();
@@ -1296,7 +1296,7 @@ async function selectWorkTask(taskId: string, saveDraft = true): Promise<void> {
   const children = summaries.filter((session) => session.kind === 'work' && session.taskId === taskId);
   const remembered = lastSessionByTask.get(taskId) ?? (summaries.find((session) => session.id === lastSessionByKind.get('work') && session.taskId === taskId)?.id);
   const next = children.find((session) => session.id === remembered) ?? children[0];
-  selectLeftView('workspaces');
+  selectLeftView('library');
   if (next) await selectSession(next.id, false);
   else {
     enterDraft('work');
@@ -2234,7 +2234,7 @@ async function createWorkTask(): Promise<void> {
   try {
     const task = await invoke<WorkTaskRecord>('create_work_task');
     await refreshSummaries(); selectedWorkTaskId = task.id; expandedWorkTasks.add(task.id); lastSessionByTask.delete(task.id); rememberNavigation();
-    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); selectLeftView('workspaces');
+    prompt.value = ''; pendingAttachments = []; renderChips(); enterDraft('work'); selectLeftView('library');
     setStatus(`Task “${task.name}” created.`);
   } catch (error) { setStatus(String(error)); }
   finally { creatingSession = false; renderSessions(); updateControls(); }
@@ -2289,7 +2289,7 @@ $('open-project').addEventListener('click', async () => {
 });
 async function newProjectSession(workspace: string): Promise<void> {
   if (creatingSession) return;
-  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); selectLeftView('workspaces');
+  saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); selectLeftView('library');
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
 $('new-session').addEventListener('click', () => {
