@@ -403,3 +403,10 @@
 - Proven by `a_steer_joins_the_running_turn_and_keeps_it_alive`: a mock provider receives the steered message as the newest message in round 2 while the turn never ended.
 - Library pane spacing between a task/project row and its session rows halved: group padding 5→2px, session-list padding 3/8→1/4px, `#library-list` gap 5→2px.
 - Tests: 147 Rust + 143 node pass, clippy `-D warnings` clean; browser check 3/3.
+
+## First published release v0.4.43 (2026-11-04)
+
+- CI caught two things local Windows testing could not: the 0.4.42 test asserted the Work command tool on macOS, where no sandbox backend advertises it (now cfg-gated like the older assertion), and the tag-release path had never actually run — tauri-action invokes `npm run tauri build`, but package.json had no `tauri` script and tauri.conf.json had no `beforeBuildCommand`, so the release build missed both the CLI entry and the frontend build.
+- Fixes: `"tauri": "tauri"` script added, `"beforeBuildCommand": "vite build"` set in tauri.conf.json, and the local `npm run build` trimmed to `tsc --noEmit && tauri build --no-bundle` so vite runs once via the conf.
+- The first Release run on the tag failed on all three OSes with `Missing script: "tauri"`; after the fix the tag was force-moved to the fixed commit and v0.4.43 published with installers for Windows (MSI + NSIS), macOS (dmg + app.tar.gz, aarch64), and Linux (AppImage + deb + rpm). Release notes document the steer/queue features and the unsigned-install workarounds.
+- One macOS CI job was cancelled mid-run by runner capacity constraints; rerunning only the failed job (`gh run rerun --failed`) turned it green.
