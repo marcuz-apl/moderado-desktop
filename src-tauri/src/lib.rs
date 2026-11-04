@@ -260,12 +260,18 @@ fn rename_project(state: tauri::State<'_, AppState>, project_workspace: String, 
 }
 
 #[tauri::command]
-fn remove_project(state: tauri::State<'_, AppState>, project_workspace: String) -> Result<(), String> {
-    for session in state.store.list()?.iter().filter(|session| session.kind == SessionKind::Code && session.workspace == project_workspace) {
-        let runtime = state.runtime(&session.id)?;
-        let _guard = runtime.turn_lock.try_lock().map_err(|_| "Stop the running sessions before removing this project")?;
+fn delete_project(app: tauri::AppHandle, state: tauri::State<'_, AppState>, project_workspace: String) -> Result<Vec<String>, String> {
+    let children: Vec<_> = state.store.list()?.into_iter()
+        .filter(|session| session.kind == SessionKind::Code && session.workspace == project_workspace)
+        .collect();
+    let runtimes: Vec<_> = children.iter().map(|session| state.runtime(&session.id)).collect::<Result<_, _>>()?;
+    let _guards: Vec<_> = runtimes.iter().map(|runtime| runtime.turn_lock.try_lock().map_err(|_| "Stop the running sessions before deleting this project")).collect::<Result<_, _>>()?;
+    let removed = state.store.delete_project(&project_workspace)?;
+    if let Ok(root) = app.path().app_data_dir() {
+        for id in &removed { let _ = std::fs::remove_dir_all(root.join("attachments").join(id)); }
     }
-    state.store.remove_project(&project_workspace)
+    state.runtimes.lock().map_err(|_| "Session state unavailable")?.retain(|id, _| !removed.contains(id));
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -372,6 +378,66 @@ fn open_file_browser(
 ) -> Result<(), String> {
     let root = browser_workspace(&state, session_id, project_workspace, work_task_id)?;
     external::open_file_browser(&root)
+}
+
+/// Paints the native Windows caption to match the webview theme. The webview
+/// covers only the client area, so without this the title bar keeps the system
+/// chrome while the rest of the window switches.
+#[cfg(windows)]
+fn apply_caption_theme(window: &tauri::WebviewWindow, theme: &str) -> Result<(), String> {
+    use std::mem::size_of;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+    let dark = theme == "dark";
+    // COLORREF is 0x00BBGGRR, so these read backwards from their hex colors.
+    let (caption, text, border) = if dark {
+        (0x002b1b0du32, 0x00f3e8dcu32, 0x0058422au32)
+    } else {
+        (0x00faf9f5u32, 0x00443720u32, 0x00ded9c9u32)
+    };
+    unsafe {
+        let immersive: i32 = i32::from(dark);
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &immersive as *const _ as *const _,
+            size_of::<i32>() as u32,
+        )
+        .map_err(|error| error.to_string())?;
+        for (attribute, value) in [
+            (DWMWA_CAPTION_COLOR, caption),
+            (DWMWA_TEXT_COLOR, text),
+        ] {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &value as *const _ as *const _,
+                size_of::<u32>() as u32,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        // Older Windows builds do not know the border attribute; the caption still lands.
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &border as *const _ as *const _,
+            size_of::<u32>() as u32,
+        );
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+    #[cfg(windows)]
+    apply_caption_theme(&window, &theme)?;
+    #[cfg(not(windows))]
+    let _ = (&window, &theme);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1525,7 +1591,7 @@ pub fn run() {
             open_project,
             list_projects,
             rename_project,
-            remove_project,
+            delete_project,
             create_default_session,
             list_sessions,
             get_session,
@@ -1547,6 +1613,7 @@ pub fn run() {
             open_in_editor,
             open_system_terminal,
             open_file_browser,
+            set_window_theme,
             rename_session,
             delete_session,
             create_schedule,

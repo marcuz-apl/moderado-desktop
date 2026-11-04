@@ -78,13 +78,17 @@
 
 ## Work Mode Task Language
 
-- The topbar label follows the mode: `AGENT TASKLIST` in Work and `AGENT SESSION` in Code.
-- The topbar action reads **New Task** in Work mode and **New Session** in Code mode. In Work mode it creates a numbered task (`work-task-01`, `work-task-02`, …) with no selection required; Code mode still creates a session in the selected project.
+- The topbar always reads `AGENT SESSION` and its action is always **New Session**, because the central workspace manages sessions in both modes.
+- In Work mode **New Session** starts a session inside the selected task; creating a task is the Library's **New Task** action, and task Rename/Delete stay task-level. Deleting a task removes its sessions, while its managed folder and files remain.
 - New Work task folders and labels use `work-task-##` instead of `work-sessionN`; existing `work-sessionN` tasks are untouched.
 - The empty Work context line now reads "Select a task to start." instead of "Select a task to start a session."
 - The empty-state logo no longer keeps a dark chip in the light theme; it uses the accent glyph and a light border.
 - The first rail view and its Left Pane heading are now **Library** instead of Workspaces, so they no longer echo the central workspace's name. The view id is `library` in code, in `data-rail`/`data-left-view`, and in the stored `moderado-left-view` value; a stored `workspaces` value still opens Library.
 - The header's M tile is now 26 px with a 15 px glyph and a 7 px radius, so it no longer reads as a third 36 px rail button beside the 13 px wordmark.
+- In Code mode the Library owns project management: **New Project**, Open, Rename, and **Delete**, all project-level. Deleting a project removes its sessions and histories from Moderado while the project folder and files remain.
+- The central workspace is session-only in both modes: New Session, Rename Session, and Delete Session act on conversations; Code keeps Plan/Act there.
+- The Files panel shows the current task or project folder path on one ellipsised line above the tree; the line and the project name both keep the full path as a tooltip.
+- The Work/Code slider no longer stretches across the header: each half is 52 px and the control hugs its two labels.
 - The Auto-approve row no longer collapses when no session exists. Its checkboxes stay visible but disabled, with a "Start with the next task." tooltip, so the footer keeps its shape in both modes before and after a session starts.
 
 ## Versioning: Patch to 99, Minor on Request

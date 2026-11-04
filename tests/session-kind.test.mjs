@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { DEFAULT_LEFT_VIEW, DEFAULT_SESSION_KIND, GIT_VIEWS, LEFT_VIEWS, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { DEFAULT_LEFT_VIEW, DEFAULT_SESSION_KIND, displayPath, GIT_VIEWS, LEFT_VIEWS, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseGitView, parseLeftView, parseSessionKind, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, startupSessionKind, visibleSessions } from '../src/renderer/sessions-view.ts';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -26,6 +26,17 @@ test('Work is the default session kind and the selector toggles both ways', () =
   assert.equal(nextSessionKind('code'), 'work');
 });
 
+test('startup opens Work unless the stored mode still has a session', async () => {
+  assert.equal(startupSessionKind('work', false), 'work');
+  assert.equal(startupSessionKind('work', true), 'work');
+  assert.equal(startupSessionKind('code', false), 'work', 'an empty Code toggle never becomes the next launch');
+  assert.equal(startupSessionKind('code', true), 'code', 'previous Code work resumes');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /const codeSessions = summaries\.filter\(\(session\) => session\.kind === 'code' && validProjects\.has\(session\.workspace\)\)/);
+  assert.match(main, /activeKind = startupSessionKind\(storedKind, codeSessions\.length > 0\)/);
+  assert.match(main, /codeSessions\.some\(\(session\) => session\.workspace === selectedProjectWorkspace\)/, 'a project without sessions does not win the restore');
+});
+
 test('Auto-approve stays visible but disabled before a session starts', async () => {
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(main, /\$\('auto-approve-group'\)\.toggleAttribute\('hidden'/, 'the footer never collapses to a blank row');
@@ -34,24 +45,28 @@ test('Auto-approve stays visible but disabled before a session starts', async ()
   assert.ok(main.includes("for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;"), 'the checkboxes are disabled without a session');
 });
 
-test('the topbar speaks in tasks for Work and sessions for Code', async () => {
+test('the workspace topbar always speaks in sessions', async () => {
   const [html, main] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
   ]);
-  assert.match(html, /<p id="session-eyebrow" class="eyebrow">AGENT SESSION<\/p>/, 'Code keeps the session label by default');
-  assert.match(main, /\$\('session-eyebrow'\)\.textContent = work \? 'AGENT TASKLIST' : 'AGENT SESSION'/);
-  assert.match(main, /\$\('new-session'\)\.textContent = work \? 'New Task' : 'New Session'/);
+  assert.match(html, /<p id="session-eyebrow" class="eyebrow">AGENT SESSION<\/p>/);
+  assert.match(main, /\$\('session-eyebrow'\)\.textContent = 'AGENT SESSION'/);
+  assert.match(main, /\$\('new-session'\)\.textContent = 'New Session'/);
+  assert.doesNotMatch(main, /AGENT TASKLIST/, 'the topbar never switches to task vocabulary');
 });
 
-test('the Work New Task action creates a numbered task, not a session', async () => {
+test('the Library creates numbered tasks and the topbar starts their sessions', async () => {
   const [main, rust] = await Promise.all([
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src-tauri/src/sessions.rs', import.meta.url), 'utf8'),
   ]);
-  assert.match(main, /if \(activeKind === 'work'\) void createWorkTask\(\)/, 'Work never reaches the session creator');
+  assert.match(main, /\$\('workspace-button'\)\.addEventListener\('click', \(\) => \{ void createWorkTask\(\); \}\)/, 'the Library owns task creation');
   assert.match(main, /const task = await invoke<WorkTaskRecord>\('create_work_task'\)/);
-  assert.match(main, /activeKind === 'code' && !selectedProjectWorkspace/, 'a Work task needs no selection');
+  assert.match(main, /async function newWorkSession\(taskId: string\)[\s\S]*createSession\(currentSettings\(\), 'work', null, taskId\)/, 'the topbar starts a session in the selected task');
+  assert.match(main, /if \(activeKind === 'work'\) \{ if \(selectedWorkTaskId\) void newWorkSession\(selectedWorkTaskId\); \}/);
+  assert.match(main, /activeKind === 'work' \? !selectedWorkTaskId : !selectedProjectWorkspace/, 'a Work session needs a selected task');
+  assert.match(main, /Delete task .* and its sessions from Moderado\?/, 'deleting a task announces its sessions');
   assert.ok(rust.includes('create_numbered_workspace(documents, "work-task-", 1, 2)'), 'task folders start at 01');
   assert.ok(rust.includes('format!("{prefix}{number:0digits$}")'), 'the counter is zero-padded to two digits');
 });
@@ -72,11 +87,12 @@ test('new session action names the selected session kind', () => {
 
 test('the rail chooses the Left Pane view and remembers it', () => {
   assert.equal(DEFAULT_LEFT_VIEW, 'library');
-  assert.deepEqual(LEFT_VIEWS, ['library', 'files', 'git', 'schedules']);
+  assert.deepEqual(LEFT_VIEWS, ['library', 'files', 'git', 'schedules', 'user']);
   assert.equal(parseLeftView('library'), 'library');
   assert.equal(parseLeftView('files'), 'files');
   assert.equal(parseLeftView('git'), 'git');
   assert.equal(parseLeftView('schedules'), 'schedules');
+  assert.equal(parseLeftView('user'), 'user');
   assert.equal(parseLeftView('workspaces'), 'library', 'the pre-rename value keeps opening Library');
   assert.equal(parseLeftView('source-control'), 'library', 'retired names fall back');
   assert.equal(parseLeftView(null), 'library');
@@ -87,19 +103,29 @@ test('the rail chooses the Left Pane view and remembers it', () => {
 });
 
 test('the merged shell header holds Work/Code and the topbar does not', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  const [html, main, style] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+  ]);
   assert.match(html, /class="left-shell">[\s\S]*class="shell-head">[\s\S]*class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
+  assert.match(html, /class="brand"><span class="brand-word">Moderado Desktop<\/span><\/div>/, 'the OS icon is the only brand mark');
+  assert.doesNotMatch(html, /class="brand-mark"/);
+  assert.doesNotMatch(style, /\.brand-mark\{/);
+  assert.match(style, /\.shell-head \.kind-segment\{flex:none;margin-left:auto\}/, 'the slider hugs its labels');
+  assert.match(style, /\.shell-head \.kind-segment button\{flex:none;width:52px/, 'both halves stay equal and compact');
   const topbar = html.slice(html.indexOf('<header class="topbar">'), html.indexOf('</header>', html.indexOf('<header class="topbar">')));
   assert.doesNotMatch(topbar, /id="kind-work"|id="kind-code"|class="kind-segment"|id="sidebar-toggle"/);
-  assert.match(html, /class="rail-tabs"[^>]*role="tablist"[^>]*aria-orientation="vertical"[\s\S]*data-rail="library"[\s\S]*data-rail="files"[\s\S]*data-rail="git"[\s\S]*data-rail="schedules"/);
+  assert.match(html, /class="rail-tabs"[^>]*role="tablist"[^>]*aria-orientation="vertical"[\s\S]*data-rail="library"[\s\S]*data-rail="files"[\s\S]*data-rail="git"[\s\S]*data-rail="schedules"[\s\S]*<\/nav>/);
   const railPages = html.slice(html.indexOf('class="rail-pages"'), html.indexOf('</aside>'));
-  assert.match(railPages, /data-page-link="profile"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="settings"/);
+  assert.match(railPages, /data-rail="user"[^>]*aria-pressed="false"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="settings"/, 'User sits directly above Docs even though it opens a pane view');
+  assert.doesNotMatch(railPages, /data-page-link="profile"/, 'User is a pane view, not a full page');
   assert.match(html, /class="session-actions">[\s\S]*id="new-session"/);
   assert.doesNotMatch(html, /empty-symbol[^<]*<img/);
   assert.match(main, /radio\.type = 'radio'/);
   // The design doc claims the rail's keyboard roving is covered by frontend checks.
   const railTabs = html.slice(html.indexOf('class="rail-tabs"'), html.indexOf('class="rail-pages"'));
+  assert.doesNotMatch(railTabs, /data-rail="user"/, 'the pane view left the top group');
   assert.equal((railTabs.match(/tabindex="0"/g) ?? []).length, 1, 'only the selected rail tab is tabbable');
   assert.equal((railTabs.match(/tabindex="-1"/g) ?? []).length, 3, 'every other rail view leaves the tab order');
   assert.equal((railTabs.match(/aria-selected="true"/g) ?? []).length, 1, 'one tab is selected');
@@ -112,9 +138,9 @@ test('the merged shell header holds Work/Code and the topbar does not', async ()
 test('both modes share one Left Pane and one rail', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const views = [...html.matchAll(/data-left-view="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(views, ['library', 'files', 'git', 'schedules']);
+  assert.deepEqual(views, ['library', 'files', 'git', 'schedules', 'user']);
   assert.doesNotMatch(html, /data-panel-content=/);
-  assert.doesNotMatch(html, /id="sidebar-toggle"/);
+  assert.match(html, /class="left-shell">[\s\S]*id="sidebar-toggle"/, 'the Left Pane collapses from the merged header');
   assert.doesNotMatch(html, /class="activity-bar"|class="activity-button"/);
   assert.match(html, /<aside class="sidebar" id="sidebar" role="tabpanel" aria-label="Left pane">/);
 });
@@ -144,6 +170,12 @@ test('Files and Git own their Left Pane contents', async () => {
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const files = html.slice(html.indexOf('data-left-view="files"'), html.indexOf('data-left-view="git"'));
   assert.match(files, /id="files-view"[\s\S]*id="project-tree"/);
+  assert.match(files, /id="project-tree"[^>]*><p class="hint">Select a task or project to browse its files\.<\/p>/, 'the idle Files text uses the shared hint size');
+  assert.match(main, /tree\.replaceChildren\(hintText\('This folder is empty\.'\)\)/, 'an empty folder reads at the same size as the idle text');
+  assert.match(main, /function hintText\(text: string\): HTMLParagraphElement \{[\s\S]*className = 'hint'/, 'one helper owns hint paragraphs');
+  assert.match(files, /id="project-path"[^>]*hidden/, 'the location line sits above the tree and starts hidden');
+  assert.match(main, /pathLine\.textContent = folder \? displayPath\(folder\) : ''/);
+  assert.match(main, /pathLine\.toggleAttribute\('hidden', !folder\)/);
   assert.match(files, /id="preview-view"[^>]*hidden[\s\S]*id="preview-back"/);
   assert.doesNotMatch(files, /data-git-tab|panel-tab/, 'Files has no tab row');
   const git = html.slice(html.indexOf('data-left-view="git"'), html.indexOf('data-left-view="schedules"'));
@@ -175,9 +207,12 @@ test('project operations stay under Projects and session navigation remains nest
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
   const panel = html.match(/data-left-view="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
-  assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="remove-project"/);
+  assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[^>]*>New Project<[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="delete-project"[^>]*>Delete</);
   assert.match(main, /className = work \? 'task-sessions' : 'project-sessions'/);
   assert.match(style, /\.project-sessions\{padding:[^}]*\}/);
+  assert.match(main, /invoke<string\[\]>\('delete_project'/, 'the Library deletes the project and its sessions');
+  assert.match(main, /Delete project .* Its sessions and histories are removed from Moderado; the project folder and files remain\./);
+  assert.doesNotMatch(main, /remove_project|remove-project/, 'no project-level remove path remains');
   assert.doesNotMatch(main, /\['New Session',[\s\S]*renameProject\(project\)/);
 });
 
@@ -286,15 +321,20 @@ test('token usage sits beside Auto-approve, outside the composer box', async () 
   assert.match(style, /\.model-usage\{[^}]*font-size:11px/);
 });
 
-test('Work profile does not require a GitHub account', () => {
-  assert.match(profileModeDescription('work'), /not required/i);
-  assert.match(profileModeDescription('code'), /optional GitHub account/i);
-});
-
 test('Explorer root uses the project folder name on Windows and Unix paths', () => {
   assert.equal(projectNameFromWorkspace('C:\\Users\\me\\Documents\\my-project', 'Session label'), 'my-project');
   assert.equal(projectNameFromWorkspace('/home/me/code/my-project/', 'Session label'), 'my-project');
   assert.equal(projectNameFromWorkspace('', 'Session label'), 'Session label');
+});
+
+test('the location line drops the Windows verbatim prefix but keeps normal paths', async () => {
+  assert.equal(displayPath('\\\\?\\E:\\projects\\moderado'), 'E:\\projects\\moderado');
+  assert.equal(displayPath('\\\\?\\UNC\\server\\share\\repo'), '\\\\server\\share\\repo');
+  assert.equal(displayPath('E:\\projects\\moderado'), 'E:\\projects\\moderado');
+  assert.equal(displayPath('/home/me/code'), '/home/me/code');
+  const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /pathLine\.textContent = folder \? displayPath\(folder\) : ''/, 'the Files panel line uses the display form');
+  assert.match(main, /button\.title = displayPath\(session\.workspace\)/, 'tooltips use it too');
 });
 
 test('projects group Code sessions by workspace and exclude Work sessions', () => {

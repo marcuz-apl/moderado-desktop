@@ -33,24 +33,38 @@ test('the manual is Getting started, then Reference, then License', async () => 
   assert.doesNotMatch(manual, /^# /m);
 });
 
-test('the About card carries the copyright on its bottom edge', async () => {
+test('the About card keeps the product name, version, and one intro line', async () => {
   const [html, style, theme] = await Promise.all([readHtml(), read('src/renderer/style.css'), read('src/renderer/theme.css')]);
-  assert.match(html, /<p class="about-copyright">© 2026 Moderado AI, an Alfazen product<\/p>/);
-  // The card is a column so the line can be pushed to its bottom, which is where
-  // the stretched card's spare space would otherwise sit empty.
-  assert.match(style, /\.about-group\{display:flex;flex-direction:column\}/);
-  assert.match(style, /\.about-copyright\{margin:auto 0 0;/);
-  assert.match(theme, /:root\[data-theme="light"\] \.about-copyright\{color:#536b77\}/);
+  const start = html.indexOf('class="settings-group about-group');
+  const about = html.slice(start, html.indexOf('</div>', start));
+  assert.match(about, /about-card/);
+  assert.match(about, /<p class="workspace-name">Moderado Desktop<\/p>/);
+  assert.match(about, /<span id="about-version"><\/span>/);
+  assert.match(about, /<p class="hint about-intro">[^<]*agent sessions[^<]*<\/p>/, 'one line says what the app is');
+  // The page footer carries the copyright now, so the card does not repeat it.
+  assert.doesNotMatch(about, /©|Alfazen|copyright/i);
+  assert.doesNotMatch(style, /\.about-copyright/);
+  assert.doesNotMatch(theme, /\.about-copyright/);
 });
 
-test('the rail bottom opens the Settings, Docs, and Profile pages', async () => {
-  const html = await readHtml();
+test('the rail bottom opens Docs and Settings, and User lives in the Left Pane', async () => {
+  const [html, main] = await Promise.all([readHtml(), readMain()]);
   const pages = html.slice(html.indexOf('class="rail-pages"'), html.indexOf('</aside>'));
-  assert.match(pages, /data-page-link="profile"[\s\S]*data-page-link="docs"[\s\S]*data-page-link="settings"/);
+  assert.match(pages, /data-page-link="docs"[\s\S]*data-page-link="settings"/);
+  assert.doesNotMatch(pages, /data-page-link="profile"/, 'User is not a full page');
+  assert.match(html, /data-rail="user"[^>]*aria-label="User" title="User"><svg aria-hidden="true"><use href="#icon-user"\/><\/svg>/);
+  assert.match(pages, /data-rail="user"[\s\S]*data-page-link="docs"/, 'the pane view sits above Docs');
+  assert.match(html, /data-left-view="user"/);
+  const userPanel = html.slice(html.indexOf('data-left-view="user"'), html.indexOf('</aside>'));
+  assert.match(userPanel, /ACCOUNT[\s\S]*GIT IDENTITY/);
+  assert.doesNotMatch(userPanel, /CURRENT SESSION|PROVIDER|>MODE<|profile-session|profile-provider/, 'transient status duplicates the topbar and composer');
+  assert.match(main, /\$\('profile-git'\)\.toggleAttribute\('hidden', work\)/, 'Git identity stays workspace-scoped');
+  assert.doesNotMatch(main, /profile-session|profile-provider|profile-mode-description/, 'the removed fields left no dead lookups');
   assert.match(html, /<h1>Docs<\/h1>/);
   assert.match(html, /<h1>Settings<\/h1>/);
-  assert.match(html, /<h1>Profile<\/h1>/);
-  assert.doesNotMatch(html, /data-panel-content="profile"/);
+  assert.doesNotMatch(html, /id="page-profile"/);
+  assert.match(main, /\$\('user-signin'\)\.addEventListener\('click'/);
+  assert.match(main, /https:\/\/modr\.alfazen\.org\/account\?mode=signin/, 'the account page is the one place to sign in');
 });
 
 test('page mode keeps the rail and Left Pane and drops the conversation', async () => {
@@ -64,25 +78,44 @@ test('page mode keeps the rail and Left Pane and drops the conversation', async 
   assert.match(style, /\.page\.active\{display:block\}/);
 });
 
-test('settings cards stack in three tight columns', async () => {
+test('settings pairs its cards on shared rows so their heights match', async () => {
   const [html, style] = await Promise.all([readHtml(), read('src/renderer/style.css')]);
   const settings = html.slice(html.indexOf('id="page-settings"'), html.indexOf('id="page-docs"'));
-  // Row-aligned grid rows left ~300px of dead space under the short cards, so
-  // each column is its own stack: Connection | MCP + Appearance | Language + About.
-  const columns = [...settings.matchAll(/<div class="page-col">([\s\S]*?)\n<\/div>/g)].map((match) =>
-    [...match[1].matchAll(/<p class="eyebrow">([^<]+)<\/p>/g)].map((inner) => inner[1]));
-  assert.deepEqual(columns, [
-    ['CONNECTION'],
-    ['LANGUAGE SERVERS', 'MCP SERVERS'],
-    ['APPEARANCE', 'ABOUT'],
-  ]);
-  // Columns share a height and their cards grow equally, so the three stacks end
-  // on the same line instead of leaving a ragged 100px step.
-  assert.match(style, /\.page-body\{display:flex;align-items:stretch;gap:16px/);
-  assert.match(style, /\.page-col\{display:flex;flex:1 1 0;flex-direction:column;min-width:0;gap:16px\}/);
-  assert.match(style, /\.page-col>\.settings-group\{flex:1 1 auto\}/);
-  // Below 1000px the columns flatten into one list, so align-items must stretch.
-  assert.match(style, /@media\(max-width:1000px\)\{\.page-body\{flex-direction:column;align-items:stretch\}\.page-col\{display:contents\}\}/);
+  // Connection | Language over MCP | Appearance over About. Two grid rows give the
+  // pairs equal heights: Appearance matches Language, and About matches MCP.
+  assert.match(settings, /class="page-body settings-grid"/);
+  const cards = [...settings.matchAll(/class="settings-group (?:[a-z-]+ )?([a-z-]+-card)"/g)].map((match) => match[1]);
+  assert.deepEqual(cards, ['connection-card', 'language-card', 'mcp-card', 'appearance-card', 'about-card']);
+  assert.match(style, /\.page-body\.settings-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);grid-template-rows:auto auto/);
+  assert.match(style, /\.settings-grid>\.connection-card\{grid-column:1;grid-row:1\/span 2\}/);
+  assert.match(style, /\.settings-grid>\.language-card\{grid-column:2;grid-row:1\}/);
+  assert.match(style, /\.settings-grid>\.mcp-card\{grid-column:2;grid-row:2\}/);
+  assert.match(style, /\.settings-grid>\.appearance-card\{grid-column:3;grid-row:1\}/);
+  assert.match(style, /\.settings-grid>\.about-card\{grid-column:3;grid-row:2\}/);
+  // Below 1000px the three columns become one stack.
+  assert.match(style, /@media\(max-width:1000px\)\{\.page-body\.settings-grid\{grid-template-columns:minmax\(0,1fr\)\}\.settings-grid>\.settings-group\{grid-column:1;grid-row:auto\}\}/);
+});
+
+test('the Settings and Docs body text share one size', async () => {
+  const style = await read('src/renderer/style.css');
+  assert.match(style, /\.markdown-body\{white-space:normal;font-size:13px;line-height:1\.65/, 'Docs body matches the settings scale');
+  assert.match(style, /\.markdown-body h2\{font-size:16px\}/);
+  assert.match(style, /\.page \.settings-group \.hint\{font-size:12px\}/, 'settings hints step up toward the Docs size');
+});
+
+test('Settings and Docs end with a footer carrying the current year', async () => {
+  const [html, main, style, theme] = await Promise.all([readHtml(), readMain(), read('src/renderer/style.css'), read('src/renderer/theme.css')]);
+  for (const id of ['page-settings', 'page-docs']) {
+    const start = html.indexOf(`id="${id}"`);
+    const page = html.slice(start, html.indexOf('</section>', start));
+    // Inside the page and after the body, so it scrolls with the content it closes.
+    assert.match(page, /<footer class="page-footer" data-page-footer><\/footer>$/, `${id} ends with the footer`);
+  }
+  // Read at render time, so the year follows the calendar rather than the build date.
+  assert.match(main, /const footerYear = new Date\(\)\.getFullYear\(\);/);
+  assert.match(main, /`\$\{footerYear\} Moderado Desktop by Moderado AI, an Alfazen platform, all rights reserved\.`/);
+  assert.match(style, /\.page-footer\{max-width:1100px;margin:28px auto 0;/);
+  assert.match(theme, /:root\[data-theme="light"\] \.page-footer\{/);
 });
 
 test('rail buttons open pages and the Back buttons leave them', async () => {
@@ -90,6 +123,6 @@ test('rail buttons open pages and the Back buttons leave them', async () => {
   assert.match(main, /function setPageMode\(page: AppPage \| null\): void/);
   assert.match(main, /document\.querySelectorAll<HTMLButtonElement>\('\.rail-pages \.rail-tab'\)/);
   assert.match(main, /switchPage\(page\)/);
-  assert.match(main, /for \(const id of \['close-page', 'close-docs', 'close-profile'\]\)/);
+  assert.match(main, /for \(const id of \['close-page', 'close-docs'\]\)/);
   assert.doesNotMatch(main, /\.activity-button/);
 });

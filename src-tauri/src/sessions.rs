@@ -271,10 +271,19 @@ impl SessionStore {
         Ok(())
     }
 
-    pub fn remove_project(&self, workspace: &str) -> Result<(), String> {
-        let changed = self.connect()?.execute("UPDATE projects SET archived=1 WHERE workspace=?1 AND archived=0", [workspace]).map_err(|error| error.to_string())?;
+    pub fn delete_project(&self, workspace: &str) -> Result<Vec<String>, String> {
+        let db = self.connect()?;
+        let tx = db.unchecked_transaction().map_err(|error| error.to_string())?;
+        let sessions = {
+            let mut query = tx.prepare("SELECT id FROM sessions WHERE kind='code' AND workspace=?1").map_err(|error| error.to_string())?;
+            let rows = query.query_map([workspace], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?
+        };
+        let changed = tx.execute("UPDATE projects SET archived=1 WHERE workspace=?1 AND archived=0", [workspace]).map_err(|error| error.to_string())?;
         if changed == 0 { return Err("Project is not registered".into()); }
-        Ok(())
+        tx.execute("DELETE FROM sessions WHERE kind='code' AND workspace=?1", [workspace]).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(sessions)
     }
 
     pub fn create_session_for_project(&self, workspace: &str, name: &str, settings: ProviderSettings) -> Result<SessionRecord, String> {
@@ -839,7 +848,7 @@ mod project_lifecycle_tests {
     }
 
     #[test]
-    fn project_survives_last_session_and_remove_reopen_preserves_history_and_files() {
+    fn deleting_a_project_removes_its_sessions_and_keeps_its_files() {
         let root = tempfile::tempdir().unwrap();
         let folder = root.path().join("project");
         std::fs::create_dir(&folder).unwrap();
@@ -852,9 +861,9 @@ mod project_lifecycle_tests {
         assert_eq!(SessionStore::open(db).unwrap().list_projects().unwrap().len(), 1);
         let second = store.create_session_for_project(&project.workspace, "Second", settings()).unwrap();
         store.rename_project(&project.workspace, "Named project").unwrap();
-        store.remove_project(&project.workspace).unwrap();
+        assert_eq!(store.delete_project(&project.workspace).unwrap(), vec![second.id.clone()]);
         assert!(store.list_projects().unwrap().is_empty());
-        assert!(store.get(&second.id).is_ok());
+        assert!(store.get(&second.id).is_err());
         assert_eq!(std::fs::read_to_string(folder.join("notes.md")).unwrap(), "keep");
         assert_eq!(store.register_project(&folder).unwrap().name, "Named project");
     }

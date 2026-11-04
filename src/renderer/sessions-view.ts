@@ -1,12 +1,12 @@
 export type SessionKind = 'work' | 'code';
 /** The rail destinations that own the Left Pane. */
-export type LeftView = 'library' | 'files' | 'git' | 'schedules';
-export const LEFT_VIEWS: readonly LeftView[] = ['library', 'files', 'git', 'schedules'];
+export type LeftView = 'library' | 'files' | 'git' | 'schedules' | 'user';
+export const LEFT_VIEWS: readonly LeftView[] = ['library', 'files', 'git', 'schedules', 'user'];
 /** Tabs inside the Git destination. */
 export type GitView = 'changes' | 'checkpoints';
 export const GIT_VIEWS: readonly GitView[] = ['changes', 'checkpoints'];
 /** Full-width views that replace the conversation. */
-export type AppPage = 'settings' | 'docs' | 'profile';
+export type AppPage = 'settings' | 'docs';
 
 export type ProjectSessionLike = {
   id: string;
@@ -31,7 +31,7 @@ export const DEFAULT_LEFT_VIEW: LeftView = 'library';
 /// pre-rename name of the Library view and keeps opening it.
 export function parseLeftView(value: string | null): LeftView {
   if (value === 'workspaces') return 'library';
-  return value === 'library' || value === 'files' || value === 'git' || value === 'schedules'
+  return value === 'library' || value === 'files' || value === 'git' || value === 'schedules' || value === 'user'
     ? value
     : DEFAULT_LEFT_VIEW;
 }
@@ -44,6 +44,12 @@ export function parseGitView(value: string | null): GitView {
 /// The rail remembers the mode you were last in, the way WorkBuddy does.
 export function parseSessionKind(value: string | null): SessionKind {
   return value === 'code' ? 'code' : 'work';
+}
+
+/// Startup opens the stored mode only while it still has a session; otherwise
+/// Work is the default, so an empty Code toggle never becomes the next launch.
+export function startupSessionKind(stored: SessionKind, hasStoredSessions: boolean): SessionKind {
+  return stored === 'code' && !hasStoredSessions ? DEFAULT_SESSION_KIND : stored;
 }
 
 export function sessionForMode<T extends { id: string; kind: SessionKind; workspace: string }>(
@@ -62,15 +68,18 @@ export function newSessionLabel(kind: SessionKind): string {
   return kind === 'work' ? '+ New Work session' : '+ New Code session';
 }
 
-export function profileModeDescription(kind: SessionKind): string {
-  return kind === 'work'
-    ? 'Work profile is local to this device. A GitHub account is not required.'
-    : 'Connect an optional GitHub account for Code mode.';
-}
-
 export function projectNameFromWorkspace(workspace: string, fallback: string): string {
   const name = workspace.split(/[\\/]/).filter(Boolean).at(-1);
   return name || fallback;
+}
+
+/// Rust canonicalizes folders, which on Windows yields verbatim paths such as
+/// `\\?\E:\work`. They are valid but noisy on screen, so strip the prefix where
+/// a path is shown; stored and command paths keep the canonical form.
+export function displayPath(path: string): string {
+  if (path.startsWith('\\\\?\\UNC\\')) return `\\\\${path.slice(8)}`;
+  if (path.startsWith('\\\\?\\')) return path.slice(4);
+  return path;
 }
 
 function pad2(value: number): string {

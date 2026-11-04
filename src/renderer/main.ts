@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -17,7 +17,7 @@ import { parseDisplaySize, zoomFor, type DisplaySize } from './display-size';
 import { LIGHT_FROM_HOUR, LIGHT_UNTIL_HOUR, nextThemePreference, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
 import manual from '../../docs/manual.md?raw';
-import { folderContextLabel, parseGitView, parseLeftView, parseSessionKind, profileModeDescription, projectNameFromWorkspace, sessionForMode, sessionLabel, sessionStamp, scheduleWriteApprovalChoiceVisible, sessionsForProject, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
+import { displayPath, folderContextLabel, parseGitView, parseLeftView, parseSessionKind, projectNameFromWorkspace, sessionForMode, sessionLabel, sessionStamp, scheduleWriteApprovalChoiceVisible, sessionsForProject, startupSessionKind, type SessionKind, type LeftView, type GitView, type AppPage } from './sessions-view';
 import { nextMenuIndex, toolDisabledReason, type ToolAction } from './tools-menu';
 import {
   artifactsFromActivity,
@@ -161,6 +161,9 @@ const checkpointsBySession = new Map<string, Checkpoint[]>();
 const turnCompleted = new Map<string, { at: number; stopped: boolean }>();
 /** The right-hand monitor, closed until the Tools menu or a stored preference asks for it. */
 let taskMonitorOpen = false;
+/** A manual open survives a mode switch; an auto-open does not. */
+const taskMonitorPinKey = 'moderado-task-monitor-pinned';
+let taskMonitorPinned = localStorage.getItem(taskMonitorPinKey) === 'true';
 const approvalQueue: ApprovalEvent[] = [];
 const modeBySession = new Map<string, 'plan' | 'act'>();
 const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>();
@@ -180,12 +183,18 @@ let themePreference: ThemePreference = 'auto';
 try { themePreference = parseThemePreference(localStorage.getItem(themeStorageKey)); }
 catch (error) { setStatus(`Theme preference could not be loaded: ${String(error)}`); }
 
+let syncedWindowTheme: string | null = null;
 function applyTheme(): void {
   const theme = resolveTheme(themePreference, new Date());
   const next = nextThemePreference(themePreference);
   themeSelect.value = themePreference;
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  if (theme !== syncedWindowTheme) {
+    syncedWindowTheme = theme;
+    // The native caption is drawn by Windows, not CSS, so it follows on demand.
+    void invoke('set_window_theme', { theme }).catch(() => { /* not running inside Tauri */ });
+  }
   if (pty) pty.terminal.options.theme = terminalTheme();
   themeToggle.dataset.themeMode = themePreference;
   themeToggle.setAttribute('aria-label', `Theme: ${themePreference}${themePreference === 'auto' ? `, ${theme} now` : ''}. Switch to ${next} theme.`);
@@ -207,7 +216,7 @@ themeSelect.addEventListener('change', () => {
   catch (error) { setStatus(`Theme preference could not be saved: ${String(error)}`); }
 });
 $('docs-content').innerHTML = markdown.render(manual);
-for (const id of ['close-page', 'close-docs', 'close-profile']) {
+for (const id of ['close-page', 'close-docs']) {
   $(id).addEventListener('click', leavePage);
 }
 themeToggle.addEventListener('click', () => {
@@ -478,7 +487,7 @@ function sessionRow(session: SessionSummary, group: string): HTMLElement {
   const button = document.createElement('button'); button.type = 'button';
   button.className = `session-item${session.id === activeSessionId ? ' selected' : ''}`;
   button.textContent = `${running.has(session.id) ? '● ' : ''}${sessionLabel(session)}`;
-  button.title = session.workspace;
+  button.title = displayPath(session.workspace);
   button.addEventListener('click', () => { void selectSession(session.id); });
   row.append(button, radio); return row;
 }
@@ -549,7 +558,7 @@ function renderSessions(): void {
     name.textContent = `${children.some((session) => running.has(session.id)) ? '● ' : ''}${entry.name}`;
     // Name first so it reads from the row's left edge; the kind tag sits at the end.
     button.append(name, badge);
-    button.title = `${entry.workspace}\n${children.length} sessions`;
+    button.title = `${displayPath(entry.workspace)}\n${children.length} sessions`;
     button.addEventListener('click', () => { if (work) void selectWorkTask(entry.key); else void selectProject(entry.workspace); });
     const radio = document.createElement('input');
     radio.type = 'radio';
@@ -583,9 +592,9 @@ function applyKindUi(): void {
   }
   // One list holds both kinds, so only the action row follows what is selected.
   applyLibraryActions();
-  // Work mode is a task list; Code mode keeps the session vocabulary.
-  $('session-eyebrow').textContent = work ? 'AGENT TASKLIST' : 'AGENT SESSION';
-  $('new-session').textContent = work ? 'New Task' : 'New Session';
+  // The workspace manages sessions in both modes; tasks are created in the Library.
+  $('session-eyebrow').textContent = 'AGENT SESSION';
+  $('new-session').textContent = 'New Session';
   // Plan/Act changes what the agent may do in a workspace; Work tasks have no
   // command execution, so the selector is hidden rather than disabled.
   $('agent-mode').toggleAttribute('hidden', work);
@@ -609,12 +618,11 @@ function applyKindUi(): void {
   const emptyCopy = document.getElementById('empty-state-copy');
   if (emptyCopy) {
     emptyCopy.textContent = work
-      ? selectedWorkTaskId ? 'Ask a question or create a document. Files and editable attachment copies stay in this task’s managed folder.' : 'Create or select a task in the Tasks panel, then start a session here.'
+      ? selectedWorkTaskId ? 'Ask a question or create a document. Files and editable attachment copies stay in this task’s managed folder.' : 'Create or select a task in the Library, then start a session here.'
       : (selectedProjectWorkspace ? 'Start a new session in this project. Existing project files are available in Explorer.' : 'Create a project folder or open an existing codebase to begin.');
   }
-  $('new-project').textContent = 'New';
+  $('new-project').textContent = 'New Project';
   $('new-session').toggleAttribute('hidden', false);
-  $('profile-mode-description').textContent = profileModeDescription(activeKind);
   $('profile-git').toggleAttribute('hidden', work);
   // The shell is Code-only, like every other command path.
   if (work) void setTerminalOpen(false);
@@ -751,15 +759,19 @@ function updateFolderContext(): void {
   const project = projects.find((item) => item.workspace === folder);
   const task = workTasks.find((item) => item.id === selectedWorkTaskId);
   $('workspace-context').textContent = folderContextLabel(activeKind, folder, project?.name, task?.name);
-  $('workspace-context').title = folder ?? '';
+  $('workspace-context').title = folder ? displayPath(folder) : '';
   $('project-root-name').textContent = activeKind === 'work' ? task?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No task selected') : project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Project files') : 'No project selected');
+  $('project-root-name').title = folder ? displayPath(folder) : '';
+  const pathLine = $('project-path');
+  pathLine.textContent = folder ? displayPath(folder) : '';
+  pathLine.title = folder ? displayPath(folder) : '';
+  pathLine.toggleAttribute('hidden', !folder);
 }
 function enterDraft(kind: SessionKind, workspace: string | null = selectedProjectWorkspace): void {
   selectionRevision++; selectingContext = false; activeSessionId = null; activeKind = kind; closeMention();
   if (kind === 'code') selectedProjectWorkspace = workspace;
   rememberNavigation();
   $('session-title').textContent = kind === 'work' && !selectedWorkTaskId ? 'Select a task' : 'New Session';
-  $('profile-session').textContent = 'No conversation selected'; $('profile-provider').textContent = 'Not configured';
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
   if (viewingFiles()) void refreshProjectTree();
@@ -777,6 +789,10 @@ async function setKind(kind: SessionKind): Promise<void> {
   const remembered = kind === 'code' && workspace ? lastSessionByProject.get(workspace) : lastSessionByKind.get(kind);
   const next = sessionForMode(candidates, kind, remembered, kind === 'code' ? workspace : null);
   enterDraft(kind, kind === 'code' ? workspace ?? next?.workspace ?? null : workspace);
+  // Code is the workspace-heavy mode, so its Right Pane opens with it. Work
+  // closes it again unless the user opened the pane by hand.
+  if (kind === 'code') setTaskMonitor(true);
+  else if (!taskMonitorPinned) setTaskMonitor(false);
   // Only the rail selects the Left Pane view, so switching kind keeps it and persists nothing.
   setPageMode(null);
   previewOpen = false;
@@ -839,8 +855,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     rememberNavigation();
     applySessionSettings(record.settings); applyAutoApprove(record.autoApprove);
     setMode(record.kind === 'work' ? 'act' : modeBySession.get(id) ?? 'act');
-    $('session-title').textContent = sessionLabel(record); $('profile-session').textContent = sessionLabel(record);
-    $('profile-provider').textContent = `${providers.find((item) => item.id === record.settings.providerId)?.name ?? record.settings.providerId} · ${record.settings.actModel || 'No model selected'}`;
+    $('session-title').textContent = sessionLabel(record);
     renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
     if (terminalOpen) {
@@ -914,8 +929,9 @@ function updateControls(): void {
   $<HTMLButtonElement>('act-mode').disabled = busy;
   $<HTMLButtonElement>('rename-session').disabled = !activeSessionId || busy;
   $<HTMLButtonElement>('delete-session').disabled = !activeSessionId || busy;
-  // A Work task needs no selection to be created; a Code session needs a project.
-  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession || (activeKind === 'code' && !selectedProjectWorkspace);
+  // The workspace starts a session in a task or a project; the Library creates tasks.
+  $<HTMLButtonElement>('new-session').disabled = !initialized || creatingSession
+    || (activeKind === 'work' ? !selectedWorkTaskId : !selectedProjectWorkspace);
   const selectedProject = projects.find((project) => project.workspace === selectedProjectWorkspace);
   const projectSessions = selectedProject ? sessionsForProject(summaries, selectedProject.workspace) : [];
   const selectedTask = activeKind === 'work' ? workTasks.find((task) => task.id === selectedWorkTaskId) : undefined;
@@ -923,7 +939,7 @@ function updateControls(): void {
   $<HTMLButtonElement>('rename-task').disabled = !selectedTask || creatingSession;
   $<HTMLButtonElement>('delete-task').disabled = !selectedTask || creatingSession || taskSessions.some((session) => running.has(session.id));
   $<HTMLButtonElement>('rename-project').disabled = !selectedProject || creatingSession;
-  $<HTMLButtonElement>('remove-project').disabled = !selectedProject || creatingSession || projectSessions.some((session) => running.has(session.id));
+  $<HTMLButtonElement>('delete-project').disabled = !selectedProject || creatingSession || projectSessions.some((session) => running.has(session.id));
   $<HTMLButtonElement>('workspace-button').disabled = !initialized || creatingSession;
   for (const id of ['new-project', 'open-project', 'kind-work', 'kind-code']) $<HTMLButtonElement>(id).disabled = !initialized || creatingSession;
   for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-command']) $<HTMLInputElement>(id).disabled = !activeSessionId || selectingContext;
@@ -1025,7 +1041,11 @@ async function refreshSchedules(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
-function setTaskMonitor(open: boolean, focus = false): void {
+function setTaskMonitor(open: boolean, focus = false, pin?: boolean): void {
+  if (pin !== undefined) {
+    taskMonitorPinned = pin;
+    try { localStorage.setItem(taskMonitorPinKey, String(pin)); } catch { /* applies for this run */ }
+  }
   taskMonitorOpen = open;
   document.querySelector<HTMLElement>('.app')?.classList.toggle('task-monitor-open', open);
   $('task-monitor').toggleAttribute('hidden', !open);
@@ -1037,7 +1057,7 @@ function setTaskMonitor(open: boolean, focus = false): void {
   if (focus) (open ? $('task-monitor-close') : $('task-monitor-open')).focus();
 }
 
-function monitorEmpty(text: string): HTMLParagraphElement {
+function hintText(text: string): HTMLParagraphElement {
   const empty = document.createElement('p');
   empty.className = 'hint';
   empty.textContent = text;
@@ -1051,9 +1071,9 @@ function renderTaskMonitor(): void {
   const processesList = $('monitor-processes');
   const artifactsList = $('monitor-artifacts');
   if (!id) {
-    updatesList.replaceChildren(monitorEmpty('Select a session.'));
-    processesList.replaceChildren(monitorEmpty('Select a session.'));
-    artifactsList.replaceChildren(monitorEmpty('Select a session.'));
+    updatesList.replaceChildren(hintText('Select a session.'));
+    processesList.replaceChildren(hintText('Select a session.'));
+    artifactsList.replaceChildren(hintText('Select a session.'));
     return;
   }
   const now = Date.now();
@@ -1075,7 +1095,7 @@ function renderTaskMonitor(): void {
     detail.textContent = update.detail || new Date(update.at).toLocaleTimeString();
     item.append(label, detail);
     return item;
-  }) : [monitorEmpty('No activity yet in this session.')]));
+  }) : [hintText('No activity yet in this session.')]));
 
   processesList.replaceChildren(...(processes.length ? processes.map((process) => {
     const item = document.createElement('div');
@@ -1086,7 +1106,7 @@ function renderTaskMonitor(): void {
     detail.textContent = process.detail;
     item.append(label, detail);
     return item;
-  }) : [monitorEmpty('No background work.')]));
+  }) : [hintText('No background work.')]));
 
   artifactsList.replaceChildren(...(artifacts.length ? artifacts.map((artifact) => {
     const item = document.createElement('button');
@@ -1098,7 +1118,7 @@ function renderTaskMonitor(): void {
       void previewProjectFile({ name: artifact.path.split('/').pop() ?? artifact.path, path: artifact.path, isDir: false });
     });
     return item;
-  }) : [monitorEmpty('No files changed yet.')]));
+  }) : [hintText('No files changed yet.')]));
 }
 
 /** A running turn is both a busy flag and a labelled row; the two never drift apart. */
@@ -1127,6 +1147,13 @@ function setPageMode(page: AppPage | null): void {
     if (button.dataset.pageLink === page) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  // The User entry shares the bottom group, so it yields while a page owns the main area.
+  const userRail = document.querySelector<HTMLButtonElement>('.rail-pages .rail-tab[data-rail]');
+  if (userRail) {
+    const selected = !open && userRail.dataset.rail === activeLeftView;
+    userRail.classList.toggle('selected', selected);
+    userRail.setAttribute('aria-pressed', String(selected));
+  }
   if (open) {
     closeMention();
     requestAnimationFrame(() => document.querySelector<HTMLElement>('.page.active .page-head .text-button')?.focus());
@@ -1152,11 +1179,15 @@ const viewingChanges = (): boolean => activeLeftView === 'git' && gitView === 'c
 
 /** Shows one rail destination and loads the data it needs. */
 function applyLeftView(): void {
-  document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab').forEach((button) => {
+  document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab, .rail-pages .rail-tab[data-rail]').forEach((button) => {
     const selected = button.dataset.rail === activeLeftView;
     button.classList.toggle('selected', selected);
-    button.setAttribute('aria-selected', String(selected));
-    button.tabIndex = selected ? 0 : -1;
+    if (button.closest('.rail-tabs')) {
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    } else {
+      button.setAttribute('aria-pressed', String(selected));
+    }
   });
   document.querySelectorAll<HTMLElement>('[data-left-view]').forEach((section) => {
     section.classList.toggle('active', section.dataset.leftView === activeLeftView);
@@ -1171,6 +1202,7 @@ function selectLeftView(view: LeftView): void {
   previewOpen = false;
   try { localStorage.setItem(leftViewKey, view); } catch { /* the pane still switches for this run */ }
   applyLeftView();
+  if (view === 'user') void refreshGitIdentity();
 }
 
 function applyFilesView(): void {
@@ -1372,7 +1404,7 @@ function renderProjectTree(): void {
     }
   };
   const rootEntries = projectEntries.get('.');
-  if (!rootEntries?.length) { tree.textContent = 'This folder is empty.'; return; }
+  if (!rootEntries?.length) { tree.replaceChildren(hintText('This folder is empty.')); return; }
   append(rootEntries, 0);
   tree.replaceChildren(fragment);
 }
@@ -1531,10 +1563,20 @@ function terminalKey(): string {
   return args.sessionId ?? args.projectWorkspace ?? '';
 }
 
-function terminalTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
-  return document.documentElement.dataset.theme === 'light'
-    ? { background: '#e7eff1', foreground: '#203744', cursor: '#08766d', selectionBackground: '#c9d9de' }
-    : { background: '#0c1d2d', foreground: '#b9cbd5', cursor: '#65cbbd', selectionBackground: '#2a4258' };
+/** A light palette is not the dark one with a pale background: Windows shells
+ *  paint prompts and echoed input in ANSI white/gray, which disappears on a
+ *  light page. Map those slots dark, then let xterm enforce a readable floor. */
+function terminalTheme(): ITheme {
+  if (document.documentElement.dataset.theme !== 'light') {
+    return { background: '#0c1d2d', foreground: '#b9cbd5', cursor: '#65cbbd', selectionBackground: '#2a4258' };
+  }
+  return {
+    background: '#ffffff', foreground: '#203744', cursor: '#08766d', selectionBackground: '#c9d9de',
+    black: '#203744', red: '#b3322d', green: '#1f7a4d', yellow: '#8a6100',
+    blue: '#1f5f9e', magenta: '#7a3f8f', cyan: '#0f6f7d', white: '#3a5561',
+    brightBlack: '#5d7480', brightRed: '#c2433d', brightGreen: '#238a57', brightYellow: '#9c6f00',
+    brightBlue: '#2a70b5', brightMagenta: '#8b4ba1', brightCyan: '#147a88', brightWhite: '#203744',
+  };
 }
 
 function fitTerminal(): void {
@@ -1577,6 +1619,7 @@ async function ensureTerminal(): Promise<void> {
       fontSize: 12,
       cursorBlink: true,
       scrollback: 5000,
+      minimumContrastRatio: 4.5,
       theme: terminalTheme(),
     });
     const fit = new FitAddon();
@@ -1808,9 +1851,17 @@ async function initialize(): Promise<void> {
     initialized = true;
     await refreshSummaries();
     restoreNavigation();
+    // A stored mode only wins while a session still backs it; otherwise Work is the default.
+    const validProjects = new Set(projects.map((project) => project.workspace));
+    const codeSessions = summaries.filter((session) => session.kind === 'code' && validProjects.has(session.workspace));
+    const storedKind = activeKind;
+    activeKind = startupSessionKind(storedKind, codeSessions.length > 0);
+    if (activeKind !== storedKind) {
+      try { localStorage.setItem(lastKindKey, activeKind); } catch { /* the default still applies for this run */ }
+    }
     const storedLeftView = activeLeftView;
     const storedMonitor = localStorage.getItem('moderado-task-monitor') !== 'false';
-    setTaskMonitor(storedMonitor);
+    setTaskMonitor(taskMonitorPinned || (activeKind === 'code' && storedMonitor));
     if (activeKind === 'work') {
       const restoredTask = workTasks.find((task) => task.id === selectedWorkTaskId);
       if (restoredTask) await selectWorkTask(restoredTask.id, false);
@@ -1820,7 +1871,12 @@ async function initialize(): Promise<void> {
         else await createSession(currentSettings(), 'work');
       }
     } else {
-      const workspace = selectedProjectWorkspace ?? projects[0]?.workspace ?? null;
+      const rememberedCode = codeSessions.find((session) => session.id === lastSessionByKind.get('code'));
+      const workspace = (selectedProjectWorkspace && codeSessions.some((session) => session.workspace === selectedProjectWorkspace) ? selectedProjectWorkspace : null)
+        ?? rememberedCode?.workspace
+        ?? codeSessions[0]?.workspace
+        ?? projects[0]?.workspace
+        ?? null;
       // Nothing to code in yet: fall back to Work rather than an empty shell.
       if (workspace) await selectProject(workspace); else await setKind('work');
     }
@@ -1840,6 +1896,10 @@ providerSelect.addEventListener('change', () => selectProvider(providerSelect.va
 $<HTMLButtonElement>('kind-work').addEventListener('click', () => { void setKind('work'); });
 $<HTMLButtonElement>('kind-code').addEventListener('click', () => { void setKind('code'); });
 $<HTMLElement>('about-version').textContent = appVersion.trim().split('+')[0] || appVersion.trim();
+const footerYear = new Date().getFullYear();
+document.querySelectorAll<HTMLElement>('[data-page-footer]').forEach((footer) => {
+  footer.textContent = `${footerYear} Moderado Desktop by Moderado AI, an Alfazen platform, all rights reserved.`;
+});
 
 mentionButton.addEventListener('click', async () => {
   if (!activeSessionId && !selectedProjectWorkspace) { setStatus('Open a project before referencing files.'); return; }
@@ -1870,6 +1930,11 @@ keyApplyLink.addEventListener('click', async (event) => {
   try { await openUrl(url); }
   catch (error) { setStatus(`Could not open apply page: ${String(error)}`); }
 });
+const accountUrl = 'https://modr.alfazen.org/account?mode=signin';
+$('user-signin').addEventListener('click', async () => {
+  try { await openUrl(accountUrl); }
+  catch (error) { setStatus(`Could not open the account page: ${String(error)}`); }
+});
 $<HTMLSelectElement>('plan-model').addEventListener('change', updateSelectedModel);
 $<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel);
 document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
@@ -1882,7 +1947,11 @@ function moveRailFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
   tabs[nextMenuIndex(current, tabs.length, key)]?.focus();
 }
 document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab').forEach((button) => {
-  button.addEventListener('click', () => selectLeftView(parseLeftView(button.dataset.rail ?? null)));
+  button.addEventListener('click', () => {
+    // Choosing a destination is a request to see it, even from the rail-only state.
+    if (sidebarCollapsed) setSidebarCollapsed(false);
+    selectLeftView(parseLeftView(button.dataset.rail ?? null));
+  });
 });
 document.querySelector<HTMLElement>('.rail-tabs')?.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
@@ -1892,6 +1961,7 @@ document.querySelector<HTMLElement>('.rail-tabs')?.addEventListener('keydown', (
 });
 document.querySelectorAll<HTMLButtonElement>('.rail-pages .rail-tab').forEach((button) => {
   button.addEventListener('click', () => {
+    if (button.dataset.rail) { selectLeftView(parseLeftView(button.dataset.rail)); return; }
     const page = button.dataset.pageLink as AppPage;
     if (activePage === page) { setPageMode(null); button.focus(); }
     else switchPage(page);
@@ -1899,8 +1969,8 @@ document.querySelectorAll<HTMLButtonElement>('.rail-pages .rail-tab').forEach((b
 });
 $('preview-back').addEventListener('click', closePreview);
 $('terminal-close').addEventListener('click', () => { void setTerminalOpen(false); });
-$('task-monitor-close').addEventListener('click', () => setTaskMonitor(false, true));
-$('task-monitor-open').addEventListener('click', () => setTaskMonitor(true, true));
+$('task-monitor-close').addEventListener('click', () => setTaskMonitor(false, true, false));
+$('task-monitor-open').addEventListener('click', () => setTaskMonitor(true, true, true));
 $('terminal-panel').addEventListener('click', () => { void setTerminalOpen(!terminalOpen); });
 $('tools-toggle').addEventListener('click', () => {
   if (toolsOpen) closeToolsMenu(true);
@@ -1928,9 +1998,24 @@ document.querySelectorAll<HTMLButtonElement>('[data-git-tab]').forEach((tab) => 
   tab.addEventListener('click', () => switchGitView(parseGitView(tab.dataset.gitTab ?? null)));
 });
 const sidebarWidthKey = 'moderado-sidebar-width';
-let sidebarWidth = 260;
+const sidebarCollapsedKey = 'moderado-sidebar-collapsed';
+let sidebarCollapsed = false;
+function setSidebarCollapsed(collapsed: boolean): void {
+  sidebarCollapsed = collapsed;
+  document.querySelector<HTMLElement>('.app')?.classList.toggle('sidebar-collapsed', collapsed);
+  const toggle = $<HTMLButtonElement>('sidebar-toggle');
+  const label = collapsed ? 'Expand left pane' : 'Collapse left pane';
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  toggle.setAttribute('aria-label', label);
+  toggle.title = label;
+  try { localStorage.setItem(sidebarCollapsedKey, String(collapsed)); } catch { /* applies for this run */ }
+}
+$('sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!sidebarCollapsed));
+if (localStorage.getItem(sidebarCollapsedKey) === 'true') setSidebarCollapsed(true);
+let sidebarWidth = 300;
 function applySidebarWidth(px: number): number {
-  const clamped = Math.max(200, Math.min(560, Math.round(px)));
+  // The floor keeps the wordmark, the mode slider and the collapse button on one line.
+  const clamped = Math.max(300, Math.min(560, Math.round(px)));
   document.querySelector<HTMLElement>('.app')?.style.setProperty('--sidebar-width', `${clamped}px`);
   return clamped;
 }
@@ -1960,7 +2045,7 @@ const endResize = (event: PointerEvent): void => {
 };
 resizer.addEventListener('pointerup', endResize);
 resizer.addEventListener('pointercancel', endResize);
-resizer.addEventListener('dblclick', () => { sidebarWidth = applySidebarWidth(260); saveSidebarWidth(); });
+resizer.addEventListener('dblclick', () => { sidebarWidth = applySidebarWidth(300); saveSidebarWidth(); });
 resizer.addEventListener('keydown', (event) => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   event.preventDefault();
@@ -2227,7 +2312,7 @@ async function createSession(settings: ProviderSettings, kind: SessionKind = act
   } finally { creatingSession = false; renderSessions(); updateControls(); }
 }
 
-/** The Tasks panel and the Work topbar both create a numbered `work-task-##`. */
+/** The Library's New Task action creates a numbered `work-task-##`. */
 async function createWorkTask(): Promise<void> {
   if (creatingSession) return;
   saveComposerDraft(); creatingSession = true; updateControls();
@@ -2292,8 +2377,13 @@ async function newProjectSession(workspace: string): Promise<void> {
   saveComposerDraft(); enterDraft('code', workspace); prompt.value = ''; pendingAttachments = []; renderChips(); expandedProjects.add(workspace); selectLeftView('library');
   try { await createSession(currentSettings(), 'code', workspace); } catch (error) { setStatus(String(error)); }
 }
+async function newWorkSession(taskId: string): Promise<void> {
+  if (creatingSession) return;
+  saveComposerDraft(); enterDraft('work'); prompt.value = ''; pendingAttachments = []; renderChips(); expandedWorkTasks.add(taskId); selectLeftView('library');
+  try { await createSession(currentSettings(), 'work', null, taskId); } catch (error) { setStatus(String(error)); }
+}
 $('new-session').addEventListener('click', () => {
-  if (activeKind === 'work') void createWorkTask();
+  if (activeKind === 'work') { if (selectedWorkTaskId) void newWorkSession(selectedWorkTaskId); }
   else if (selectedProjectWorkspace) void newProjectSession(selectedProjectWorkspace);
 });
 async function renameProject(project: ProjectRecord): Promise<void> {
@@ -2301,14 +2391,21 @@ async function renameProject(project: ProjectRecord): Promise<void> {
   try { await invoke('rename_project', { projectWorkspace: project.workspace, name }); await refreshSummaries(); updateFolderContext(); }
   catch (error) { setStatus(String(error)); }
 }
-async function removeProject(project: ProjectRecord): Promise<void> {
-  if (!window.confirm(`Remove “${project.name}” from Moderado? Its files and session history are kept. Open the folder again to restore it.`)) return;
+async function deleteProject(project: ProjectRecord): Promise<void> {
+  if (!window.confirm(`Delete project “${project.name}”? Its sessions and histories are removed from Moderado; the project folder and files remain.`)) return;
   const revision = selectionRevision;
+  const wasSelected = selectedProjectWorkspace === project.workspace;
   try {
-    await invoke('remove_project', { projectWorkspace: project.workspace }); await refreshSummaries();
-    if (selectedProjectWorkspace === project.workspace) {
-      selectedProjectWorkspace = null; rememberNavigation();
-      if (revision === selectionRevision && activeKind === 'code') { saveComposerDraft(); enterDraft('code', null); if (projects[0]) await selectProject(projects[0].workspace); }
+    const removed = await invoke<string[]>('delete_project', { projectWorkspace: project.workspace });
+    for (const id of removed) { sessions.delete(id); views.delete(id); conversationBindings.delete(id); composerDrafts.delete(id); usageBySession.delete(id); clearRunning(id); }
+    lastSessionByProject.delete(project.workspace);
+    if (removed.includes(lastSessionByKind.get('code') ?? '')) lastSessionByKind.delete('code');
+    await refreshSummaries();
+    if (!wasSelected) return;
+    selectedProjectWorkspace = null; rememberNavigation();
+    if (revision === selectionRevision && activeKind === 'code') {
+      saveComposerDraft(); enterDraft('code', null);
+      if (projects[0]) await selectProject(projects[0].workspace);
     }
   } catch (error) { setStatus(String(error)); }
 }
@@ -2316,9 +2413,9 @@ $('rename-project').addEventListener('click', () => {
   const project = projects.find((item) => item.workspace === selectedProjectWorkspace);
   if (project) void renameProject(project);
 });
-$('remove-project').addEventListener('click', () => {
+$('delete-project').addEventListener('click', () => {
   const project = projects.find((item) => item.workspace === selectedProjectWorkspace);
-  if (project) void removeProject(project);
+  if (project) void deleteProject(project);
 });
 
 function localDateTime(date: Date): string {

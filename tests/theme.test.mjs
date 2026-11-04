@@ -150,7 +150,7 @@ test('the shell surfaces added after the first light pass have light counterpart
   // Each surface the rail removal, drawer, tools menu and task monitor introduced ships
   // dark first; without a light rule it keeps its dark chip or ink in the default daytime theme.
   for (const selector of [
-    '.left-shell', '.shell-head', '.rail', '.rail-tab', '.rail-tab.selected',
+    '.left-shell', '.shell-head', '.rail', '.rail-tab', '.rail-tab.selected', '.sidebar-toggle',
     '.terminal-drawer', '.terminal-head', '.tools-menu',
     '.task-monitor', '.monitor-head', '.monitor-button', '.monitor-edge',
     '.monitor-section', '.monitor-section h3',
@@ -161,4 +161,18 @@ test('the shell surfaces added after the first light pass have light counterpart
     assert.match(theme, new RegExp(`:root\\[data-theme="light"\\] ${escaped}(?![\\w-])`), `${selector} has no light rule`);
   }
   assert.doesNotMatch(theme, /:root\[data-theme="light"\] \.activity-(?:bar|button)/, 'the removed rail-free shell left no light rules behind');
+});
+
+test('the native window caption follows the app theme', async () => {
+  const [main, lib, cargo] = await Promise.all([
+    readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8'),
+  ]);
+  assert.match(main, /void invoke\('set_window_theme', \{ theme \}\)/, 'the renderer tells Windows when the resolved theme changes');
+  assert.match(lib, /DWMWA_USE_IMMERSIVE_DARK_MODE/, 'the caption follows the immersive dark flag');
+  assert.match(lib, /DWMWA_CAPTION_COLOR/, 'the caption fill matches the app background');
+  assert.match(lib, /DWMWA_TEXT_COLOR/, 'the caption text stays readable in both themes');
+  assert.match(lib, /set_window_theme,/, 'the command is registered');
+  assert.match(cargo, /windows = \{ version = "0\.62", features = \[[^\]]*"Win32_Graphics_Dwm"/);
 });

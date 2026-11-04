@@ -9,22 +9,25 @@ Give Moderado Desktop a VS Code style workbench layout while keeping the convers
 Revised 2026-11-03: the window is four vertical regions — Activity Rail, Left Pane,
 Workspace, and Right Pane.
 
-- The 52 px Activity Rail and the resizable Left Pane (200-560 px, 260 px default)
-  share one 56 px merged header. The header carries the Moderado mark and wordmark
-  plus the Work/Code segmented control. Below the header the rail and the Left Pane
-  are separate columns.
+- The 52 px Activity Rail and the resizable Left Pane (300-560 px, 300 px default)
+  share one 56 px merged header. The header carries the "Moderado Desktop" wordmark
+  plus the Work/Code segmented control; the OS window icon carries the brand mark.
+  Below the header the rail and the Left Pane are separate columns.
 - The rail's top group selects the Left Pane contents: Library, Files, Git, and
-  Schedules. Its bottom group — User (Profile), Docs, and Settings — opens each as a
-  full-width page; activating the active page button returns to the conversation.
+  Schedules. Its bottom group — User (still a Left Pane view), Docs, and Settings —
+  puts the account entry above the pages. Docs and Settings open as full-width
+  pages; activating the active page button returns to the conversation.
 - The conversation column owns the 56 px topbar (session stamp, project or task
   context, actions, Plan/Act (hidden in Work mode), theme), the transcript, the composer, and a terminal drawer
   below the composer. The drawer is Code-only and keeps its PTY alive while hidden.
-- The Right Pane is the Task Monitor, open by default. At 1200 px and wider it is a
+- The Right Pane is the Task Monitor. At 1200 px and wider it is a
   320 px grid column; below 1200 px it overlays the workspace's right edge as
   `min(340px, calc(100vw - 60px))`, so the rail, Left Pane and workspace stay visible
   and the grid has no third column while overlaying. It leaves the grid when
-  collapsed, and page mode also closes its column. Its 56 px header has exactly three
-  controls: Tools
+  collapsed, and page mode also closes its column. Switching to Code opens it, since
+  that mode's work lives in the monitor; switching back to Work closes it unless the
+  user opened the pane by hand, and that manual choice survives restarts. Its 56 px
+  header has exactly three controls: Tools
   (Open File Browser, Open system terminal, Open in VS Code), the terminal-panel toggle,
   and the collapse triangle. Collapsing leaves a 24 x 64 px edge tab that reopens it.
 - Page mode hides the conversation (topbar and transcript), the composer, the drawer
@@ -34,21 +37,24 @@ Workspace, and Right Pane.
   the workspace context line in the topbar hides. Session actions stay reachable at
   every width, so New, Rename, and Delete never disappear. The rail never hides, and
   the window minimum stays 760 px.
+- The Left Pane collapses to the 52 px rail from the triangle in the merged header; the rail stays navigable, and choosing a destination or pressing the same triangle reopens it. The state persists.
 - The rail selection persists in `moderado-left-view` (`library`, `files`, `git`,
   `schedules`; default `library`), the Git switch in `moderado-git-view`
   (`changes` or `checkpoints`; default `changes`), the Left Pane width in
-  `moderado-sidebar-width` (200-560 px; default 260), and the Right Pane in
-  `moderado-task-monitor`, open unless stored as `false`. The retired keys
-  `moderado-sidebar-collapsed` and `moderado-workspace-view` are ignored: stored
-  values are not migrated.
+  `moderado-sidebar-width` (300-560 px; default 300), the Left Pane collapse state
+  in `moderado-sidebar-collapsed` (`true` hides the pane, leaving the rail; default
+  expanded), the Right Pane in
+  `moderado-task-monitor`, open unless stored as `false`, and a manual Right Pane
+  open in `moderado-task-monitor-pinned`, which outranks the mode default. The
+  retired key `moderado-workspace-view` is ignored: stored values are not migrated.
 
 ## Panels
 
 ### Library
 
-The Library rail tab keeps the existing task and project list and New session action; the name avoids colliding with the central workspace. Its view id is `library`; a stored `workspaces` value from before the rename still opens Library. A new Code session is named with its creation time as `YYYY-MM-DD HH:MM:SS` in the local zone; older auto-named sessions are labelled the same way, and a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
+The Library rail tab keeps the existing task and project list and its context actions; the name avoids colliding with the central workspace. In Work mode it owns task management: New Task creates a numbered `work-task-##`, and Rename/Delete act on the selected task; deleting a task deletes its sessions while the managed folder and files remain. In Code mode it owns project management: New Project creates a folder, Open registers one, and Rename/Delete act on the selected project; deleting a project deletes its sessions and histories while the project folder and files remain. Its view id is `library`; a stored `workspaces` value from before the rename still opens Library. A new Code session is named with its creation time as `YYYY-MM-DD HH:MM:SS` in the local zone; older auto-named sessions are labelled the same way, and a name typed through Rename replaces the stamp. Show the active session, a running indicator, and its workspace path in the row tooltip. Switching sessions updates every contextual panel without losing drafts or an in-progress turn.
 
-The conversation topbar reads `AGENT TASKLIST` in Work mode and `AGENT SESSION` in Code mode beside the same creation stamp. In Work mode its **New Task** action creates a numbered `work-task-##` task; Code keeps **New Session**. Its secondary line names the project or task, never the full folder path; the full path remains in the line's tooltip and in the Files view.
+The conversation topbar always reads `AGENT SESSION` beside the session's creation stamp, in both Work and Code. Its **New Session** action starts a session in the selected task (Work) or project (Code); tasks are managed in the Library. Its secondary line names the project or task, never the full folder path; the full path remains in the line's tooltip and in the Files view.
 
 ### Workspace / Project Browser
 
@@ -66,9 +72,9 @@ For a Git repository whose root equals the selected workspace, the Git rail tab 
 the current branch, changed and untracked files, and the 50 most recent commits with
 short hash, subject, author, and local date. The view has Refresh and explicit empty/error states. Git calls are read-only; this scope does not add staging, committing, checkout, fetch, or push controls. If the selected workspace is not a repository root, show a message to open the repository root as the workspace. This keeps Git inspection inside the workspace boundary. Commit rows can reveal the files changed in that commit if the bounded history contract supports it; the first implementation can present the commit list without a graph.
 
-### Profile
+### User
 
-Keep the Profile page available in both modes. In Work mode, show a local profile and make clear that no GitHub account is needed. In Code mode, offer optional GitHub sign-in and show the connected account when available. Keep account credentials in the OS keychain. About belongs in Settings and must describe the app independently of source-control hosting.
+User is a Left Pane view in both modes, not a full page: its content is small enough to read beside the conversation. It shows the account and, when a Code workspace is a repository, the Git identity. The current session, provider, and Work/Code mode are deliberately absent: the topbar, composer, and the shell's mode control already show that live state, and a second copy goes stale. The Account block offers a Sign in action that opens the Moderado account page at `https://modr.alfazen.org/account?mode=signin` in the system browser. The app keeps working locally without an account. Profile data is not yet pulled back into the pane, because that needs an account API contract; when it exists, tokens belong in the OS keychain and only the display name, email, and plan are cached. About belongs in Settings and must describe the app independently of source-control hosting.
 
 ### Settings
 

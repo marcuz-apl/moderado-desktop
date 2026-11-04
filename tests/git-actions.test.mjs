@@ -21,7 +21,7 @@ test('git identity replaces the GitHub placeholder', async () => {
   const html = await read('index.html');
   assert.doesNotMatch(html, /id="profile-github"/, 'the placeholder is gone');
   assert.doesNotMatch(html, /Sign-in has not been configured for this build/);
-  assert.match(html, /id="profile-git" hidden/);
+  assert.match(html, /id="profile-git"[^>]*hidden/);
   assert.match(html, /id="profile-git-name"/);
   assert.match(html, /id="profile-git-remote"/);
   assert.match(html, /id="profile-git-credential"/);
