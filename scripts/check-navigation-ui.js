@@ -26,7 +26,7 @@ async (page) => {
       async invoke(cmd, args = {}) {
         state.calls.push({ cmd, args });
         if (cmd === 'plugin:event|listen') { (state.listeners[args.event] ??= []).push(args.handler); return args.handler; }
-        if (cmd === 'provider_catalog') return [{ id: 'ollama', name: 'Ollama', defaultBaseUrl: settings.baseUrl, editableUrl: false, local: true, applyKeyUrl: null, applyKeyLabel: '' }];
+        if (cmd === 'provider_catalog') return [{ id: 'ollama', name: 'Ollama', defaultBaseUrl: settings.baseUrl, local: true, applyKeyUrl: null, applyKeyLabel: '' }];
         if (cmd === 'load_provider_settings') return settings;
         if (cmd === 'list_sessions') return state.sessions;
         if (cmd === 'list_work_tasks') return state.workTasks;

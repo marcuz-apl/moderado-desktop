@@ -62,6 +62,11 @@
 :root[data-theme="light"] #composer,
 :root[data-theme="light"] dialog{background:var(--light-surface);border-color:var(--light-border);color:#203744;box-shadow:0 12px 40px #40606a20}
 :root[data-theme="light"] #composer:focus-within{border-color:var(--light-accent)}
+:root[data-theme="light"] .queued-turn{background:var(--light-surface);border-color:var(--light-border)}
+:root[data-theme="light"] .queued-text{color:#203744}
+:root[data-theme="light"] .queued-turn.steering{background:#e5f3f0;border-color:var(--light-accent)}
+:root[data-theme="light"] .queued-steer{color:#175f58;border-color:var(--light-accent)}
+:root[data-theme="light"] .queued-remove{color:#667e88}
 :root[data-theme="light"] textarea{color:#203744}
 :root[data-theme="light"] textarea::placeholder{color:#667e88}
 :root[data-theme="light"] #selected-model{color:#315865}

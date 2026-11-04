@@ -28,7 +28,6 @@ pub struct ProviderPreset {
     pub id: ProviderId,
     pub name: &'static str,
     pub default_base_url: &'static str,
-    pub editable_url: bool,
     pub local: bool,
     /// The provider can serve inference without an API key by falling back to
     /// its free default models. The Moderado Gateway exposes two pinned stealth
@@ -44,7 +43,6 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: ProviderId::Moderado,
         name: "Moderado",
         default_base_url: "https://modr.alfazen.org/v1",
-        editable_url: true,
         local: false,
         keyless: true,
         apply_key_url: Some("https://modr.alfazen.org/account?mode=signin"),
@@ -54,7 +52,6 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: ProviderId::NvidiaNim,
         name: "Nvidia NIM",
         default_base_url: "https://integrate.api.nvidia.com/v1",
-        editable_url: false,
         local: false,
         keyless: false,
         apply_key_url: Some("https://build.nvidia.com/settings/api-keys"),
@@ -64,7 +61,6 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: ProviderId::OpenRouter,
         name: "OpenRouter",
         default_base_url: "https://openrouter.ai/api/v1",
-        editable_url: false,
         local: false,
         keyless: false,
         apply_key_url: Some("https://openrouter.ai/settings/keys"),
@@ -74,7 +70,6 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: ProviderId::Ollama,
         name: "Ollama - Local",
         default_base_url: "http://localhost:11434/v1",
-        editable_url: false,
         local: true,
         keyless: false,
         apply_key_url: Some("https://ollama.com/download"),
@@ -84,7 +79,6 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: ProviderId::LmStudio,
         name: "LM Studio - Local",
         default_base_url: "http://localhost:1234/v1",
-        editable_url: false,
         local: true,
         keyless: false,
         apply_key_url: Some("https://lmstudio.ai/download"),
@@ -94,7 +88,6 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: ProviderId::OpenAiCompatible,
         name: "Other OpenAI Compatible Endpoints",
         default_base_url: "",
-        editable_url: true,
         local: false,
         keyless: false,
         apply_key_url: None,
@@ -111,12 +104,7 @@ impl ProviderId {
     }
 
     pub fn base_url(self, entered: &str) -> Result<String, String> {
-        let preset = self.preset();
-        let value = if preset.editable_url {
-            entered.trim()
-        } else {
-            preset.default_base_url
-        };
+        let value = entered.trim();
         completion_url(value)?;
         Ok(value.to_owned())
     }
@@ -616,20 +604,9 @@ mod tests {
     fn provider_catalog_resolves_supported_endpoints() {
         assert_eq!(PRESETS.len(), 6);
         for preset in PRESETS {
-            let entered = if preset.editable_url {
-                "https://example.test/v1"
-            } else {
-                "ignored"
-            };
-            let base = preset.id.base_url(entered).unwrap();
-            assert_eq!(
-                base,
-                if preset.editable_url {
-                    entered
-                } else {
-                    preset.default_base_url
-                }
-            );
+            // Every provider accepts a custom Base URL: the entered value wins.
+            let base = preset.id.base_url("https://example.test/v1").unwrap();
+            assert_eq!(base, "https://example.test/v1");
             assert_eq!(
                 completion_url(&base).unwrap().path(),
                 format!(

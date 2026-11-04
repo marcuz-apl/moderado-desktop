@@ -198,7 +198,7 @@ export const fr: Record<string, string> = {
   'Saved in OS keychain': 'Enregistrée dans le trousseau du système',
   'Get API key': 'Obtenir une clé API',
   'No key needed — the free stealth models work without one. A key unlocks the full catalog.': 'Aucune clé requise — les modèles furtifs gratuits fonctionnent sans clé. Une clé débloque le catalogue complet.',
-  'Save Settings': 'Enregistrer les paramètres',
+  'Save Model Selections': 'Enregistrer la sélection de modèles',
   'Load Models': 'Charger les modèles',
   'Plan model': 'Modèle Plan',
   'Act model': 'Modèle Act',

@@ -64,9 +64,9 @@ test('the rail bottom opens Docs and Settings, and User lives in the Left Pane',
   assert.match(html, /<h1>Settings<\/h1>/);
   assert.doesNotMatch(html, /id="page-profile"/);
   assert.match(main, /\$\('user-signin'\)\.addEventListener\('click'/);
-  assert.match(main, /invoke<\{ email: string \}>\('moderado_sign_in', \{ baseUrl: GATEWAY_URLS\[gatewayMode\] \}\)/, 'sign-in uses the selected gateway and returns the email');
-  assert.match(main, /invoke\('moderado_sign_out', \{ baseUrl: GATEWAY_URLS\[gatewayMode\] \}\)/, 'sign-out revokes the key of the selected gateway');
-  assert.match(main, /`moderado-account-email:\$\{mode\}`/, 'each gateway keeps its own signed-in email');
+  assert.match(main, /invoke<\{ email: string \}>\('moderado_sign_in', \{ baseUrl: url \}\)/, 'sign-in uses the Base URL the Connection card shows');
+  assert.match(main, /invoke\('moderado_sign_out', \{ baseUrl: url \}\)/, 'sign-out revokes the key of that same Base URL');
+  assert.match(main, /`moderado-account-email:\$\{url\}`/, 'each gateway keeps its own signed-in email');
   assert.match(main, /\$\('user-account-name'\)\.textContent = accountEmail \|\| t\('Not signed in'\)/);
   assert.doesNotMatch(main, /account\?mode=signin/, 'the pane no longer sends the user to a page that forgets them');
 });
@@ -124,6 +124,58 @@ test('Settings and Docs end with a footer carrying the current year', async () =
   assert.match(theme, /:root\[data-theme="light"\] \.page-footer\{/);
 });
 
+test('the Connection card saves model selections under the model pickers and edits every Base URL', async () => {
+  const [html, main, provider] = await Promise.all([readHtml(), readMain(), read('src-tauri/src/provider.rs')]);
+  const card = html.slice(html.indexOf('class="settings-group connection-card"'), html.indexOf('id="page-docs"'));
+  // Load Models sits above the Plan picker for every provider.
+  assert.match(card, /<div class="settings-row">\s*<button id="load-models"[^>]*>Load Models<\/button>\s*<\/div>\s*<label for="plan-model">Plan model<\/label>/);
+  // The save action sits after the Plan and Act pickers, closing the card.
+  assert.match(card, /<select id="act-model"[\s\S]*?<div class="settings-row">\s*<button id="save-provider-settings"[^>]*>Save Model Selections<\/button>/);
+  assert.doesNotMatch(card, />Save Settings</);
+  // The moved row left no broken nesting: every card stays inside the grid.
+  const pageStart = html.indexOf('id="page-settings"');
+  const page = html.slice(pageStart, html.indexOf('</section>', pageStart));
+  assert.equal((page.match(/<div\b/g) || []).length, (page.match(/<\/div>/g) || []).length, 'div tags balance in the Settings page');
+  // Base URL is typeable for every provider.
+  assert.doesNotMatch(main, /editableUrl|endpoint\.readOnly/, 'the renderer no longer pins fixed providers');
+  assert.doesNotMatch(provider, /editable_url/, 'the catalog resolves the entered Base URL for every provider');
+});
+
+test('the Connection card centers both model buttons and enlarges their text', async () => {
+  const style = await read('src/renderer/style.css');
+  assert.match(style, /\.connection-card \.settings-row\{justify-content:center\}/);
+  assert.match(style, /\.connection-card \.settings-row button\{flex:0 1 auto;padding:8px 14px;text-align:center;font-size:calc\(14px\*var\(--text-scale\)\)\}/);
+  // Other settings rows keep their full-width, left-aligned buttons.
+  assert.match(style, /\.settings-row\{display:flex;gap:10px;margin-top:10px\}/);
+  assert.match(style, /\.settings-row button\{flex:1\}/);
+});
+
+test('the MCP Servers card keeps the Add server form enabled inside it', async () => {
+  const [html, main] = await Promise.all([readHtml(), readMain()]);
+  const card = html.slice(html.indexOf('class="settings-group mcp-card"'), html.indexOf('class="settings-group language-card"'));
+  assert.match(card, /<div id="mcp-servers"><\/div>[\s\S]*?<button id="add-mcp-server"[^>]*>Add server<\/button>/, 'Add server lives in the card next to the server list');
+  // An empty config still shows one editable row, so the form is ready without a click.
+  assert.match(main, /function emptyMcpServer\(\): McpServerConfig/);
+  assert.match(main, /const servers = config\.servers\.length \? config\.servers : \[emptyMcpServer\(\)\]/);
+  assert.match(main, /\$\('add-mcp-server'\)\.addEventListener\('click', \(\) => \{\s*\$\('mcp-servers'\)\.append\(mcpRow\(emptyMcpServer\(\)\)\);/);
+  // Blank rows stay out of the saved config instead of failing Rust validation.
+  assert.match(main, /\.filter\(\(server\) => Boolean\(server\.id \|\| server\.command \|\| server\.url\)\)/);
+});
+
+test('the User pane signs in against the Base URL in the Connection card', async () => {
+  const main = await readMain();
+  // A typed dev URL must switch the identity and the sign-in target, not keep prod.
+  assert.match(main, /function accountGateway\(\): \{ mode: GatewayMode; url: string \}/);
+  assert.match(main, /const entered = endpoint\.value\.trim\(\)\.replace\(\/\\\/\+\$\/, ''\)/);
+  assert.match(main, /if \(entered === GATEWAY_URLS\.dev\) return \{ mode: 'dev', url: entered \}/);
+  assert.match(main, /for \(const event of \['change', 'input'\]\) endpoint\.addEventListener\(event, refreshAccount\)/);
+  assert.match(main, /const identity = await invoke<\{ email: string \}>\('moderado_sign_in', \{ baseUrl: url \}\)/);
+  assert.match(main, /await invoke\('moderado_sign_out', \{ baseUrl: url \}\)/);
+  assert.doesNotMatch(main, /moderado_sign_in', \{ baseUrl: GATEWAY_URLS\[gatewayMode\]/);
+  // Old mode-keyed and unkeyed prod emails still load after the key change.
+  assert.match(main, /localStorage\.getItem\(legacyModeKey\(mode\)\)/);
+});
+
 test('rail buttons open pages and the Back buttons leave them', async () => {
   const main = await readMain();
   assert.match(main, /function setPageMode\(page: AppPage \| null\): void/);
@@ -131,4 +183,35 @@ test('rail buttons open pages and the Back buttons leave them', async () => {
   assert.match(main, /switchPage\(page\)/);
   assert.match(main, /for \(const id of \['close-page', 'close-docs'\]\)/);
   assert.doesNotMatch(main, /\.activity-button/);
+});
+
+test('a sent question is indented by two tabs', async () => {
+  const style = await read('src/renderer/style.css');
+  // Two 40px tab stops push the You bubble in from the transcript's left edge.
+  assert.match(style, /\.message\.you\{padding-left:calc\(2\*40px\)\}/);
+});
+
+test('questions typed during a turn wait in a Steer queue above the composer', async () => {
+  const [html, main, style] = await Promise.all([readHtml(), readMain(), read('src/renderer/style.css')]);
+  assert.match(html, /<div id="queued-turns" class="queued-turns" aria-label="Queued questions" aria-live="polite" hidden><\/div>/);
+  assert.match(style, /\.queued-steer\{/);
+  assert.match(style, /\.queued-turn\.steering\{/);
+  // Sending stays available while a turn runs; only setup gates it now.
+  assert.match(main, /send\.disabled = !canSend\(initialized, creatingSession \|\| selectingContext\)/);
+  assert.doesNotMatch(main, /send\.disabled = !canSend\(initialized, busy \|\|/);
+  // A busy session queues the question instead of dropping it.
+  assert.match(main, /if \(activeSessionId && running\.has\(activeSessionId\)\) \{\s*enqueueTurn\(activeSessionId, text, sent\);/);
+  assert.match(main, /function enqueueTurn\(id: string, text: string, attachments: AttachmentRecord\[\]\): void/);
+  assert.match(main, /const queuedTurns = new Map<string, QueuedTurn\[\]>\(\)/);
+  // Every queued row leads with its Steer button.
+  assert.match(main, /steer\.className = 'queued-steer'/);
+  assert.match(main, /steer\.textContent = item\.steer \? 'Next' : 'Steer'/);
+  assert.match(main, /row\.append\(steer, text, remove\)/);
+  // Steer promotes a question to the front of the queue.
+  assert.match(main, /function steerQueuedTurn\(index: number\): void/);
+  assert.match(main, /item\.steer = true;\s*queue\.unshift\(item\)/);
+  // The next question starts only after the running turn has finished.
+  assert.match(main, /async function drainQueuedTurn\(id: string\): Promise<void>/);
+  assert.match(main, /if \(!fromQueue\) void drainQueuedTurn\(id\)/);
+  assert.match(main, /if \(id !== activeSessionId \|\| running\.has\(id\) \|\| dispatchingQueuedTurn\.has\(id\)\) return/);
 });

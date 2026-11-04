@@ -32,7 +32,7 @@ import {
 } from './task-monitor';
 
 export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
-type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; editableUrl: boolean; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
+type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebContent: boolean; executeCommand: boolean; useMcpServers: boolean };
 type ModelUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; rateTps: number | null; contextTokens: number | null };
@@ -99,6 +99,11 @@ const lastKindKey = 'moderado-last-kind';
 /** Start in the mode you left, the way WorkBuddy does, not always in Work. */
 let activeKind: SessionKind = parseSessionKind(localStorage.getItem(lastKindKey));
 let pendingAttachments: AttachmentRecord[] = [];
+/** Questions typed while a turn runs wait here, one queue per session. */
+type QueuedTurn = { key: string; text: string; attachments: AttachmentRecord[]; steer: boolean };
+const queuedTurns = new Map<string, QueuedTurn[]>();
+/** A drain is in flight for these sessions, so two events cannot dispatch twice. */
+const dispatchingQueuedTurn = new Set<string>();
 let initialized = false;
 let creatingSession = false;
 let activeProvider: ProviderId = 'moderado';
@@ -334,12 +339,9 @@ function setModelOptions(models: ModelInfo[], planValue: string, actValue: strin
 function setGatewayMode(next: GatewayMode, persistDraft = true): void {
   const changed = gatewayMode !== next;
   gatewayMode = next;
-  if (changed) {
-    // The User pane follows the gateway: each one has its own signed-in email.
-    accountEmail = storedAccountEmail();
-    applyAccount();
-  }
   endpoint.value = GATEWAY_URLS[next];
+  // The User pane follows the gateway: each one has its own signed-in email.
+  if (changed) refreshAccount();
   document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
     const selected = button.dataset.gatewayMode === next;
     button.classList.toggle('selected', selected);
@@ -368,10 +370,11 @@ function selectProvider(id: ProviderId): void {
   const isModerado = id === 'moderado';
   if (isModerado) {
     setGatewayMode(draft?.baseUrl === GATEWAY_URLS.dev ? 'dev' : 'prod', false);
+    // A customized Moderado Base URL survives reselecting the provider.
+    if (draft?.baseUrl) endpoint.value = draft.baseUrl;
   } else {
     endpoint.value = draft?.baseUrl ?? preset.defaultBaseUrl;
   }
-  endpoint.readOnly = isModerado || !preset.editableUrl;
   $('gateway-mode').toggleAttribute('hidden', !isModerado);
   endpoint.placeholder = id === 'moderado' ? 'https://your-gateway.example/v1' : 'https://your-endpoint.example/v1';
   setModelOptions([], draft?.planModel ?? '', draft?.actModel ?? '');
@@ -389,6 +392,7 @@ function selectProvider(id: ProviderId): void {
     keyApplyLink.setAttribute('disabled', '');
     keyApplyLink.style.display = 'none';
   }
+  refreshAccount();
   if (activeSession()) setStatus(`${preset.name} selected. Changing provider starts a new conversation on the next task.`);
 }
 
@@ -396,10 +400,10 @@ function applySessionSettings(settings: ProviderSettings): void {
   selectProvider(settings.providerId);
   if (settings.providerId === 'moderado') {
     setGatewayMode(settings.baseUrl === GATEWAY_URLS.dev ? 'dev' : 'prod', false);
-  } else {
-    endpoint.value = settings.baseUrl;
   }
+  endpoint.value = settings.baseUrl;
   setModelOptions([], settings.planModel, settings.actModel);
+  refreshAccount();
 }
 
 async function saveEnteredKey(settings: ProviderSettings): Promise<void> {
@@ -920,7 +924,7 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     applySessionSettings(record.settings); applyAutoApprove(record.autoApprove);
     setMode(record.kind === 'work' ? 'act' : modeBySession.get(id) ?? 'act');
     $('session-title').textContent = sessionLabel(record);
-    renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); renderSessions();
+    renderTranscript(); restoreComposerDraft(); renderQueuedTurns(); applyKindUi(); updateFolderContext(); renderSessions();
     projectEntries.clear(); expandedFolders.clear();
     if (terminalOpen) {
       if (record.kind === 'work') void setTerminalOpen(false);
@@ -929,6 +933,8 @@ async function selectSession(id: string, saveDraft = true): Promise<void> {
     await Promise.all([refreshCheckpoints(), refreshSchedules(), viewingFiles() ? refreshProjectTree() : Promise.resolve(), viewingChanges() ? refreshSourceControl() : Promise.resolve()]);
     renderTaskMonitor();
     setStatus(running.has(id) ? 'Agent is working…' : record.kind === 'work' ? 'Task ready.' : 'Session ready.');
+    // Coming back to a session with waiting questions starts the first one.
+    if (!running.has(id)) void drainQueuedTurn(id);
   } catch (error) { if (revision === selectionRevision) setStatus(`Could not open conversation: ${String(error)}`); }
   finally { if (revision === selectionRevision) { selectingContext = false; updateControls(); } }
 }
@@ -974,7 +980,8 @@ for (const id of ['approve-read', 'approve-edit', 'approve-web', 'approve-comman
 function updateControls(): void {
   applyKindUi();
   const busy = activeSessionId ? running.has(activeSessionId) : false;
-  send.disabled = !canSend(initialized, busy || creatingSession || selectingContext) || (activeKind === 'code' && !selectedProjectWorkspace) || (activeKind === 'work' && !selectedWorkTaskId);
+  // Sending stays available while a turn runs: the question waits in the queue.
+  send.disabled = !canSend(initialized, creatingSession || selectingContext) || (activeKind === 'code' && !selectedProjectWorkspace) || (activeKind === 'work' && !selectedWorkTaskId);
   // The stop button is always present so the action row never shifts; it shows a
   // grey play triangle while idle and a red square while a turn is running.
   stop.disabled = !busy;
@@ -2008,38 +2015,58 @@ keyApplyLink.addEventListener('click', async (event) => {
   try { await openUrl(url); }
   catch (error) { setStatus(`Could not open apply page: ${String(error)}`); }
 });
+/**
+ * Sign-in follows the Base URL in the Connection card. A typed dev URL must not
+ * keep the prod identity, or the User pane hides "Sign in" and mints a prod key.
+ */
+function accountGateway(): { mode: GatewayMode; url: string } {
+  const entered = endpoint.value.trim().replace(/\/+$/, '');
+  if (entered === GATEWAY_URLS.dev) return { mode: 'dev', url: entered };
+  if (entered === GATEWAY_URLS.prod) return { mode: 'prod', url: entered };
+  return { mode: gatewayMode, url: GATEWAY_URLS[gatewayMode] };
+}
 /** Each gateway keeps its own identity, so a dev sign-in never poses as the prod account. */
-const accountEmailKey = (mode: GatewayMode) => `moderado-account-email:${mode}`;
-/** Earlier builds stored the prod email without a mode; read it once so nobody seems signed out. */
+const accountEmailKey = (url: string) => `moderado-account-email:${url}`;
+/** Earlier builds keyed the email by mode, then by nothing at all. */
+const legacyModeKey = (mode: GatewayMode) => `moderado-account-email:${mode}`;
 const legacyAccountEmailKey = 'moderado-account-email';
 const storedAccountEmail = (): string => {
+  const { mode, url } = accountGateway();
   try {
-    return localStorage.getItem(accountEmailKey(gatewayMode))
-      ?? (gatewayMode === 'prod' ? localStorage.getItem(legacyAccountEmailKey) : null)
+    return localStorage.getItem(accountEmailKey(url))
+      ?? localStorage.getItem(legacyModeKey(mode))
+      ?? (mode === 'prod' ? localStorage.getItem(legacyAccountEmailKey) : null)
       ?? '';
   } catch { return ''; }
 };
 let accountEmail = '';
 function applyAccount(): void {
+  const { mode } = accountGateway();
   $('user-account-name').textContent = accountEmail || t('Not signed in');
   $('user-signin').toggleAttribute('hidden', Boolean(accountEmail));
   $('user-signout').toggleAttribute('hidden', !accountEmail);
-  $('user-signin').textContent = gatewayMode === 'dev'
+  $('user-signin').textContent = mode === 'dev'
     ? t('Sign in at 127.0.0.1:4788')
     : t('Sign in at modr.alfazen.org');
 }
+function refreshAccount(): void {
+  accountEmail = storedAccountEmail();
+  applyAccount();
+}
 accountEmail = storedAccountEmail();
 applyAccount();
+for (const event of ['change', 'input']) endpoint.addEventListener(event, refreshAccount);
 $('user-signin').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('user-signin');
   button.disabled = true;
   setStatus('Waiting for the browser to finish signing in…');
+  const { url } = accountGateway();
   try {
     // The browser authorizes on the website; the loopback callback mints the
     // key, stores it in the OS keychain, and reports the signed-in email.
-    const identity = await invoke<{ email: string }>('moderado_sign_in', { baseUrl: GATEWAY_URLS[gatewayMode] });
+    const identity = await invoke<{ email: string }>('moderado_sign_in', { baseUrl: url });
     accountEmail = identity.email;
-    try { localStorage.setItem(accountEmailKey(gatewayMode), accountEmail); } catch { /* the pane shows it for this run */ }
+    try { localStorage.setItem(accountEmailKey(url), accountEmail); } catch { /* the pane shows it for this run */ }
     applyAccount();
     setStatus(`Signed in as ${accountEmail}.`);
   } catch (error) {
@@ -2049,12 +2076,14 @@ $('user-signin').addEventListener('click', async () => {
   }
 });
 $('user-signout').addEventListener('click', async () => {
-  try { await invoke('moderado_sign_out', { baseUrl: GATEWAY_URLS[gatewayMode] }); }
+  const { mode, url } = accountGateway();
+  try { await invoke('moderado_sign_out', { baseUrl: url }); }
   catch (error) { setStatus(`Sign-out failed: ${String(error)}`); return; }
   accountEmail = '';
   try {
-    localStorage.removeItem(accountEmailKey(gatewayMode));
-    if (gatewayMode === 'prod') localStorage.removeItem(legacyAccountEmailKey);
+    localStorage.removeItem(accountEmailKey(url));
+    localStorage.removeItem(legacyModeKey(mode));
+    if (mode === 'prod') localStorage.removeItem(legacyAccountEmailKey);
   } catch { /* nothing else caches it */ }
   applyAccount();
   setStatus('Signed out. Local work is unchanged.');
@@ -2325,14 +2354,20 @@ function mcpRow(server: McpServerConfig): HTMLElement {
   return row;
 }
 
+/** An empty row keeps the Add server form enabled inside the card. */
+function emptyMcpServer(): McpServerConfig {
+  return { id: '', transport: 'stdio', command: '', url: '', args: [], env: {}, tools: null, enabled: true };
+}
+
 function renderMcpServers(config: { servers: McpServerConfig[] }): void {
-  $('mcp-servers').replaceChildren(...config.servers.map((server) => mcpRow(server)));
+  const servers = config.servers.length ? config.servers : [emptyMcpServer()];
+  $('mcp-servers').replaceChildren(...servers.map((server) => mcpRow(server)));
 }
 
 function readMcpServers(): { servers: McpServerConfig[] } {
   const rows = Array.from(document.querySelectorAll<HTMLElement>('#mcp-servers .mcp-server-row'));
   return {
-    servers: rows.map((row) => {
+    servers: rows.map((row): McpServerConfig => {
       const value = (field: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field="${field}"]`)?.value ?? '';
       const transport = value('transport') === 'http' ? 'http' : 'stdio';
       const target = value('target').trim();
@@ -2346,7 +2381,7 @@ function readMcpServers(): { servers: McpServerConfig[] } {
         tools: parseMcpTools(value('tools')),
         enabled: row.querySelector<HTMLInputElement>('[data-field="enabled"]')?.checked ?? true,
       };
-    }),
+    }).filter((server) => Boolean(server.id || server.command || server.url)),
   };
 }
 
@@ -2378,7 +2413,7 @@ async function loadMcpConfig(): Promise<void> {
 }
 
 $('add-mcp-server').addEventListener('click', () => {
-  $('mcp-servers').append(mcpRow({ id: '', transport: 'stdio', command: '', url: '', args: [], env: {}, tools: null, enabled: true }));
+  $('mcp-servers').append(mcpRow(emptyMcpServer()));
 });
 
 $('save-mcp-config').addEventListener('click', async () => {
@@ -2720,7 +2755,7 @@ const scheduleStartedReady = listen<ScheduleStarted>('schedule-started', ({ payl
 const scheduleRunReady = listen<ScheduleRun>('schedule-run', ({ payload }) => {
   const remaining = (scheduledPending.get(payload.sessionId) ?? 1) - 1;
   if (remaining > 0) scheduledPending.set(payload.sessionId, remaining);
-  else { scheduledPending.delete(payload.sessionId); clearRunning(payload.sessionId); }
+  else { scheduledPending.delete(payload.sessionId); clearRunning(payload.sessionId); void drainQueuedTurn(payload.sessionId); }
   if (payload.sessionId === activeSessionId) {
     setStatus(payload.error ? `Scheduled task failed: ${payload.error}` : 'Scheduled task completed.');
     void refreshSchedules();
@@ -2801,30 +2836,97 @@ prompt.addEventListener('input', () => {
 });
 prompt.addEventListener('blur', () => closeMention());
 
-$<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!initialized || creatingSession || selectingContext || (activeSessionId && running.has(activeSessionId))) return;
-  const text = prompt.value.trim();
-  const sent = [...pendingAttachments];
-  const submittedDraftKey = draftKey();
-  const btw = /^\/btw(?:\s|$)/i.test(text);
-  if (!text) return;
-  if (btw && text.replace(/^\/btw\s*/i, '').trim() === '') {
-    const history = activeSessionId ? btwHistory.get(activeSessionId) ?? [] : [];
-    const content = history.length
-      ? history.slice(-5).reverse().map((item) => `Q: ${item.question}\nA: ${item.answer}`).join('\n\n---\n\n')
-      : 'Ask a quick side question with /btw <question>. Side questions are not added to session history.';
-    $('btw-content').textContent = content;
-    $<HTMLDialogElement>('btw-dialog').showModal();
-    prompt.value = '';
-    recallState = { ...EMPTY_RECALL };
+const queuedTurnKey = (): string => `queued-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** Waiting questions sit above the composer, each with a Steer button in front. */
+function renderQueuedTurns(): void {
+  const host = $('queued-turns');
+  const queue = activeSessionId ? queuedTurns.get(activeSessionId) ?? [] : [];
+  host.replaceChildren(...queue.map((item, index) => {
+    const row = document.createElement('div');
+    row.className = `queued-turn${item.steer ? ' steering' : ''}`;
+    const steer = document.createElement('button');
+    steer.type = 'button';
+    steer.className = 'queued-steer';
+    steer.textContent = item.steer ? 'Next' : 'Steer';
+    steer.title = 'Send this question next, ahead of the rest of the queue.';
+    steer.setAttribute('aria-label', `Steer: ${item.text}`);
+    steer.addEventListener('click', () => steerQueuedTurn(index));
+    const text = document.createElement('span');
+    text.className = 'queued-text';
+    text.textContent = item.text;
+    text.title = item.text;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'queued-remove';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', 'Remove queued question');
+    remove.addEventListener('click', () => {
+      const id = activeSessionId;
+      if (!id) return;
+      const current = queuedTurns.get(id) ?? [];
+      current.splice(index, 1);
+      queuedTurns.set(id, current);
+      renderQueuedTurns();
+      setStatus(current.length ? `${current.length} question(s) queued.` : 'Queue cleared.');
+    });
+    row.append(steer, text, remove);
+    return row;
+  }));
+  host.toggleAttribute('hidden', queue.length === 0);
+}
+
+function enqueueTurn(id: string, text: string, attachments: AttachmentRecord[]): void {
+  const queue = queuedTurns.get(id) ?? [];
+  queue.push({ key: queuedTurnKey(), text, attachments, steer: false });
+  queuedTurns.set(id, queue);
+  if (id === activeSessionId) renderQueuedTurns();
+}
+
+/** Steer moves a question to the front, so the agent reads it before the rest. */
+function steerQueuedTurn(index: number): void {
+  const id = activeSessionId;
+  if (!id) return;
+  const queue = queuedTurns.get(id) ?? [];
+  const [item] = queue.splice(index, 1);
+  if (!item) return;
+  item.steer = true;
+  queue.unshift(item);
+  queuedTurns.set(id, queue);
+  renderQueuedTurns();
+  if (running.has(id)) {
+    setStatus('Steering: this question goes next, as soon as the current turn ends.');
     return;
   }
+  void drainQueuedTurn(id);
+}
+
+/** A running turn cannot take a second prompt, so the queue feeds the next one. */
+async function drainQueuedTurn(id: string): Promise<void> {
+  if (id !== activeSessionId || running.has(id) || dispatchingQueuedTurn.has(id)) return;
+  dispatchingQueuedTurn.add(id);
+  try {
+    // Keep handing the agent the next waiting question until the queue is empty.
+    while (id === activeSessionId && !running.has(id)) {
+      const queue = queuedTurns.get(id) ?? [];
+      const next = queue.shift();
+      if (!next) return;
+      queuedTurns.set(id, queue);
+      renderQueuedTurns();
+      await submitTurn(next.text, next.attachments, true);
+    }
+  } finally { dispatchingQueuedTurn.delete(id); }
+}
+
+/** Runs one turn for the current settings; queued questions reuse this path. */
+async function submitTurn(text: string, sent: AttachmentRecord[], fromQueue = false): Promise<void> {
+  const submittedDraftKey = draftKey();
   const settings = currentSettings();
   const turnMode = activeKind === 'work' ? 'act' : mode;
   const model = turnMode === 'plan' ? settings.planModel : settings.actModel;
+  const btw = /^\/btw(?:\s|$)/i.test(text);
   const sideQuestion = btw ? text.replace(/^\/btw\s*/i, '').trim() : '';
-  if (!text || !settings.baseUrl || (btw ? !settings.planModel : !model)) { setStatus('Enter an endpoint, choose a model, and enter a task.'); return; }
+  if (!settings.baseUrl || (btw ? !settings.planModel : !model)) { setStatus('Enter an endpoint, choose a model, and enter a task.'); return; }
   let id: string;
   try { id = await sessionForSubmit(activeSessionId, () => createSession(settings)); }
   catch (error) { setStatus(String(error) === 'No workspace selected' ? 'Choose a workspace to send your message.' : String(error)); return; }
@@ -2855,9 +2957,12 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     }
     conversationBindings.set(id, binding(settings));
     addDisplay(id, 'You', sent.length ? `${text}\n\n[${sent.map((item) => item.name).join(', ')}]` : text);
-    composerDrafts.delete(submittedDraftKey);
-    composerDrafts.set(id, { text: '', attachments: [] });
-    if (id === activeSessionId) { prompt.value = ''; pendingAttachments = []; renderChips(); }
+    // A queued question never clears the draft the user is typing right now.
+    if (!fromQueue) {
+      composerDrafts.delete(submittedDraftKey);
+      composerDrafts.set(id, { text: '', attachments: [] });
+      if (id === activeSessionId) { prompt.value = ''; pendingAttachments = []; renderChips(); }
+    }
     if (id === activeSessionId) setStatus('Agent is working…');
     await invoke('start_turn', {
       sessionId: id,
@@ -2875,7 +2980,45 @@ $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
     renderSessions();
     updateControls();
     if (id === activeSessionId) prompt.focus();
+    // A queued question starts only after this turn has fully finished.
+    if (!fromQueue) void drainQueuedTurn(id);
   }
+}
+
+$<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!initialized || creatingSession || selectingContext) return;
+  const text = prompt.value.trim();
+  const sent = [...pendingAttachments];
+  const btw = /^\/btw(?:\s|$)/i.test(text);
+  if (!text) return;
+  if (btw && text.replace(/^\/btw\s*/i, '').trim() === '') {
+    const history = activeSessionId ? btwHistory.get(activeSessionId) ?? [] : [];
+    const content = history.length
+      ? history.slice(-5).reverse().map((item) => `Q: ${item.question}\nA: ${item.answer}`).join('\n\n---\n\n')
+      : 'Ask a quick side question with /btw <question>. Side questions are not added to session history.';
+    $('btw-content').textContent = content;
+    $<HTMLDialogElement>('btw-dialog').showModal();
+    prompt.value = '';
+    recallState = { ...EMPTY_RECALL };
+    return;
+  }
+  const settings = currentSettings();
+  const turnMode = activeKind === 'work' ? 'act' : mode;
+  const model = turnMode === 'plan' ? settings.planModel : settings.actModel;
+  if (!settings.baseUrl || (btw ? !settings.planModel : !model)) { setStatus('Enter an endpoint, choose a model, and enter a task.'); return; }
+  // While a turn runs the question waits, so several can be lined up at once.
+  if (activeSessionId && running.has(activeSessionId)) {
+    enqueueTurn(activeSessionId, text, sent);
+    prompt.value = '';
+    pendingAttachments = [];
+    renderChips();
+    const waiting = queuedTurns.get(activeSessionId)?.length ?? 1;
+    setStatus(`Queued ${waiting} question(s). Steer one to send it next.`);
+    prompt.focus();
+    return;
+  }
+  await submitTurn(text, sent);
 });
 
 void initialize();
