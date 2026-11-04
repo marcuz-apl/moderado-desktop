@@ -5,6 +5,7 @@
   "identifier": "com.moderado.desktop",
   "build": {
     "beforeDevCommand": "npm run vite:dev",
+    "beforeBuildCommand": "vite build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
