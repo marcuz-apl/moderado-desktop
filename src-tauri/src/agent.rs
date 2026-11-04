@@ -535,7 +535,10 @@ mod tests {
             .iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
             .collect();
-        for name in ["read_file", "list_files", "search_files", "write_file", "edit_file", "web_search", "execute_command"] { assert!(names.iter().any(|item| item == name), "{name}"); }
+        for name in ["read_file", "list_files", "search_files", "write_file", "edit_file", "web_search"] { assert!(names.iter().any(|item| item == name), "{name}"); }
+        // The jailed command tool is only advertised where a sandbox backend exists.
+        #[cfg(any(windows, target_os = "linux"))]
+        assert!(names.iter().any(|item| item == "execute_command"), "execute_command");
         // MCP servers stay a Code-session capability.
         assert!(!names.iter().any(|item| item == "git_diff"));
     }
