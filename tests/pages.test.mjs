@@ -215,3 +215,11 @@ test('questions typed during a turn wait in a Steer queue above the composer', a
   assert.match(main, /if \(!fromQueue\) void drainQueuedTurn\(id\)/);
   assert.match(main, /if \(id !== activeSessionId \|\| running\.has\(id\) \|\| dispatchingQueuedTurn\.has\(id\)\) return/);
 });
+
+test('Work mode exposes the Run commands auto-approve alongside Code', async () => {
+  const [html, main] = await Promise.all([readHtml(), readMain()]);
+  assert.match(html, /<label id="approve-command-option" class="auto-approve-option" title="[^"]*"><input id="approve-command" type="checkbox" checked \/>Run commands<\/label>/);
+  // The toggle shows in Work mode too; MCP servers stay Code-only.
+  assert.match(main, /\$\('approve-mcp-option'\)\.toggleAttribute\('hidden', work\)/);
+  assert.doesNotMatch(main, /\$\('approve-command-option'\)\.toggleAttribute\('hidden', work\)/);
+});

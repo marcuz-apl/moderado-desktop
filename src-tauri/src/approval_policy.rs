@@ -22,7 +22,9 @@ impl AutoApprovePolicy {
 
     pub fn for_new_session(kind: SessionKind) -> Self {
         if kind == SessionKind::Code { Self { read_files: true, edit_files: true, fetch_web_content: true, execute_command: true, use_mcp_servers: true } }
-        else { Self { read_files: true, edit_files: true, fetch_web_content: true, execute_command: false, use_mcp_servers: false } }
+        // Work tasks run sandboxed commands too — python conversions, converters —
+        // while MCP servers stay a Code-session capability.
+        else { Self { read_files: true, edit_files: true, fetch_web_content: true, execute_command: true, use_mcp_servers: false } }
     }
     pub fn legacy_default(kind: SessionKind) -> Self {
         Self::for_new_session(kind)
@@ -37,4 +39,5 @@ mod tests {
     use super::*;
     #[test] fn new_code_policy_enables_all_categories() { let p = AutoApprovePolicy::for_new_session(SessionKind::Code); assert!(p.read_files && p.edit_files && p.fetch_web_content && p.execute_command && p.use_mcp_servers); }
     #[test] fn code_defaults_enable_all_five_capabilities_for_new_and_existing_sessions() { for p in [AutoApprovePolicy::legacy_default(SessionKind::Code), AutoApprovePolicy::for_new_session(SessionKind::Code)] { assert!(p.read_files && p.edit_files && p.fetch_web_content && p.execute_command && p.use_mcp_servers); } }
+    #[test] fn work_defaults_auto_approve_commands_but_not_mcp() { let p = AutoApprovePolicy::for_new_session(SessionKind::Work); assert!(p.read_files && p.edit_files && p.fetch_web_content && p.execute_command); assert!(!p.use_mcp_servers); }
 }

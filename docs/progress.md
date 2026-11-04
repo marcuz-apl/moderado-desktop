@@ -382,3 +382,10 @@
 - The side panel is **resizable**: the grid uses `var(--sidebar-width, 260px)`, and a 7px handle on the panel's right edge drags it between 200 and 560px. Double-click resets to 260, arrow keys step by 16 when the handle is focused, and the width persists in `moderado-sidebar-width`.
 - The terminal's ResizeObserver already refits on host size, so widening the panel widens the shell automatically.
 - Tests: the rail is asserted by aria-label (so a duplicate `data-panel` for the Git button is not ambiguous), and the resizer's variable, clamping, persistence and keyboard path are asserted.
+
+## Work tasks can run sandboxed commands (0.4.42)
+
+- Work mode used to hard-refuse `execute_command` and never advertised the tool. It now gets the same jailed command tool as Code (Windows AppContainer workspace copy, Linux Landlock), so a task can run python or a converter itself.
+- The **Run commands** auto-approve toggle shows in Work mode as well (the label was "Command"; it now says what it does and carries a tooltip). MCP servers remain Code-only, and Plan mode still blocks commands.
+- New Work sessions default every category except MCP to enabled; migration 12 flips `executeCommand` on for Work sessions still sitting on the shipped default while leaving any saved custom policy untouched. The migration guards `add_column_if_missing` because a database that skipped version 4 would otherwise fail the update.
+- Tests: tool list and dispatch for Work/Act, a Work auto-approve command run, the prompt-all rejection path, the new policy default, and the migration's flip-vs-preserve behaviour.

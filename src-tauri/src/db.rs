@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bump this and add a migration below when the schema changes.
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 12;
 
 /// Version 1 is the schema as it shipped before versioning existed. It is
 /// written with `IF NOT EXISTS` so a database created by an older build passes
@@ -273,6 +273,22 @@ fn migrate(db: &mut Connection) -> Result<(), String> {
         tx.commit().map_err(|error| error.to_string())?;
     }
 
+    if version < 12 {
+        let tx = db.transaction().map_err(|error| error.to_string())?;
+        add_column_if_missing(&tx, "sessions", "auto_approve_json", "TEXT NOT NULL DEFAULT '{}'")?;
+        // Real databases that reached version 4 carry the approval column, and
+        // every one of them also carries `kind`; the update only applies there.
+        if columns(&tx, "sessions")?.iter().any(|column| column == "kind") {
+            // Work tasks can run sandboxed commands now (a python conversion,
+            // say), so sessions still on the old default flip "Run commands" on.
+            // Sessions whose operator saved a different policy keep their choice.
+            tx.execute("UPDATE sessions SET auto_approve_json='{\"readFiles\":true,\"editFiles\":true,\"fetchWebContent\":true,\"executeCommand\":true,\"useMcpServers\":false}' WHERE kind='work' AND auto_approve_json='{\"readFiles\":true,\"editFiles\":true,\"fetchWebContent\":true,\"executeCommand\":false,\"useMcpServers\":false}'", [])
+                .map_err(|error| format!("Could not enable Work command execution: {error}"))?;
+        }
+        tx.pragma_update(None, "user_version", 12).map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -347,8 +363,13 @@ mod tests {
         let (policy, history): (String, String) = db.query_row("SELECT auto_approve_json,history_json FROM sessions WHERE id='w1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(serde_json::from_str::<serde_json::Value>(&policy).unwrap()["editFiles"], true);
         assert!(history.contains("keep"));
+        // The Work session still on the shipped default gains sandboxed commands;
+        // the one with a saved custom policy keeps what its operator chose.
+        let migrated: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='w3'", [], |row| row.get(0)).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&migrated).unwrap()["executeCommand"], true);
         let custom: String = db.query_row("SELECT auto_approve_json FROM sessions WHERE id='w2'", [], |row| row.get(0)).unwrap();
         assert_eq!(serde_json::from_str::<serde_json::Value>(&custom).unwrap()["editFiles"], false);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&custom).unwrap()["executeCommand"], false);
         let (tasks, shared_task): (i64, bool) = db.query_row("SELECT (SELECT COUNT(*) FROM work_tasks),(SELECT task_id FROM sessions WHERE id='w1')=(SELECT task_id FROM sessions WHERE id='w3')", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(tasks, 2);
         assert!(shared_task);

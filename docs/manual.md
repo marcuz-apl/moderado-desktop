@@ -18,7 +18,7 @@ The Work/Code switch sits in the top bar.
 
 | Mode | What it is for | What it can do |
 | --- | --- | --- |
-| **Work** | Questions, notes, documents | Reads, writes, and edits files inside a managed task folder. No commands. |
+| **Work** | Questions, notes, documents | Reads, writes, and edits files inside a managed task folder, plus sandboxed commands (a python conversion, say). |
 | **Code** | A real project folder | Everything Work does, plus Plan/Act, Git inspection, diagnostics, and sandboxed commands. |
 
 Work tasks and Code projects both appear in the **Library** panel on the left.

@@ -46,9 +46,7 @@ pub fn tool_definitions_with_mcp(kind: SessionKind, mode: Mode, mcp_tools: &[Val
         tools.push(json!({"type":"function","function":{"name":"write_file","description":"Create or replace a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative file path"},"content":{"type":"string"}},"required":["path","content"]}}}));
         tools.push(json!({"type":"function","function":{"name":"edit_file","description":"Replace one unique text span in a UTF-8 file after user approval","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}));
         #[cfg(any(windows, target_os = "linux"))]
-        if matches!(kind, SessionKind::Code) {
         tools.push(json!({"type":"function","function":{"name":"execute_command","description":"Run one executable with separate arguments in a Windows AppContainer workspace copy. No shell is invoked implicitly.","parameters":{"type":"object","properties":{"program":{"type":"string","description":"Executable name or absolute path"},"args":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string","description":"Workspace-relative directory"},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000}},"required":["program"]}}}));
-        }
     }
     #[cfg(not(windows))]
     let _ = kind;
@@ -113,7 +111,9 @@ where
 
 pub async fn dispatch_tool_with_policy<F, Fut, C>(
     root: &Path,
-    kind: SessionKind,
+    // Kept in the signature because tool availability still depends on the
+    // session kind at listing time; dispatch itself now treats both kinds alike.
+    _kind: SessionKind,
     mode: Mode,
     policy: &AutoApprovePolicy,
     call: &ToolCall,
@@ -125,9 +125,6 @@ where
     Fut: Future<Output = Option<String>>,
     C: FnOnce(&Approval) -> Result<(), String>,
 {
-    if matches!(kind, SessionKind::Work) && call.name == "execute_command" {
-        return Err("Work tasks cannot execute commands".into());
-    }
     if matches!(call.name.as_str(), "write_file" | "edit_file") && matches!(mode, Mode::Plan) {
         return Err("Plan mode blocks file writes".into());
     }
@@ -331,11 +328,11 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
-    fn command_tool_is_available_only_in_code_act_mode() {
+    fn command_tool_is_available_in_act_mode_for_both_session_kinds() {
         let has_command = |kind, mode| tool_definitions(kind, mode).iter().any(|tool| tool["function"]["name"] == "execute_command");
         assert!(has_command(SessionKind::Code, Mode::Act));
         assert!(!has_command(SessionKind::Code, Mode::Plan));
-        assert!(!has_command(SessionKind::Work, Mode::Act));
+        assert!(has_command(SessionKind::Work, Mode::Act));
     }
 
     #[tokio::test]
@@ -533,17 +530,18 @@ mod tests {
     }
 
     #[test]
-    fn work_tasks_get_document_tools_without_command_execution() {
+    fn work_tasks_get_document_tools_and_command_execution() {
         let names: Vec<String> = tool_definitions(SessionKind::Work, Mode::Act)
             .iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
             .collect();
-        for name in ["read_file", "list_files", "search_files", "write_file", "edit_file", "web_search"] { assert!(names.iter().any(|item| item == name), "{name}"); }
-        assert!(!names.iter().any(|item| item == "execute_command"));
+        for name in ["read_file", "list_files", "search_files", "write_file", "edit_file", "web_search", "execute_command"] { assert!(names.iter().any(|item| item == name), "{name}"); }
+        // MCP servers stay a Code-session capability.
+        assert!(!names.iter().any(|item| item == "git_diff"));
     }
 
     #[tokio::test]
-    async fn work_tasks_edit_only_inside_their_folder_and_reject_commands() {
+    async fn work_tasks_edit_only_inside_their_folder_and_ask_before_commands() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("a.txt"), "hello").unwrap();
         for (name, arguments) in [
@@ -564,9 +562,24 @@ mod tests {
             .await;
             assert!(result.is_ok(), "{name}: {result:?}");
         }
-        for (name, arguments) in [("read_file", r#"{"path":"../outside.txt"}"#), ("write_file", r#"{"path":"../outside.txt","content":"bad"}"#), ("execute_command", r#"{"program":"cmd.exe"}"#)] {
+        for (name, arguments) in [("read_file", r#"{"path":"../outside.txt"}"#), ("write_file", r#"{"path":"../outside.txt","content":"bad"}"#)] {
             let call = ToolCall { id: "escape".into(), name: name.into(), arguments: arguments.into() };
             assert!(dispatch_tool(root.path(), SessionKind::Work, Mode::Act, &call, |_| async { panic!("approval must not bypass the jail") }).await.is_err());
         }
+        // A command still goes through the approval gate when auto-approve is off.
+        let call = ToolCall { id: "cmd".into(), name: "execute_command".into(), arguments: r#"{"program":"cmd.exe"}"#.into() };
+        let result = dispatch_tool(root.path(), SessionKind::Work, Mode::Act, &call, |_| async { None }).await;
+        assert!(result.unwrap_err().contains("rejected by user"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn work_tasks_auto_approve_their_commands() {
+        let root = tempfile::tempdir().unwrap();
+        let call = ToolCall { id: "py".into(), name: "execute_command".into(), arguments: r#"{"program":"cmd.exe","args":["/c","echo converted>out.txt"]}"#.into() };
+        let result = dispatch_tool_with_policy(root.path(), SessionKind::Work, Mode::Act, &AutoApprovePolicy::for_new_session(SessionKind::Work), &call, |_| async { panic!("a Work command auto-approves by default") }, |_| Ok(())).await.unwrap();
+        let result: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result["exitCode"], 0);
+        assert_eq!(fs::read_to_string(root.path().join("out.txt")).unwrap().trim(), "converted");
     }
 }

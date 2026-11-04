@@ -661,15 +661,16 @@ function applyKindUi(): void {
   // The workspace manages sessions in both modes; tasks are created in the Library.
   $('session-eyebrow').textContent = 'AGENT SESSION';
   $('new-session').textContent = 'New Session';
-  // Plan/Act changes what the agent may do in a workspace; Work tasks have no
-  // command execution, so the selector is hidden rather than disabled.
+  // Plan/Act changes what the agent may do in a Code workspace; Work tasks
+  // always run in Act, so the selector is hidden rather than disabled.
   $('agent-mode').toggleAttribute('hidden', work);
   // The approval toggles keep the footer's shape before a session exists;
   // they stay visible, disabled, and say when they take effect.
   const approvals = $('auto-approve-group');
   approvals.removeAttribute('hidden');
   approvals.title = activeSessionId ? '' : work ? 'Start with the next task.' : 'Start with the next session.';
-  $('approve-command-option').toggleAttribute('hidden', work);
+  // Work tasks run sandboxed commands too (a python conversion, say), so the
+  // Run commands toggle shows there as well; MCP servers stay Code-only.
   $('approve-mcp-option').toggleAttribute('hidden', work);
   // "+" attaches a file's content in both modes; "@" references a project file.
   attachButton.disabled = selectingContext || !activeSessionId;

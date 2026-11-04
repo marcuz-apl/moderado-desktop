@@ -8,7 +8,7 @@ A Task owns a managed folder under Documents/Moderado-Desktop named `work-task-#
 
 The Library's Work list places New, Rename, and Delete beneath its heading. Each Task expands to show its indented sessions. Radio controls identify the selected Task and session; list rows remain unboxed. The Library owns task management: **New Task** creates a numbered task, and Rename/Delete act on the selected task. The main workspace's **New Session** action starts a session inside the selected task; Code mode uses the same label to create a session in the selected project. Rename and Delete Session stay in the main workspace. Deleting a session keeps its Task and managed files. Deleting a Task removes its child sessions and histories from Moderado while preserving the managed folder and files.
 
-Work can read, search, create, and edit UTF-8 documents inside its folder. Markdown, plain text, CSV, and HTML are supported by the existing file tools. These tools cannot generate native binary Office/PDF documents. Work cannot execute commands. File operations remain jailed, follow the task's approval policy, and create checkpoints before mutation. Explorer is available in Work mode. Checkpoints share the Git rail tab, which is Code-only, so Work disables that tab and neither view can be opened there.
+Work can read, search, create, and edit UTF-8 documents inside its folder. Markdown, plain text, CSV, and HTML are supported by the existing file tools. These tools cannot generate native binary Office/PDF documents. Work can also run sandboxed commands — the same jailed AppContainer/Landlock sandbox as Code — so a task can call python or a converter, gated by the **Run commands** auto-approve. File operations remain jailed, follow the task's approval policy, and create checkpoints before mutation. Explorer is available in Work mode. Checkpoints share the Git rail tab, which is Code-only, so Work disables that tab and neither view can be opened there.
 
 Text/image attachments keep an immutable copy for conversation replay and an editable copy at attachments/<id>-<name> inside the task folder. Old attachment references are copied when the task next runs, and existing edited copies are preserved. Original source files remain untouched.
 
@@ -31,7 +31,7 @@ The compact Work/Code selector restores that mode's last task/session or Code pr
 
 Async selection results are guarded by a revision counter. A delayed request cannot reactivate another mode or overwrite a newer selection. Completion and attachment events are scoped to their originating conversation. Deleting the active session selects another conversation only in the same task mode or Code project; otherwise it displays a new draft.
 
-The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web approval controls; Code also shows command and MCP. Checkbox changes save immediately per session. Provider/model and usage share a row below the input.
+The job status remains above the single-line Auto-Approve toolbar and input. Work shows read/edit/web and **Run commands** controls; Code also shows MCP. Checkbox changes save immediately per session. Provider/model and usage share a row below the input.
 
 Assistant replies and final turn summaries render Markdown with embedded HTML disabled. Completed assistant replies are presented as Turn summaries; a requested summary heading is separated from any preceding response text. Tool calls appear in a compact activity timeline with running/completed/error states, timestamps, and expandable results.
 

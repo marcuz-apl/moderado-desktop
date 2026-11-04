@@ -105,7 +105,7 @@ export const fr: Record<string, string> = {
   'Read': 'Lire',
   'Edit': 'Modifier',
   'Web': 'Web',
-  'Command': 'Commande',
+  'Run commands': 'Exécuter des commandes',
   'Model token usage': 'Utilisation des jetons du modèle',
   'In, Out, and Total are task totals; Rate is the latest response; Context is the latest request size.': 'In, Out et Total sont les totaux de la tâche ; Rate est la dernière réponse ; Context est la taille de la dernière requête.',
   'Enter to send · Shift+Enter for a new line · /btw for a side question': 'Entrée pour envoyer · Maj+Entrée pour un saut de ligne · /btw pour une question annexe',
