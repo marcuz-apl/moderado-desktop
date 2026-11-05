@@ -8,11 +8,11 @@ The window title bar shows the version of this build after the product name (for
 
 Open **Settings** from the gear icon.
 
-- **Provider** — pick a preset (Moderado Gateway, NVIDIA NIM, OpenRouter) or a local runtime (Ollama, LM Studio).
+- **Provider** — pick a preset (Moderado Gateway, NVIDIA NIM, OpenRouter) or a local runtime (llama.cpp, Ollama, LM Studio).
 - **API key** — stored in the OS keychain, never in a config file or the transcript.
 - **Models** — choose a Plan model and an Act model. Use **Load models** to read the provider's list.
 
-Ollama and LM Studio need no key and work offline.
+llama.cpp, Ollama, and LM Studio need no key and work offline. Each is marked available or offline in the provider list at startup; llama.cpp's server (`llama-server`) is expected on `http://localhost:9931/v1`.
 
 ### 2. Choose a mode
 

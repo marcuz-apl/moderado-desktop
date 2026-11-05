@@ -663,6 +663,10 @@ mod tests {
                 include_str!("../../tests/fixtures/open_router.sse"),
             ),
             (
+                ProviderId::LlamaCpp,
+                include_str!("../../tests/fixtures/llama_cpp.sse"),
+            ),
+            (
                 ProviderId::Ollama,
                 include_str!("../../tests/fixtures/ollama.sse"),
             ),

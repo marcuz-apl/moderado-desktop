@@ -49,7 +49,7 @@ All providers are normalized to a single `ChatCompletion` contract (OpenAI-compa
 | --- | --- |
 | Moderado Gateway | Default; org-scoped API key; model list from `/v1/models`. |
 | NVIDIA NIM, OpenRouter | OpenAI-compatible HTTPS + API key. |
-| Ollama (`http://localhost:11434`), LM Studio (`http://localhost:1234`) | Local, no auth; probe availability at startup. |
+| llama.cpp (`http://localhost:9931`), Ollama (`http://localhost:11434`), LM Studio (`http://localhost:1234`) | Local, no auth; probe availability at startup. |
 | Custom endpoint | User-supplied base URL + optional key; validate against `/v1/models` before saving. |
 
 Rules:

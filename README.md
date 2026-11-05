@@ -2,7 +2,7 @@
 
 Cross-platform desktop application for running autonomous AI coding agent sessions outside the IDE. Built with Tauri, Rust, and TypeScript.
 
-Moderado Desktop follows the Cline Desktop interaction model — parallel sessions, Plan/Act dual modes, explicit tool approval, and git-backed checkpoints — while remaining **provider-agnostic**: Moderado Gateway (first-party), NVIDIA NIM, OpenRouter, Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
+Moderado Desktop follows the Cline Desktop interaction model — parallel sessions, Plan/Act dual modes, explicit tool approval, and git-backed checkpoints — while remaining **provider-agnostic**: Moderado Gateway (first-party), NVIDIA NIM, OpenRouter, llama.cpp (local), Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
 
 ## Current build
 
@@ -27,7 +27,7 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 - **Checkpoints**: automatic git-backed snapshots before each mutating agent step; one-click rollback.
 - **Attach and reference**: the **+** button attaches files in both modes — Work copies them into the task folder so the agent can edit them, Code sends their content without writing into the repository. In Code, **@** (button or typed) picks a project file and inserts `@relative/path` for the agent to read.
 - **Composer history**: press Up in the composer to walk back through the prompts this session has sent and Down to walk forward; stepping past the newest entry restores what you were typing. Arrows still move the caret inside multi-line text.
-- **Local-first**: fully usable offline with Ollama or LM Studio; no accounts required at first launch.
+- **Local-first**: fully usable offline with llama.cpp, Ollama, or LM Studio; no accounts required at first launch.
 - **No telemetry**: data never leaves your machine except to explicitly configured remote providers.
 
 ## Supported Providers
@@ -37,11 +37,12 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 | Moderado Gateway (default) | OpenAI-compatible HTTPS | Optional — two free stealth models work keyless; a key unlocks the full catalog |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key |
 | OpenRouter | OpenAI-compatible HTTPS | API key |
+| llama.cpp (local) | `http://localhost:9931/v1` | none |
 | Ollama (local) | `http://localhost:11434` | none |
 | LM Studio (local) | `http://localhost:1234` | none |
 | Custom | User-supplied base URL | optional key |
 
-All providers normalize to a single `ChatCompletion` contract. API keys are stored in the OS keychain and never written to plaintext config or logs. Every provider in Settings links to where you get it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and an installer page for the local Ollama and LM Studio runtimes, which need no key. The Moderado Gateway also serves two pinned stealth models without any key; they lead the model list tagged **free, no key**, while its other free routes still require a key.
+All providers normalize to a single `ChatCompletion` contract. API keys are stored in the OS keychain and never written to plaintext config or logs. Every provider in Settings links to where you get it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and a download page for the local llama.cpp, Ollama, and LM Studio runtimes, which need no key. The local runtimes are probed at startup and marked available or offline in the provider list. The Moderado Gateway also serves two pinned stealth models without any key; they lead the model list tagged **free, no key**, while its other free routes still require a key.
 
 ## Getting Started
 

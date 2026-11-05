@@ -31,7 +31,7 @@ import {
   type MonitorRun,
 } from './task-monitor';
 
-export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'ollama' | 'lm_studio' | 'other_openai_compatible';
+export type ProviderId = 'moderado' | 'nvidia_nim' | 'open_router' | 'llama_cpp' | 'ollama' | 'lm_studio' | 'open_ai_compatible';
 type ProviderPreset = { id: ProviderId; name: string; defaultBaseUrl: string; local: boolean; keyless: boolean; applyKeyUrl: string | null; applyKeyLabel: string };
 type ProviderSettings = { providerId: ProviderId; baseUrl: string; planModel: string; actModel: string };
 type AutoApprovePolicy = { readFiles: boolean; editFiles: boolean; fetchWebContent: boolean; executeCommand: boolean; useMcpServers: boolean };

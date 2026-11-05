@@ -17,6 +17,7 @@ pub enum ProviderId {
     Moderado,
     NvidiaNim,
     OpenRouter,
+    LlamaCpp,
     Ollama,
     LmStudio,
     OpenAiCompatible,
@@ -65,6 +66,15 @@ pub const PRESETS: &[ProviderPreset] = &[
         keyless: false,
         apply_key_url: Some("https://openrouter.ai/settings/keys"),
         apply_key_label: "Get API key",
+    },
+    ProviderPreset {
+        id: ProviderId::LlamaCpp,
+        name: "llama.cpp",
+        default_base_url: "http://localhost:9931/v1",
+        local: true,
+        keyless: false,
+        apply_key_url: Some("https://github.com/ggml-org/llama.cpp/releases"),
+        apply_key_label: "Get llama.cpp",
     },
     ProviderPreset {
         id: ProviderId::Ollama,
@@ -428,28 +438,27 @@ pub struct LocalProviderStatus {
     pub available: bool,
 }
 
+/// Every local runtime in the catalog gets an availability probe, so adding a
+/// preset is enough to have it show "available"/"offline" in Settings.
+fn local_presets() -> impl Iterator<Item = &'static ProviderPreset> {
+    PRESETS.iter().filter(|preset| preset.local)
+}
+
 pub async fn probe_local_providers() -> Vec<LocalProviderStatus> {
-    let ollama = list_models_with_timeout(
-        ProviderId::Ollama.preset().default_base_url,
-        "",
-        Duration::from_secs(2),
-    );
-    let lm_studio = list_models_with_timeout(
-        ProviderId::LmStudio.preset().default_base_url,
-        "",
-        Duration::from_secs(2),
-    );
-    let (ollama, lm_studio) = tokio::join!(ollama, lm_studio);
-    vec![
-        LocalProviderStatus {
-            id: ProviderId::Ollama,
-            available: ollama.is_ok(),
-        },
-        LocalProviderStatus {
-            id: ProviderId::LmStudio,
-            available: lm_studio.is_ok(),
-        },
-    ]
+    let presets: Vec<_> = local_presets().collect();
+    let probes: Vec<_> = presets
+        .iter()
+        .map(|preset| list_models_with_timeout(preset.default_base_url, "", Duration::from_secs(2)))
+        .collect();
+    let results = futures_util::future::join_all(probes).await;
+    presets
+        .iter()
+        .zip(results)
+        .map(|(preset, result)| LocalProviderStatus {
+            id: preset.id,
+            available: result.is_ok(),
+        })
+        .collect()
 }
 
 pub async fn chat_completion(
@@ -602,7 +611,7 @@ mod tests {
 
     #[test]
     fn provider_catalog_resolves_supported_endpoints() {
-        assert_eq!(PRESETS.len(), 6);
+        assert_eq!(PRESETS.len(), 7);
         for preset in PRESETS {
             // Every provider accepts a custom Base URL: the entered value wins.
             let base = preset.id.base_url("https://example.test/v1").unwrap();
@@ -622,6 +631,51 @@ mod tests {
             .base_url("http://example.test/v1")
             .is_err());
         assert!(ProviderId::Moderado.base_url("").is_err());
+    }
+
+    #[test]
+    fn llama_cpp_sits_between_open_router_and_ollama_on_port_9931() {
+        let ids: Vec<_> = PRESETS.iter().map(|preset| preset.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                ProviderId::Moderado,
+                ProviderId::NvidiaNim,
+                ProviderId::OpenRouter,
+                ProviderId::LlamaCpp,
+                ProviderId::Ollama,
+                ProviderId::LmStudio,
+                ProviderId::OpenAiCompatible,
+            ]
+        );
+        let preset = ProviderId::LlamaCpp.preset();
+        assert_eq!(preset.name, "llama.cpp");
+        assert_eq!(preset.default_base_url, "http://localhost:9931/v1");
+        assert!(preset.local, "llama.cpp runs on this machine");
+        assert!(!preset.keyless, "only the Gateway has free stealth models");
+        assert!(completion_url(preset.default_base_url).is_ok());
+        assert_eq!(
+            serde_json::to_string(&ProviderId::LlamaCpp).unwrap(),
+            "\"llama_cpp\""
+        );
+    }
+
+    #[test]
+    fn every_local_runtime_is_probed_for_availability() {
+        let local: Vec<_> = local_presets().map(|preset| preset.id).collect();
+        assert_eq!(
+            local,
+            vec![
+                ProviderId::LlamaCpp,
+                ProviderId::Ollama,
+                ProviderId::LmStudio,
+            ]
+        );
+        // The catalog, the settings file, and the renderer must agree on ids.
+        assert_eq!(
+            serde_json::to_string(&ProviderId::OpenAiCompatible).unwrap(),
+            "\"open_ai_compatible\""
+        );
     }
 
     #[test]
