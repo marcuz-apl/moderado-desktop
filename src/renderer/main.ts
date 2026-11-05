@@ -672,6 +672,11 @@ function applyKindUi(): void {
   // Work tasks run sandboxed commands too (a python conversion, say), so the
   // Run commands toggle shows there as well; MCP servers stay Code-only.
   $('approve-mcp-option').toggleAttribute('hidden', work);
+  // Work tasks own no repository, so the Git icon leaves the rail entirely
+  // instead of sitting there dimmed and unclickable. This also covers session
+  // selection changing the kind, which does not re-run applyLeftView.
+  document.querySelector<HTMLElement>('.rail-tabs .rail-tab[data-rail="git"]')
+    ?.toggleAttribute('hidden', work);
   // "+" attaches a file's content in both modes; "@" references a project file.
   attachButton.disabled = selectingContext || !activeSessionId;
   attachButton.title = 'Attach files';
@@ -1253,11 +1258,13 @@ const gitAvailable = (): boolean => activeKind === 'code';
 
 /** Shows one rail destination and loads the data it needs. */
 function applyLeftView(): void {
-  // Work has no repository, so its Git entry is disabled and the Library takes over.
+  // Work has no repository, so its Git entry is hidden and the Library takes over.
   const enabled = gitAvailable();
   if (!enabled && activeLeftView === 'git') activeLeftView = 'library';
   const gitRail = document.querySelector<HTMLButtonElement>('.rail-tabs .rail-tab[data-rail="git"]');
   if (gitRail) {
+    // Hidden in Work: a repository-backed tool has no business in that rail.
+    gitRail.toggleAttribute('hidden', !enabled);
     gitRail.setAttribute('aria-disabled', String(!enabled));
     gitRail.classList.toggle('unavailable', !enabled);
     gitRail.title = enabled ? 'Git' : 'Git is available in Code mode';

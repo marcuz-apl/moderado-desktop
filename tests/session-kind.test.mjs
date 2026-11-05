@@ -145,7 +145,7 @@ test('both modes share one Left Pane and one rail', async () => {
   assert.match(html, /<aside class="sidebar" id="sidebar" role="tabpanel" aria-label="Left pane">/);
 });
 
-test('Git is Code-only, so Work disables its rail entry and pane', async () => {
+test('Git is Code-only, so Work hides its rail icon and never opens the pane', async () => {
   const [main, style, theme] = await Promise.all([
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
@@ -154,7 +154,12 @@ test('Git is Code-only, so Work disables its rail entry and pane', async () => {
   assert.match(main, /const gitAvailable = \(\): boolean => activeKind === 'code';/, 'only Code owns a repository');
   assert.match(main, /if \(kind === 'work' && activeLeftView === 'git'\) activeLeftView = 'library';/, 'the view settles before any refresh reads it');
   assert.match(main, /if \(!enabled && activeLeftView === 'git'\) activeLeftView = 'library';/, 'Work falls back to the Library');
-  assert.match(main, /gitRail\.setAttribute\('aria-disabled', String\(!enabled\)\)/, 'the rail entry announces its state');
+  // The icon disappears from the rail in Work; both mode-change paths set it,
+  // because selecting a session changes the kind without re-running applyLeftView.
+  assert.match(main, /document\.querySelector<HTMLElement>\('\.rail-tabs \.rail-tab\[data-rail="git"\]'\)\s*\?\.toggleAttribute\('hidden', work\)/, 'applyKindUi hides the icon');
+  assert.match(main, /gitRail\.toggleAttribute\('hidden', !enabled\)/, 'applyLeftView hides the icon too');
+  assert.match(style, /\[hidden\]\{display:none!important\}/, 'the hidden attribute really removes it from the layout');
+  assert.match(main, /gitRail\.setAttribute\('aria-disabled', String\(!enabled\)\)/, 'the rail entry announces its state even if hidden is removed');
   assert.match(main, /gitRail\.title = enabled \? 'Git' : 'Git is available in Code mode'/, 'hovering explains how to reach it');
   assert.match(main, /button\.dataset\.rail === 'git' && !gitAvailable\(\)/, 'a disabled entry explains itself instead of switching');
   assert.match(main, /Git is available in Code mode\.'\); return;/, 'the click names the mode');

@@ -55,7 +55,7 @@ Two icons in the left rail open their own panels:
 - **Preview** shows the file you selected in Workspace files, read-only.
 - **Terminal** is a real shell in the project folder (Code only).
 
-**Git** has its own rail button too: it opens the Workspace panel on its Changes tab, without hunting for the tab first.
+**Git** has its own rail button in Code mode: it opens the Workspace panel on its Changes tab, without hunting for the tab first. Work tasks own no repository, so that icon leaves the rail entirely while you are in Work mode.
 
 Any panel can be widened: drag the panel's right edge, or focus the edge and press the arrow keys. Double-click the edge to go back to the default width. The width is remembered.
 
