@@ -109,7 +109,7 @@ test('the merged shell header holds Work/Code and the topbar does not', async ()
     readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
   ]);
   assert.match(html, /class="left-shell">[\s\S]*class="shell-head">[\s\S]*class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
-  assert.match(html, /class="brand"><span class="brand-word" id="brand-version" data-no-i18n>Moderado Desktop<\/span><\/div>/, 'the header carries the build version instead of a second product name');
+  assert.match(html, /class="brand"><span class="brand-word">Moderado Desktop<\/span><\/div>/, 'the OS icon is the only brand mark');
   assert.doesNotMatch(html, /class="brand-mark"/);
   assert.doesNotMatch(style, /\.brand-mark\{/);
   assert.match(style, /\.shell-head \.kind-segment\{flex:none;margin-left:auto\}/, 'the slider hugs its labels');
@@ -271,17 +271,20 @@ test('About displays the VERSION value without its BUILD metadata or an extra la
   assert.match(main, /appVersion\.trim\(\)\.split\('\+'\)\[0\]/);
 });
 
-test('the left pane header shows the version while the OS title keeps the product name', async () => {
-  const [html, main, conf] = await Promise.all([
+test('the version belongs to the native window title, not the left pane header', async () => {
+  const [html, main, conf, rust] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8'),
   ]);
-  assert.match(html, /id="brand-version"[^>]*data-no-i18n/, 'the build id is not recorded as an English source');
-  assert.match(main, /brandVersion\.textContent = versionLabel/, 'the header is filled from VERSION at startup');
-  assert.match(main, /brandVersion\.title = `Moderado Desktop/, 'hover reveals the full build identifier');
-  assert.match(conf, /"title": "Moderado Desktop"/, 'the native window title is unchanged');
-  assert.doesNotMatch(main, /set_title|setTitle/, 'no runtime window-title override');
+  assert.match(html, /class="brand"><span class="brand-word">Moderado Desktop<\/span><\/div>/, 'the left pane keeps its product name');
+  assert.doesNotMatch(html, /brand-version/);
+  assert.doesNotMatch(main, /brandVersion|brand-version/, 'no renderer-side version badge');
+  assert.match(conf, /"title": "Moderado Desktop"/, 'the config keeps the product name as the initial title');
+  assert.match(rust, /fn window_title\(version: &str\) -> String/);
+  assert.match(rust, /format!\("Moderado Desktop · v\{version\}"\)/, 'the version is appended, not substituted');
+  assert.match(rust, /window\.set_title\(&window_title\(env!\("CARGO_PKG_VERSION"\)\)\)\?/, 'the title follows the package version at startup');
 });
 
 test('Code Explorer exposes manual file operations from its context menu', async () => {

@@ -1587,11 +1587,21 @@ async fn poll_schedules(app: tauri::AppHandle) {
     }
 }
 
+/// The OS window title keeps the product name and appends the package version,
+/// so Alt-Tab, the taskbar, and screenshots show which build is running.
+fn window_title(version: &str) -> String {
+    format!("Moderado Desktop · v{version}")
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let window = app
+                .get_webview_window("main")
+                .ok_or_else(|| std::io::Error::other("main window missing"))?;
+            window.set_title(&window_title(env!("CARGO_PKG_VERSION")))?;
             let path = app.path().app_data_dir()?.join("sessions.sqlite");
             let store = SessionStore::open(path.clone()).map_err(std::io::Error::other)?;
             let schedules = ScheduleStore::open(path.clone()).map_err(std::io::Error::other)?;
@@ -1702,6 +1712,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_title_keeps_the_product_name_and_appends_the_version() {
+        assert_eq!(window_title("0.4.45"), "Moderado Desktop · v0.4.45");
+        assert!(
+            window_title(env!("CARGO_PKG_VERSION"))
+                .starts_with("Moderado Desktop · v")
+        );
+    }
 
     #[tokio::test]
     async fn separate_sessions_can_hold_turn_locks_at_the_same_time() {

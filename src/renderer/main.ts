@@ -1988,14 +1988,7 @@ providerSelect.addEventListener('change', () => selectProvider(providerSelect.va
 
 $<HTMLButtonElement>('kind-work').addEventListener('click', () => { void setKind('work'); });
 $<HTMLButtonElement>('kind-code').addEventListener('click', () => { void setKind('code'); });
-// The OS window title carries the product name, so the left pane header uses
-// that space to show which build is running. Hover reveals the full identifier.
-const versionLabel = appVersion.trim().split('+')[0] || appVersion.trim();
-$<HTMLElement>('about-version').textContent = versionLabel;
-const brandVersion = $<HTMLElement>('brand-version');
-brandVersion.textContent = versionLabel;
-brandVersion.title = `Moderado Desktop ${appVersion.trim()}`;
-brandVersion.setAttribute('aria-label', brandVersion.title);
+$<HTMLElement>('about-version').textContent = appVersion.trim().split('+')[0] || appVersion.trim();
 const footerYear = new Date().getFullYear();
 document.querySelectorAll<HTMLElement>('[data-page-footer]').forEach((footer) => {
   footer.textContent = `${footerYear} Moderado Desktop by Moderado AI, an Alfazen platform, all rights reserved.`;
