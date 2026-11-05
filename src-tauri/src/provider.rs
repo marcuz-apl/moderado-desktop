@@ -710,7 +710,8 @@ mod tests {
             let (mut socket, _) = listener.accept().unwrap();
             let _ = read_full_request(&mut socket);
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n").unwrap();
-            std::thread::sleep(Duration::from_millis(100));
+            // The stream stays silent far longer than the idle window below.
+            std::thread::sleep(Duration::from_millis(450));
         });
         let result = chat_completion_with_timeout(
             &format!("http://127.0.0.1:{port}/v1"),
@@ -718,7 +719,9 @@ mod tests {
             "",
             &[],
             &[],
-            Duration::from_millis(20),
+            // The same deadline covers the initial connection; 20 ms was
+            // enough in isolation but lost the race under a loaded full suite.
+            Duration::from_millis(150),
             |_| {},
         )
         .await;

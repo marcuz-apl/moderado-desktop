@@ -30,7 +30,6 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
 const PACKS: Record<Language, Record<string, string>> = { en, fr, 'zh-Hans': zhHans, 'zh-Hant': zhHant, ja, ko, es, de, ru };
 
 let current: Language = DEFAULT_LANGUAGE;
-let previous: Language = DEFAULT_LANGUAGE;
 
 export function parseLanguage(value: string | null | undefined): Language {
   return LANGUAGES.includes(value as Language) ? (value as Language) : DEFAULT_LANGUAGE;
@@ -56,7 +55,10 @@ const textSources = new Map<Text, string>();
 const attributeSources = new Map<Element, Map<string, string>>();
 
 const ATTRIBUTES = ['title', 'aria-label', 'placeholder'] as const;
-/** Prose, code, and live conversation keep the language they were written in. */
+/** Prose, code, and live conversation keep the language they were written in.
+ * Elements whose copy is written with t() by render code also carry
+ * data-no-i18n: their text is already translated, so recording it as an
+ * English source would strand it when the language changes again. */
 const OPAQUE = 'script,style,code,pre,textarea,.message,.markdown-body,.terminal-host,.mention-menu,[data-no-i18n]';
 /** A textarea's own placeholder is interface copy; only its contents are opaque. */
 const OPAQUE_ATTRIBUTES = 'script,style,code,pre,.message,.markdown-body,.terminal-host,.mention-menu,[data-no-i18n]';
@@ -71,15 +73,21 @@ function inside(node: Node, selector: string): boolean {
 }
 
 /**
- * Recognizes values this module produced (in the current or previous language)
- * and keeps their English source; anything else is new content and becomes the
- * source. The current-language check matters because the tree is translated
- * twice per switch — once by applyLanguage and once over what the render code
- * rebuilt — and the second pass must not record a translation as its source.
+ * Recognizes values this module produced and keeps their English source;
+ * anything else is new content and becomes the source. Two details matter:
+ * text nodes keep their surrounding whitespace ("API key " before a nested
+ * span) while pack keys are trimmed, so the comparison uses the trimmed core;
+ * and the tree is translated twice per switch (once by applyLanguage, once over
+ * what the render code rebuilt), while a switch can arrive from *any* of the
+ * nine languages. Matching only the last two languages let a translation be
+ * mistaken for fresh English and left behind permanently.
  */
 function sourceOf(recorded: string | undefined, value: string): string {
   if (recorded === undefined) return value;
-  if (value === recorded || value === lookup(previous, recorded) || value === lookup(current, recorded)) return recorded;
+  const source = recorded.trim();
+  const content = value.trim();
+  if (content === source) return recorded;
+  if (LANGUAGES.some((language) => lookup(language, source) === content)) return recorded;
   return value;
 }
 
@@ -119,7 +127,6 @@ export function translateTree(root: ParentNode): void {
 
 /** Applies one language to the whole document and records it for persistence. */
 export function applyLanguage(language: Language): void {
-  previous = current;
   current = language;
   document.documentElement.lang = language;
   translateTree(document.body);

@@ -46,7 +46,7 @@ test('the settings panel offers language, font family, text size, and UI scale',
   assert.match(html, /<option value="en">English<\/option>[\s\S]*<option value="fr">Français<\/option>/);
   // The language list keeps the requested order after English and French.
   const languageOrder = ['zh-Hans', 'zh-Hant', 'ja', 'ko', 'es', 'de', 'ru'];
-  const select = html.match(/<select id="language">([\s\S]*?)<\/select>/)?.[1] ?? '';
+  const select = html.match(/<select id="language"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? '';
   const positions = languageOrder.map((code) => select.indexOf(`<option value="${code}"`));
   assert.ok(positions.every((position) => position >= 0), 'every requested language has an option');
   assert.deepStrictEqual([...positions].sort((a, b) => a - b), positions, 'languages keep the requested order');
@@ -81,6 +81,50 @@ test('the renderer applies and remembers every appearance choice', async () => {
   assert.match(main, /localStorage\.setItem\(textSizeKey, textSize\)/);
   assert.match(main, /localStorage\.setItem\(uiScaleKey, uiScale\)/);
   assert.match(main, /localStorage\.getItem\(uiScaleKey\) \?\? localStorage\.getItem\('moderado-display-size'\)/, 'the old preference migrates');
+});
+
+test('switching languages never strands a translated label as English source', async () => {
+  const readSource = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  const [registry, html] = await Promise.all([
+    readSource('src/renderer/i18n/index.ts'),
+    readSource('index.html'),
+  ]);
+  assert.doesNotMatch(registry, /let previous: Language/, 'source tracking does not depend on the last two languages');
+  assert.doesNotMatch(registry, /__i18nDebug/, 'no debug hook ships in the renderer');
+  // Copy written by t() at render time is already translated; it must never be
+  // recorded as an English source by the tree walk.
+  assert.match(html, /<p id="user-account-name"[^>]*data-no-i18n>/);
+  assert.match(html, /<button id="user-signin"[^>]*data-no-i18n>/);
+  // The language list is written in each language's own name, so it must never
+  // be translated (or recorded as English source) by the tree walk.
+  assert.match(html, /<select id="language" data-no-i18n>/);
+
+  // Run the shipped sourceOf body against the real packs: text nodes around a
+  // nested span keep a trailing space, while pack keys are trimmed. That gap
+  // used to turn "API key " into a permanent "API 密钥 " source.
+  const body = registry.match(/function sourceOf\(recorded: string \| undefined, value: string\): string \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(body, 'sourceOf is present and extractable');
+  const languages = ['fr', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'es', 'de', 'ru'];
+  const packs = {};
+  for (const language of languages) {
+    const source = await readSource(`src/renderer/i18n/${language}.ts`);
+    const pack = {};
+    const entry = /^  '((?:[^'\\]|\\.)*)': '((?:[^'\\]|\\.)*)',?$/gm;
+    for (let match = entry.exec(source); match; match = entry.exec(source)) pack[match[1]] = match[2];
+    packs[language] = pack;
+  }
+  const lookup = (language, phrase) => packs[language]?.[phrase] ?? phrase;
+  const sourceOf = new Function('LANGUAGES', 'lookup', 'recorded', 'value', body);
+  const recognize = (recorded, value) => sourceOf(languages, lookup, recorded, value);
+  assert.equal(recognize(undefined, 'API key '), 'API key ', 'a fresh English node becomes the source');
+  assert.equal(recognize('API key ', 'API 密钥 '), 'API key ', 'the Chinese label keeps its source');
+  assert.equal(recognize('API key ', 'API-Schlüssel '), 'API key ', 'a switch from any language keeps its source');
+  assert.equal(recognize('API key ', 'Clé API '), 'API key ', 'French works too');
+  assert.equal(recognize('API key ', 'Saved. '), 'Saved. ', 'genuinely new copy replaces the source');
+  const lsp = 'Configure LSP servers for the diagnostics tool as JSON. Each entry maps file extensions to a command, for example ';
+  assert.match(registry, /const source = recorded\.trim\(\)/, 'comparison uses the trimmed core');
+  assert.match(registry, /LANGUAGES\.some\(\(language\) => lookup\(language, source\) === content\)/);
+  assert.equal(recognize(lsp, `${packs['zh-Hans'][lsp.trim()]} `), lsp, 'the long LSP hint also round-trips');
 });
 
 test('every language pack covers the same phrases as the French reference pack', async () => {

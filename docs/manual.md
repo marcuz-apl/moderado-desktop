@@ -78,7 +78,8 @@ The terminal is your own shell — the Windows PowerShell, or `$SHELL` elsewhere
 | **Provider** | Chooses the preset or local runtime; **Base URL** overrides the endpoint. |
 | **Plan model** / **Act model** | The model used to plan, and the one that executes. |
 | **Theme** | Auto follows local time (light 07:00–18:59); Light and Dark pin it. |
-| **Display size** | Zooms the whole window from 90% to 150%. |
+| **Language** | Switches the interface between nine languages. Conversations and files are not translated, and switching back to English restores every label. |
+| **Appearance** | Font family, Text size, and UI scale are set independently of the language. |
 | **MCP servers** | Stdio or Streamable HTTP servers exposed as tools in Code/Act sessions. |
 | **Language servers** | LSP entries that power the `diagnostics` tool. |
 
