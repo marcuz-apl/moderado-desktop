@@ -71,7 +71,7 @@
 #project-entry-name{width:calc(100% - 52px);height:36px;margin:0 26px;border:1px solid #426078;border-radius:7px;background:#102236;color:#e9f4f7;padding:0 10px;font:calc(13px*var(--text-scale)) var(--font-ui)}
 #project-entry-error{margin:8px 26px 14px;color:#ffb7a9}
 #project-entry-location{margin-top:6px;overflow-wrap:anywhere}
-.app.page-mode{grid-template-columns:auto minmax(0,1fr)}.main.page-mode>.topbar,.main.page-mode>.transcript,.main.page-mode>.composer-wrap{display:none}.main.page-mode>.terminal-drawer{display:none}.page{display:none;flex:1;min-height:0;overflow:auto;padding:26px 30px 44px}
+.app.page-mode{grid-template-columns:auto minmax(0,1fr)}.main.page-mode>.transcript,.main.page-mode>.composer-wrap{display:none}.main.page-mode>.terminal-drawer{display:none}.page{display:none;flex:1;min-height:0;overflow:auto;padding:26px 30px 44px}
 /* A page is a destination, not a pane: the rail stays, both panes collapse. */
 .app.page-mode .left-shell{grid-template-columns:52px 0;grid-template-rows:0 minmax(0,1fr)}
 .app.page-mode .shell-head,.app.page-mode .sidebar,.app.page-mode .sidebar-resizer{display:none}

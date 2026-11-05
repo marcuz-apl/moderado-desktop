@@ -79,7 +79,8 @@ test('page mode keeps the rail, collapses both panes, and drops the conversation
   assert.match(style, /\.app\.page-mode \.left-shell\{grid-template-columns:52px 0;grid-template-rows:0 minmax\(0,1fr\)\}/, 'the Left Pane gives its width to the page');
   assert.match(style, /\.app\.page-mode \.shell-head,\.app\.page-mode \.sidebar,\.app\.page-mode \.sidebar-resizer\{display:none\}/, 'the merged header and pane leave with the workspace');
   assert.match(style, /\.app\.page-mode \.task-monitor\{display:none\}/, 'the Right Pane leaves too');
-  assert.match(style, /\.main\.page-mode>\.topbar,\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
+  assert.match(style, /\.main\.page-mode>\.transcript,\.main\.page-mode>\.composer-wrap\{display:none\}/);
+  assert.doesNotMatch(style, /\.main\.page-mode>\.topbar/, 'the app header stays visible above Docs and Settings');
   assert.match(style, /\.main\.page-mode>\.terminal-drawer\{display:none\}/, 'page mode hides the terminal drawer');
   assert.match(style, /\.page\.active\{display:block\}/);
 });
