@@ -54,7 +54,7 @@
 :root[data-theme="light"] .mode-control button.selected{background:var(--light-accent);color:#fff}
 :root[data-theme="light"] .empty-state>p:last-child{color:#4e6875}
 :root[data-theme="light"] .empty-symbol{color:var(--light-accent);border-color:#8ab8b7}
-:root[data-theme="light"] .message.you .message-body{background:#e9f3f4;border-color:var(--light-border)}
+:root[data-theme="light"] .message.you .message-body{background:#ddefe8;border-color:#a9cec5}
 :root[data-theme="light"] .message.tool .message-body{color:#175f58;background:#e5f3f0;border-color:var(--light-accent)}
 :root[data-theme="light"] .message.system .message-body{color:#4b6872}
 :root[data-theme="light"] .message.error .message-body,

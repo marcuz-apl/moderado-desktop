@@ -186,10 +186,16 @@ test('rail buttons open pages and the Back buttons leave them', async () => {
   assert.doesNotMatch(main, /\.activity-button/);
 });
 
-test('a sent question is indented by two tabs', async () => {
+test('a sent question is indented by ten tabs and colored apart from the turn summary', async () => {
   const style = await read('src/renderer/style.css');
-  // Two 40px tab stops push the You bubble in from the transcript's left edge.
-  assert.match(style, /\.message\.you\{padding-left:calc\(2\*40px\)\}/);
+  // Ten 40px tab stops push the You bubble well in from the transcript's edge.
+  assert.match(style, /\.message\.you\{padding-left:calc\(10\*40px\)\}/);
+  // The You bubble is teal-green; the turn summary keeps its blue panel, so the
+  // two never read as the same box.
+  assert.match(style, /\.message\.you \.message-body\{background:#123531;border:1px solid #2c5a52/);
+  assert.match(style, /\.message\.turn-summary\{[^}]*background:#14283a\}/);
+  const theme = await read('src/renderer/theme.css');
+  assert.match(theme, /light"\] \.message\.you \.message-body\{background:#ddefe8;border-color:#a9cec5\}/);
 });
 
 test('questions typed during a turn wait in a Steer queue above the composer', async () => {
