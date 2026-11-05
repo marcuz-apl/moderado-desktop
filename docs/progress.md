@@ -410,3 +410,8 @@
 - Fixes: `"tauri": "tauri"` script added, `"beforeBuildCommand": "vite build"` set in tauri.conf.json, and the local `npm run build` trimmed to `tsc --noEmit && tauri build --no-bundle` so vite runs once via the conf.
 - The first Release run on the tag failed on all three OSes with `Missing script: "tauri"`; after the fix the tag was force-moved to the fixed commit and v0.4.43 published with installers for Windows (MSI + NSIS), macOS (dmg + app.tar.gz, aarch64), and Linux (AppImage + deb + rpm). Release notes document the steer/queue features and the unsigned-install workarounds.
 - One macOS CI job was cancelled mid-run by runner capacity constraints; rerunning only the failed job (`gh run rerun --failed`) turned it green.
+
+## Docs and Settings stop covering the header (0.4.44)
+
+- Opening Docs or Settings used to hide the whole main area including the topbar, so the session header vanished behind the page. Page mode now hides only the transcript and composer; the header stays visible and live above the page — session title, workspace context, Plan/Act, and the theme toggle (which is handy to poke while on Settings).
+- Verified in real Chromium (`.playwright-cli/check-page-header.mjs`): both pages sit below the visible header with no overlap, the transcript still hides, and leaving the page restores the conversation.
