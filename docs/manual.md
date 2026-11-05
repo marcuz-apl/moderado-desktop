@@ -2,6 +2,8 @@
 
 Moderado Desktop runs coding and document sessions against the model provider you choose. Everything stays on this machine except the calls you configure.
 
+The left pane header shows the version of this build (for example `v0.4.45`); hover it to see the full build identifier. The window title bar and **Settings → About** keep the product name.
+
 ### 1. Connect a model
 
 Open **Settings** from the gear icon.
