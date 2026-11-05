@@ -249,10 +249,11 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
   assert.match(main, /session\.taskId === entry\.key/);
 });
 
-test('Library rows sit at half the former inter-row spacing between tasks/projects and their sessions', async () => {
+test('Library rows sit tight against their task/project name and at half the former inter-row spacing', async () => {
   const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
-  assert.match(style, /\.task-sessions\{padding:1px 0 4px 34px\}/);
-  assert.match(style, /\.project-sessions\{padding:1px 0 4px 23px\}/);
+  assert.match(style, /\.task-sessions\{padding:0 0 3px 34px\}/);
+  assert.match(style, /\.project-sessions\{padding:0 0 3px 23px\}/);
+  assert.match(style, /\.task-heading:has\(\+ \.task-sessions\)>\.session-item,\.project-heading:has\(\+ \.project-sessions\)>\.session-item\{padding-bottom:4px\}/);
   assert.match(style, /\.task-group\{padding:2px 0;border:0\}/);
   assert.match(style, /\.project-group\{padding:2px 0;border-bottom:1px solid #2a4258\}/);
   assert.match(style, /#library-list\{gap:2px\}/);

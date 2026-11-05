@@ -44,6 +44,12 @@ test('the settings panel offers language, font family, text size, and UI scale',
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /<label for="language">Language<\/label>/);
   assert.match(html, /<option value="en">English<\/option>[\s\S]*<option value="fr">Français<\/option>/);
+  // The language list keeps the requested order after English and French.
+  const languageOrder = ['zh-Hans', 'zh-Hant', 'ja', 'ko', 'es', 'de', 'ru'];
+  const select = html.match(/<select id="language">([\s\S]*?)<\/select>/)?.[1] ?? '';
+  const positions = languageOrder.map((code) => select.indexOf(`<option value="${code}"`));
+  assert.ok(positions.every((position) => position >= 0), 'every requested language has an option');
+  assert.deepStrictEqual([...positions].sort((a, b) => a - b), positions, 'languages keep the requested order');
   assert.match(html, /<label for="font-family">Font family<\/label>/);
   for (const family of FONT_FAMILIES) assert.match(html, new RegExp(`<option value="${family}"`));
   assert.match(html, /<label for="text-size">Text size<\/label>/);
@@ -75,4 +81,21 @@ test('the renderer applies and remembers every appearance choice', async () => {
   assert.match(main, /localStorage\.setItem\(textSizeKey, textSize\)/);
   assert.match(main, /localStorage\.setItem\(uiScaleKey, uiScale\)/);
   assert.match(main, /localStorage\.getItem\(uiScaleKey\) \?\? localStorage\.getItem\('moderado-display-size'\)/, 'the old preference migrates');
+});
+
+test('every language pack covers the same phrases as the French reference pack', async () => {
+  const readPack = (name) => readFile(new URL(`../src/renderer/i18n/${name}`, import.meta.url), 'utf8');
+  const keysOf = (source) => (source.match(/(?:^|\n)\s*'((?:[^'\\]|\\.)*)':/g) ?? [])
+    .map((entry) => entry.replace(/(?:^|\n)\s*'|':$/g, ''));
+  const registry = await readPack('index.ts');
+  assert.match(registry, /LANGUAGES = \['en', 'fr', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'es', 'de', 'ru'\] as const/);
+  assert.match(registry, /'zh-Hans': '简体中文'/);
+  assert.match(registry, /ru: 'Русский'/);
+  const reference = keysOf(await readPack('fr.ts'));
+  assert.ok(reference.length > 100, 'the reference pack keeps its full key set');
+  for (const pack of ['zh-Hans.ts', 'zh-Hant.ts', 'ja.ts', 'ko.ts', 'es.ts', 'de.ts', 'ru.ts']) {
+    const keys = keysOf(await readPack(pack));
+    const missing = reference.filter((key) => !keys.includes(key));
+    assert.deepStrictEqual(missing, [], `${pack} covers every phrase in fr.ts`);
+  }
 });

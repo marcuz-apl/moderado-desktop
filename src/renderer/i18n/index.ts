@@ -1,16 +1,33 @@
 import { en } from './en';
 import { fr } from './fr';
+import { zhHans } from './zh-Hans';
+import { zhHant } from './zh-Hant';
+import { ja } from './ja';
+import { ko } from './ko';
+import { es } from './es';
+import { de } from './de';
+import { ru } from './ru';
 
-export const LANGUAGES = ['en', 'fr'] as const;
+export const LANGUAGES = ['en', 'fr', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'es', 'de', 'ru'] as const;
 
 export type Language = (typeof LANGUAGES)[number];
 
 export const DEFAULT_LANGUAGE: Language = 'en';
 
 /** Each name is written in its own language, so the list reads the same in every pack. */
-export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', fr: 'Français' };
+export const LANGUAGE_NAMES: Record<Language, string> = {
+  en: 'English',
+  fr: 'Français',
+  'zh-Hans': '简体中文',
+  'zh-Hant': '繁體中文',
+  ja: '日本語',
+  ko: '한국어',
+  es: 'Español',
+  de: 'Deutsch',
+  ru: 'Русский',
+};
 
-const PACKS: Record<Language, Record<string, string>> = { en, fr };
+const PACKS: Record<Language, Record<string, string>> = { en, fr, 'zh-Hans': zhHans, 'zh-Hant': zhHant, ja, ko, es, de, ru };
 
 let current: Language = DEFAULT_LANGUAGE;
 let previous: Language = DEFAULT_LANGUAGE;
@@ -54,12 +71,15 @@ function inside(node: Node, selector: string): boolean {
 }
 
 /**
- * Recognizes values this module produced (in the language it last applied) and
- * keeps their English source; anything else is new content and becomes the source.
+ * Recognizes values this module produced (in the current or previous language)
+ * and keeps their English source; anything else is new content and becomes the
+ * source. The current-language check matters because the tree is translated
+ * twice per switch — once by applyLanguage and once over what the render code
+ * rebuilt — and the second pass must not record a translation as its source.
  */
 function sourceOf(recorded: string | undefined, value: string): string {
   if (recorded === undefined) return value;
-  if (value === recorded || value === lookup(previous, recorded)) return recorded;
+  if (value === recorded || value === lookup(previous, recorded) || value === lookup(current, recorded)) return recorded;
   return value;
 }
 
