@@ -415,3 +415,10 @@
 
 - Opening Docs or Settings used to hide the whole main area including the topbar, so the session header vanished behind the page. Page mode now hides only the transcript and composer; the header stays visible and live above the page — session title, workspace context, Plan/Act, and the theme toggle (which is handy to poke while on Settings).
 - Verified in real Chromium (`.playwright-cli/check-page-header.mjs`): both pages sit below the visible header with no overlap, the transcript still hides, and leaving the page restores the conversation.
+
+## Seven new interface languages (0.4.45)
+
+- Settings → Language now offers, in order: English, Français, 简体中文, 繁體中文, 日本語, 한국어, Español, Deutsch, Русский. Each pack translates the full phrase set (a pack-parity node test pins every key against the French reference; missing keys would still fall back to English).
+- This exposed a latent i18n bug: the second `translateTree` pass in `refreshLanguageUi` recorded the translation itself as the English source once more than one language had been applied, freezing the interface on the first non-English pack (only visible with 3+ languages). `sourceOf` now also recognizes values produced by the current pack, making the double pass idempotent — verified by round-tripping zh-Hans → ja → de → en in the browser check.
+- Library affiliation: session rows sit 0px under their task/project heading (the heading's bottom padding folds in via `:has(+ .task-sessions)` when expanded) and stay indented, so sessions read as children of their task/project.
+- Browser checks: `check-languages.mjs` 7/7 (order, proximity, four live translations, English restore), plus existing page-header and steer checks re-run green. 144 node tests, tsc, eslint clean; Desktop exe replaced and relaunched.
