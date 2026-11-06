@@ -24,9 +24,11 @@ const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 /// Directories a command never needs and that make copying a workspace
 /// unaffordable: version control, package caches, and build output. Both
 /// backends skip the same names, so a workspace behaves identically whichever
-/// sandbox runs it.
+/// sandbox runs it. macOS has no backend yet, which is why the pair is gated.
+#[cfg(any(windows, target_os = "linux"))]
 const EXCLUDED_DIRS: [&str; 6] = [".git", "node_modules", "target", ".venv", "__pycache__", ".next"];
 
+#[cfg(any(windows, target_os = "linux"))]
 fn is_excluded_dir(name: &std::ffi::OsStr) -> bool {
     name.to_str().is_some_and(|name| EXCLUDED_DIRS.contains(&name))
 }
