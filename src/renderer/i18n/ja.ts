@@ -236,4 +236,8 @@ export const ja: Record<string, string> = {
   'A desktop workspace where agent sessions read, edit, and run tools inside your own folders.': '自分のフォルダー内でエージェントセッションが読み取り、編集、ツール実行を行えるデスクトップワークスペース。',
   'MANUAL': 'マニュアル',
   'Getting started, reference, and license for this build.': 'このビルドの使い方、リファレンス、ライセンス。',
+  // メッセージ操作
+  'Copy': 'コピー',
+  'Re-run': '再実行',
+  'Copied': 'コピーしました',
 };

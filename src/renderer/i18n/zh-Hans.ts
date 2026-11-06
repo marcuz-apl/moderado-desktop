@@ -236,4 +236,8 @@ export const zhHans: Record<string, string> = {
   'A desktop workspace where agent sessions read, edit, and run tools inside your own folders.': '一个桌面工作区，智能体会话可以在你自己的文件夹中读取、编辑和运行工具。',
   'MANUAL': '手册',
   'Getting started, reference, and license for this build.': '本版本的入门指南、参考和许可信息。',
+  // 消息操作
+  'Copy': '复制',
+  'Re-run': '重新运行',
+  'Copied': '已复制',
 };

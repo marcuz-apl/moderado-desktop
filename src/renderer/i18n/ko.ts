@@ -236,4 +236,8 @@ export const ko: Record<string, string> = {
   'A desktop workspace where agent sessions read, edit, and run tools inside your own folders.': '에이전트 세션이 사용자의 폴더 안에서 파일을 읽고, 편집하고, 도구를 실행하는 데스크톱 작업 공간입니다.',
   'MANUAL': '설명서',
   'Getting started, reference, and license for this build.': '이 빌드의 시작 안내, 참조, 라이선스.',
+  // 메시지 작업
+  'Copy': '복사',
+  'Re-run': '다시 실행',
+  'Copied': '복사됨',
 };

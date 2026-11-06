@@ -236,4 +236,8 @@ export const zhHant: Record<string, string> = {
   'A desktop workspace where agent sessions read, edit, and run tools inside your own folders.': '一個桌面工作區，智慧代理會話可以在你自己的資料夾中讀取、編輯與執行工具。',
   'MANUAL': '手冊',
   'Getting started, reference, and license for this build.': '此版本的入門指南、參考與授權資訊。',
+  // 訊息操作
+  'Copy': '複製',
+  'Re-run': '重新執行',
+  'Copied': '已複製',
 };

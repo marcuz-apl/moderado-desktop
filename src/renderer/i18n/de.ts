@@ -236,4 +236,8 @@ export const de: Record<string, string> = {
   'A desktop workspace where agent sessions read, edit, and run tools inside your own folders.': 'Ein Desktop-Arbeitsbereich, in dem Agentensitzungen in deinen eigenen Ordnern lesen, bearbeiten und Werkzeuge ausführen.',
   'MANUAL': 'HANDBUCH',
   'Getting started, reference, and license for this build.': 'Einstieg, Referenz und Lizenz für diese Version.',
+  // Nachrichtenaktionen
+  'Copy': 'Kopieren',
+  'Re-run': 'Erneut ausführen',
+  'Copied': 'Kopiert',
 };

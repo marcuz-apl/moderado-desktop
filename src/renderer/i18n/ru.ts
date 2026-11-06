@@ -236,4 +236,8 @@ export const ru: Record<string, string> = {
   'A desktop workspace where agent sessions read, edit, and run tools inside your own folders.': 'Настольная рабочая область, где сессии агента читают, редактируют и запускают инструменты в ваших собственных папках.',
   'MANUAL': 'РУКОВОДСТВО',
   'Getting started, reference, and license for this build.': 'Введение, справочник и лицензия этой сборки.',
+  // Действия с сообщениями
+  'Copy': 'Копировать',
+  'Re-run': 'Повторить',
+  'Copied': 'Скопировано',
 };

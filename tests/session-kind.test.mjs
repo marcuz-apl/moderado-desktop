@@ -341,7 +341,7 @@ test('the composer offers a plus in both modes and a file menu in Code', async (
   assert.match(main, /File references are available in Code sessions/);
   assert.match(main, /invoke<string\[\]>/);
   assert.match(main, /mentionQuery\(prompt\.value/);
-  assert.match(style, /\.composer-stop svg\{width:18px;height:18px\}/);
+  assert.match(style, /\.composer-stop svg\{width:22px;height:22px\}/);
 });
 
 test('composer footer pairs the model with the shortcut hint and always shows stop', async () => {

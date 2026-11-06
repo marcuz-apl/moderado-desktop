@@ -451,3 +451,10 @@
 - Startup availability probing is now generic: `local_presets()` walks the catalog, so every local runtime — llama.cpp, Ollama, LM Studio — automatically gets probed and its Settings option gains an available/offline marker. No per-provider branch remains in `probe_local_providers`.
 - Added the `llama_cpp.sse` fixture to the shared end-to-end agent task, a Rust test pinning catalog order/id/URL/keyless flags, a Rust test pinning the probed local set and id serialization, a node source test, and `.playwright-cli/check-llama-cpp-provider.mjs` for the live dropdown behavior.
 - README, `AGENTS.md` provider rules, and the in-app manual now document the third local runtime and its port.
+
+## Message actions and a bigger Idle/Stop glyph (0.4.45)
+
+- The composer's **Idle / Stop** button keeps its 34px frame, but the triangle and square inside it now render at 22px with slightly fuller geometry, so the state is easier to read at a glance.
+- Every **Turn summary** card gets a small **Copy** button; every **sent question** gets **Copy** and **Re-run** buttons. Copy uses the async clipboard API with a hidden-textarea fallback and flashes a "Copied" state; Re-run re-submits the exact original prompt and attachments without clearing the composer draft, and queues the prompt if a turn is already running.
+- Action labels are localized through `t()` behind `data-no-i18n` (conversations are never translated) and refreshed on every language switch; all eight non-English packs gained `Copy` / `Re-run` / `Copied`.
+- Documented in the in-app manual; covered by `tests/message-actions.test.mjs` and `.playwright-cli/check-message-actions.mjs`.

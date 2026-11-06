@@ -41,7 +41,7 @@ type AttachmentRecord = { id: string; sessionId: string; name: string; kind: 'te
 type HistoryMessage = { role: string; content?: string | Array<{ type?: string; text?: string; name?: string }>; tool_call_id?: string; tool_calls?: Array<{ id: string; function?: { name?: string } }> };
 type SessionSummary = { id: string; name: string; workspace: string; kind: SessionKind; taskId: string | null; settings: ProviderSettings; autoApprove: AutoApprovePolicy; updatedAt: number; createdAt: number };
 type SessionRecord = SessionSummary & { history: HistoryMessage[] };
-type DisplayMessage = { role: string; content: string; toolName?: string; toolId?: string; activityState?: 'working' | 'completed' | 'attention'; createdAt?: number };
+type DisplayMessage = { role: string; content: string; prompt?: string; attachments?: AttachmentRecord[]; toolName?: string; toolId?: string; activityState?: 'working' | 'completed' | 'attention'; createdAt?: number };
 type TurnEvent = { kind: 'text' | 'tool_started' | 'tool' | 'usage' | 'error' | 'done' | 'cancelled'; session_id: string; tool_id?: string; name?: string; value?: string; usage?: ModelUsage };
 type ApprovalEvent = { sessionId: string; id: number; category: 'read_files' | 'edit_files' | 'fetch_web_content' | 'execute_command' | 'use_mcp_servers'; title: string; detail: string; hasPreview: boolean; path: string; before: string; after: string };
 type ApprovalExpired = { sessionId: string; id: number };
@@ -261,6 +261,7 @@ function refreshLanguageUi(): void {
   updateFolderContext();
   updateControls();
   applyAccount();
+  refreshMessageActionLabels();
   // The render code writes English; one pass converts everything it rebuilt.
   translateTree(document.body);
 }
@@ -445,6 +446,87 @@ function activityTitle(name: string | undefined): string {
   return name ? titles[name] ?? name.replaceAll('_', ' ') : 'Tool activity';
 }
 
+/** Inline glyphs keep the small actions legible in both themes. */
+const COPY_GLYPH = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.4" y="5.4" width="8" height="8" rx="1.6"/><path d="M10.8 3.4H4.2c-.7 0-1.2.5-1.2 1.2v6.6" stroke-linecap="round"/></svg>';
+const RERUN_GLYPH = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12.8 7.1A5.1 5.1 0 1 0 13 9.6"/><path d="M12.9 3.5v3.7H9.2"/></svg>';
+
+function messageActionButton(action: 'copy' | 'rerun'): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `message-action message-action-${action}`;
+  button.dataset.action = action;
+  // Conversations keep their own language; render code localizes these labels.
+  button.dataset.noI18n = '';
+  button.title = t(action === 'copy' ? 'Copy' : 'Re-run');
+  button.setAttribute('aria-label', button.title);
+  button.innerHTML = action === 'copy' ? COPY_GLYPH : RERUN_GLYPH;
+  return button;
+}
+
+function messageActions(message: DisplayMessage): HTMLElement {
+  const actions = document.createElement('div');
+  actions.className = 'message-actions';
+  actions.dataset.noI18n = '';
+  const copy = messageActionButton('copy');
+  copy.addEventListener('click', () => { void copyMessageText(message.content, copy); });
+  actions.append(copy);
+  if (message.role === 'You') {
+    const rerun = messageActionButton('rerun');
+    rerun.addEventListener('click', () => { void rerunPrompt(message); });
+    actions.append(rerun);
+  }
+  return actions;
+}
+
+async function copyMessageText(text: string, button: HTMLButtonElement): Promise<void> {
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; }
+  catch {
+    // Some WebViews deny the async clipboard API; the hidden textarea still works.
+    const helper = document.createElement('textarea');
+    helper.value = text;
+    helper.setAttribute('readonly', '');
+    helper.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.append(helper);
+    helper.select();
+    copied = document.execCommand('copy');
+    helper.remove();
+  }
+  if (!copied) { setStatus('Could not copy to clipboard.'); return; }
+  button.classList.add('copied');
+  button.title = t('Copied');
+  button.setAttribute('aria-label', button.title);
+  window.setTimeout(() => {
+    button.classList.remove('copied');
+    button.title = t('Copy');
+    button.setAttribute('aria-label', button.title);
+  }, 1200);
+}
+
+/** Re-sends an earlier question without discarding a draft the user is typing. */
+async function rerunPrompt(message: DisplayMessage): Promise<void> {
+  const text = (message.prompt ?? message.content.replace(/\n\n\[[^\]]*\]$/, '')).trim();
+  if (!text) return;
+  const attachments = message.attachments ?? [];
+  const id = activeSessionId;
+  if (id && running.has(id)) {
+    enqueueTurn(id, text, attachments);
+    setStatus('Re-run queued for the next turn.');
+    return;
+  }
+  await submitTurn(text, attachments, false, true);
+}
+
+/** Rebuilds labels that live behind data-no-i18n after a language switch. */
+function refreshMessageActionLabels(): void {
+  document.querySelectorAll<HTMLButtonElement>('.message-action').forEach((button) => {
+    if (button.classList.contains('copied')) return;
+    const phrase = button.dataset.action === 'rerun' ? 'Re-run' : 'Copy';
+    button.title = t(phrase);
+    button.setAttribute('aria-label', button.title);
+  });
+}
+
 function messageElement(message: DisplayMessage): HTMLElement {
   if (message.role === 'Activity') {
     const entry = document.createElement('article');
@@ -488,6 +570,7 @@ function messageElement(message: DisplayMessage): HTMLElement {
     });
   } else body.textContent = message.content;
   card.append(label, body);
+  if (message.role === 'Turn summary' || message.role === 'You') card.append(messageActions(message));
   return card;
 }
 
@@ -2912,6 +2995,8 @@ async function steerRunningTurn(id: string, item: QueuedTurn): Promise<void> {
     });
     // The backend history carries the question; the transcript mirrors it.
     addDisplay(id, 'You', item.attachments.length ? `${item.text}\n\n[${item.attachments.map((attachment) => attachment.name).join(', ')}]` : item.text);
+    const steeredView = views.get(id)?.at(-1);
+    if (steeredView) { steeredView.prompt = item.text; steeredView.attachments = item.attachments; }
     if (id === activeSessionId) setStatus('Steered: the agent answers this inside the running turn.');
   } catch (error) {
     // The turn may have finished first; the question still gets answered.
@@ -2939,7 +3024,7 @@ async function drainQueuedTurn(id: string): Promise<void> {
 }
 
 /** Runs one turn for the current settings; queued questions reuse this path. */
-async function submitTurn(text: string, sent: AttachmentRecord[], fromQueue = false): Promise<void> {
+async function submitTurn(text: string, sent: AttachmentRecord[], fromQueue = false, preserveDraft = false): Promise<void> {
   const submittedDraftKey = draftKey();
   const settings = currentSettings();
   const turnMode = activeKind === 'work' ? 'act' : mode;
@@ -2977,8 +3062,12 @@ async function submitTurn(text: string, sent: AttachmentRecord[], fromQueue = fa
     }
     conversationBindings.set(id, binding(settings));
     addDisplay(id, 'You', sent.length ? `${text}\n\n[${sent.map((item) => item.name).join(', ')}]` : text);
-    // A queued question never clears the draft the user is typing right now.
-    if (!fromQueue) {
+    // Keep the exact prompt and its attachments so the message's re-run button
+    // can send the same turn again instead of guessing from the rendered text.
+    const sentView = views.get(id)?.at(-1);
+    if (sentView) { sentView.prompt = text; sentView.attachments = sent; }
+    // A queued question or a re-run never clears the draft the user is typing.
+    if (!fromQueue && !preserveDraft) {
       composerDrafts.delete(submittedDraftKey);
       composerDrafts.set(id, { text: '', attachments: [] });
       if (id === activeSessionId) { prompt.value = ''; pendingAttachments = []; renderChips(); }
