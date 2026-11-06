@@ -12,6 +12,13 @@ import {
   parseTextSize,
   parseUiScale,
   zoomFor,
+  textScaleFor,
+  CONTEXT_SCALE_MIN,
+  CONTEXT_SCALE_MAX,
+  CONTEXT_SCALE_STEP,
+  DEFAULT_CONTEXT_SCALE,
+  parseContextScale,
+  stepContextScale,
 } from '../src/renderer/appearance.ts';
 
 test('only the offered font families are accepted', () => {
@@ -38,6 +45,29 @@ test('the UI scale accepts its names and the retired percentages', () => {
 test('the zoom value matches the scale name', () => {
   assert.equal(zoomFor('medium'), '100%');
   assert.equal(zoomFor('large'), '125%');
+});
+
+test('textScaleFor mirrors the CSS presets', async () => {
+  assert.equal(textScaleFor('small'), 0.9);
+  assert.equal(textScaleFor('medium'), 1);
+  assert.equal(textScaleFor('large'), 1.15);
+  const css = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  assert.match(css, /:root\[data-text-size="small"\]\{--text-scale:\.9\}/);
+  assert.match(css, /:root\[data-text-size="large"\]\{--text-scale:1\.15\}/);
+});
+
+test('the live context scale snaps, steps and clamps', () => {
+  assert.equal(parseContextScale(null), DEFAULT_CONTEXT_SCALE);
+  assert.equal(parseContextScale('garbage'), DEFAULT_CONTEXT_SCALE);
+  assert.equal(parseContextScale('0'), DEFAULT_CONTEXT_SCALE);
+  assert.equal(parseContextScale('1.13'), 1.15, 'stored values snap to the 5% grid');
+  assert.equal(parseContextScale('99'), CONTEXT_SCALE_MAX);
+  assert.equal(parseContextScale('0.01'), CONTEXT_SCALE_MIN);
+  assert.equal(stepContextScale(1, 1), 1.05);
+  assert.equal(stepContextScale(1, -1), 0.95);
+  assert.equal(stepContextScale(CONTEXT_SCALE_MAX, 1), CONTEXT_SCALE_MAX);
+  assert.equal(stepContextScale(CONTEXT_SCALE_MIN, -1), CONTEXT_SCALE_MIN);
+  assert.equal(CONTEXT_SCALE_STEP, 0.05);
 });
 
 test('the settings panel offers language, font family, text size, and UI scale', async () => {

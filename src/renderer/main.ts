@@ -13,7 +13,7 @@ import { defaultModelId, explainProviderError, keylessModelCount, modelOptionLab
 import { parseMcpArgs, parseMcpEnv, parseMcpTools } from './mcp-config';
 import { EMPTY_RECALL, canRecall, recall, type RecallState } from './prompt-history';
 import { applyMention, filterFiles, mentionQuery } from './mention';
-import { parseFontFamily, parseTextSize, parseUiScale, zoomFor, type FontFamily, type TextSize, type UiScale } from './appearance';
+import { CONTEXT_SCALE_MAX, CONTEXT_SCALE_MIN, DEFAULT_CONTEXT_SCALE, parseContextScale, parseFontFamily, parseTextSize, parseUiScale, stepContextScale, textScaleFor, zoomFor, type FontFamily, type TextSize, type UiScale } from './appearance';
 import { applyLanguage, DEFAULT_LANGUAGE, parseLanguage, t, translateTree, type Language } from './i18n';
 import { LIGHT_FROM_HOUR, LIGHT_UNTIL_HOUR, nextThemePreference, parseThemePreference, resolveTheme, type ThemePreference } from './theme';
 import appVersion from '../../VERSION?raw';
@@ -188,8 +188,10 @@ function setStatus(message: string): void {
 const fontFamilyKey = 'moderado-font-family';
 const textSizeKey = 'moderado-text-size';
 const uiScaleKey = 'moderado-ui-scale';
+const contextScaleKey = 'moderado-context-scale';
 let fontFamily: FontFamily = parseFontFamily(localStorage.getItem(fontFamilyKey));
 let textSize: TextSize = parseTextSize(localStorage.getItem(textSizeKey));
+let contextScale = parseContextScale(localStorage.getItem(contextScaleKey));
 /** The retired Display size stored a percentage; parseUiScale keeps its intent. */
 let uiScale: UiScale = parseUiScale(localStorage.getItem(uiScaleKey) ?? localStorage.getItem('moderado-display-size'));
 /** Font and text size reach CSS as root attributes; one zoom scales the window. */
@@ -198,6 +200,22 @@ function applyAppearance(): void {
   root.dataset.font = fontFamily;
   root.dataset.textSize = textSize;
   root.style.zoom = zoomFor(uiScale);
+  applyContextScale();
+}
+
+/** The gesture scales the conversation only; the rest of the window keeps the
+ * Settings Text size preset. Inline --text-scale overrides the root value for
+ * every message, activity row and the empty state inside the transcript. */
+function applyContextScale(): void {
+  const scale = Number((textScaleFor(textSize) * contextScale).toFixed(3));
+  transcript.style.setProperty('--text-scale', String(scale));
+}
+
+function setContextScale(next: number): void {
+  contextScale = Math.min(CONTEXT_SCALE_MAX, Math.max(CONTEXT_SCALE_MIN, Number(next.toFixed(2))));
+  applyContextScale();
+  try { localStorage.setItem(contextScaleKey, String(contextScale)); } catch { /* the setting still applies for this run */ }
+  setStatus(`${t('Context text size')}: ${Math.round(contextScale * 100)}%`);
 }
 applyAppearance();
 const themeStorageKey = 'moderado-theme';
@@ -245,6 +263,26 @@ uiScaleSelect.addEventListener('change', () => {
   uiScale = parseUiScale(uiScaleSelect.value);
   try { localStorage.setItem(uiScaleKey, uiScale); } catch { /* the setting still applies for this run */ }
   applyAppearance();
+});
+
+/** Shift + the mouse wheel (middle button) resizes conversation text live.
+ * Holding the middle button down while wheeling works too, and Shift + a
+ * middle click restores 100%. Only the workspace is captured, so scrolling a
+ * sidebar, terminal or code block keeps its normal behavior. */
+document.addEventListener('wheel', (event: WheelEvent) => {
+  if (!event.shiftKey) return;
+  if (!(event.target instanceof Element) || !event.target.closest('.main')) return;
+  event.preventDefault();
+  const delta = event.deltaY || event.deltaX;
+  if (!delta) return;
+  setContextScale(stepContextScale(contextScale, delta < 0 ? 1 : -1));
+}, { passive: false });
+document.addEventListener('mousedown', (event: MouseEvent) => {
+  if (event.button !== 1 || !event.shiftKey) return;
+  if (!(event.target instanceof Element) || !event.target.closest('.main')) return;
+  // Also suppresses the Windows middle-click autoscroll cursor.
+  event.preventDefault();
+  setContextScale(DEFAULT_CONTEXT_SCALE);
 });
 const languageSelect = $<HTMLSelectElement>('language');
 languageSelect.value = language;

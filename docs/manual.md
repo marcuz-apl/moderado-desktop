@@ -72,6 +72,8 @@ The terminal is your own shell — the Windows PowerShell, or `$SHELL` elsewhere
 | `Enter` | Send |
 | `Shift+Enter` | New line |
 | `↑` / `↓` | Previous / next sent prompt |
+| `Shift` + mouse wheel | Enlarge or shrink the conversation text on the fly, from 75% to 175% in 5% steps. It changes the context pane only, not the controls. |
+| `Shift` + middle click | Reset the conversation text to 100% |
 | `Esc` | Dismiss the file picker |
 | `/btw` | Ask a side question without derailing the task |
 
@@ -83,7 +85,7 @@ The terminal is your own shell — the Windows PowerShell, or `$SHELL` elsewhere
 | **Plan model** / **Act model** | The model used to plan, and the one that executes. |
 | **Theme** | Auto follows local time (light 07:00–18:59); Light and Dark pin it. |
 | **Language** | Switches the interface between nine languages. Conversations and files are not translated, and switching back to English restores every label. |
-| **Appearance** | Font family, Text size, and UI scale are set independently of the language. |
+| **Appearance** | Font family, Text size, and UI scale are set independently of the language. **Shift + wheel** over the conversation adds a continuous live text-size adjustment on top of the chosen Text size; **Shift + middle click** resets it. The value is remembered between launches. |
 | **MCP servers** | Stdio or Streamable HTTP servers exposed as tools in Code/Act sessions. |
 | **Language servers** | LSP entries that power the `diagnostics` tool. |
 

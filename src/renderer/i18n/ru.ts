@@ -240,4 +240,7 @@ export const ru: Record<string, string> = {
   'Copy': 'Копировать',
   'Re-run': 'Повторить',
   'Copied': 'Скопировано',
+  // Размер текста контекста на лету
+  'Context text size': 'Размер текста контекста',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': 'Shift + колесо над диалогом мгновенно меняет размер текста контекста; Shift + средний щелчок сбрасывает его.',
 };

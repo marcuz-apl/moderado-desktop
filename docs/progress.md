@@ -458,3 +458,11 @@
 - Every **Turn summary** card gets a small **Copy** button; every **sent question** gets **Copy** and **Re-run** buttons. Copy uses the async clipboard API with a hidden-textarea fallback and flashes a "Copied" state; Re-run re-submits the exact original prompt and attachments without clearing the composer draft, and queues the prompt if a turn is already running.
 - Action labels are localized through `t()` behind `data-no-i18n` (conversations are never translated) and refreshed on every language switch; all eight non-English packs gained `Copy` / `Re-run` / `Copied`.
 - Documented in the in-app manual; covered by `tests/message-actions.test.mjs` and `.playwright-cli/check-message-actions.mjs`.
+
+## Shift + wheel resizes the conversation text (0.4.45)
+
+- Holding **Shift** and scrolling the mouse wheel over the central workspace now changes the context (conversation) font size on the fly: 5% steps, clamped to 75–175%. **Shift + middle click** resets to 100% and also suppresses the Windows middle-click autoscroll cursor. Holding the middle button while wheeling works as well.
+- The gesture multiplies the existing Settings **Text size** preset (`textScaleFor`) instead of replacing it. `applyContextScale()` writes an inline `--text-scale` on `.transcript`, so messages, activity rows and the empty state scale while the composer, sidebar and controls keep their size. The value persists under `moderado-context-scale`.
+- Scroll without Shift keeps its normal behavior everywhere, and the gesture is scoped to `.main`. A status readout shows the current percentage.
+- `appearance.ts` gained `textScaleFor`, `parseContextScale` and `stepContextScale`; the Settings Appearance hint, in-app manual and all eight non-English packs document the gesture.
+- Covered by `tests/context-scale.test.mjs`, pure-function tests in `tests/appearance.test.mjs`, and `.playwright-cli/check-context-scale.mjs`.

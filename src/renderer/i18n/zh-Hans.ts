@@ -240,4 +240,7 @@ export const zhHans: Record<string, string> = {
   'Copy': '复制',
   'Re-run': '重新运行',
   'Copied': '已复制',
+  // 实时调整正文字号
+  'Context text size': '正文字号',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': '在对话上按住 Shift 并滚动滚轮可即时调整正文字号；Shift + 中键单击恢复默认。',
 };

@@ -240,4 +240,7 @@ export const zhHant: Record<string, string> = {
   'Copy': '複製',
   'Re-run': '重新執行',
   'Copied': '已複製',
+  // 即時調整內文字級
+  'Context text size': '內文字級',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': '在對話上按住 Shift 並滾動滾輪可即時調整內文字級；Shift + 中鍵按一下恢復預設。',
 };

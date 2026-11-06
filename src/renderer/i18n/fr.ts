@@ -240,4 +240,7 @@ export const fr: Record<string, string> = {
   'Copy': 'Copier',
   'Re-run': 'Relancer',
   'Copied': 'Copié',
+  // Live context text size
+  'Context text size': 'Taille du texte du contexte',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': 'Maj + molette sur la conversation modifie la taille du texte du contexte ; Maj + clic molette la réinitialise.',
 };

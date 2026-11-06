@@ -240,4 +240,7 @@ export const es: Record<string, string> = {
   'Copy': 'Copiar',
   'Re-run': 'Volver a ejecutar',
   'Copied': 'Copiado',
+  // Tamaño del texto del contexto en vivo
+  'Context text size': 'Tamaño del texto del contexto',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': 'Mayús + rueda sobre la conversación cambia al instante el tamaño del texto del contexto; Mayús + clic central lo restablece.',
 };

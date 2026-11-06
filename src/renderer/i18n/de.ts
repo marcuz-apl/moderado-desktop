@@ -240,4 +240,7 @@ export const de: Record<string, string> = {
   'Copy': 'Kopieren',
   'Re-run': 'Erneut ausführen',
   'Copied': 'Kopiert',
+  // Schriftgröße des Kontexts live ändern
+  'Context text size': 'Schriftgröße des Kontexts',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': 'Umschalt + Mausrad über dem Gespräch ändert die Schriftgröße des Kontexts sofort; Umschalt + mittlerer Klick setzt sie zurück.',
 };

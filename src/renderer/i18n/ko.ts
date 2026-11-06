@@ -240,4 +240,7 @@ export const ko: Record<string, string> = {
   'Copy': '복사',
   'Re-run': '다시 실행',
   'Copied': '복사됨',
+  // 본문 글자 크기 즉시 조절
+  'Context text size': '본문 글자 크기',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': '대화 영역에서 Shift + 휠로 본문 글자 크기를 즉시 조절하고, Shift + 가운데 클릭으로 초기화합니다.',
 };

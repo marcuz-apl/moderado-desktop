@@ -240,4 +240,7 @@ export const ja: Record<string, string> = {
   'Copy': 'コピー',
   'Re-run': '再実行',
   'Copied': 'コピーしました',
+  // 本文の文字サイズを即時変更
+  'Context text size': '本文の文字サイズ',
+  'Shift + wheel over the conversation changes the context text size; Shift + middle click resets it.': '会話上で Shift + ホイールすると本文の文字サイズを即時に変更できます。Shift + 中クリックでリセットします。',
 };
