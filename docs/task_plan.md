@@ -134,3 +134,24 @@ Make the desktop sidebar navigable like an editor workbench while preserving the
 - `npm run build`: frontend and Rust builds passed.
 - `npm run dev`: Vite and the Tauri executable started successfully; the process was stopped after startup.
 - `git diff --check`: passed.
+
+# Office and Document Capability Plan (deferred)
+
+## Goal
+
+Let Work sessions produce real office artifacts — slides, documents, spreadsheets, charts — and let the user review them inside the app. A Skills page for daily routines is **not** the first step.
+
+## Decision (2026-11-06)
+
+A skill is an instruction bundle, and today's tools are text-only (`write_file` takes a UTF-8 string; Preview renders a file as text). Installing skills now yields nicer HTML, which is the failure already observed with a 12-day Spain itinerary that could not become a `.pptx`. The dependency order is:
+
+1. Artifact preview panel — render HTML, PDF, images and office files inside the app, with generated HTML treated as inert, untrusted content.
+2. Typed generators plus verification — Rust commands that emit real binary files and render them to images the model can inspect.
+3. Skills layer — `~/.moderado/skills/<name>/SKILL.md`, folder-scanned, explicitly installed and enabled.
+4. Registry — last, and still deferred by PRD NG1.
+
+## Notes
+
+- Skills are executable content and a prompt-injection surface: no auto-install, no remote fetch during a turn, no bypass of the approval gate or workspace jail.
+- Binary artifacts break three current assumptions: approval previews are text diffs, checkpoint review is text-oriented, and generated artifacts have no viewer.
+- Full rationale and boundaries: [office-capability-plan.md](./office-capability-plan.md). Nothing here is implemented in v0.4.49.

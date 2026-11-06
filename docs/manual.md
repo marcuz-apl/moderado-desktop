@@ -9,7 +9,7 @@ The window title bar shows the version of this build after the product name (for
 Open **Settings** from the gear icon.
 
 - **Provider** — pick a preset (Moderado Gateway, NVIDIA NIM, OpenRouter) or a local runtime (llama.cpp, Ollama, LM Studio).
-- **API key** — stored in the OS keychain, never in a config file or the transcript.
+- **API key** — stored in the OS keychain, never in a config file or the transcript. One key is kept per provider, so editing a Base URL does not lose it; a key saved by an older build under the old URL is picked up automatically.
 - **Models** — choose a Plan model and an Act model. Use **Load models** to read the provider's list.
 
 llama.cpp, Ollama, and LM Studio need no key and work offline. Each is marked available or offline in the provider list at startup; llama.cpp's server (`llama-server`) is expected on `http://127.0.0.1:9931/v1`.
@@ -114,6 +114,7 @@ No telemetry is sent anywhere.
 ### If something looks wrong
 
 - **"Enter an endpoint, choose a model"** — Settings is missing a provider URL or model.
+- **Only one local model appears, but the command line shows several** — two servers are answering on the same port, one on `::1` and one on `127.0.0.1` (a native Ollama and one under WSL is the usual pair). The app talks to `127.0.0.1`, where the CLI looks; saved `localhost` endpoints are rewritten on the next request. Stop the server you do not want, or point Base URL at it explicitly.
 - **Windows says "Windows protected your PC"** — the build is unsigned; choose **More info → Run anyway**.
 - **macOS will not open the app** — the build is unsigned; right-click the app → **Open** once, or run `xattr -dr com.apple.quarantine "/Applications/Moderado Desktop.app"`.
 - **A turn stops early** — the agent hit its step limit; send `continue` to keep going from where it stopped.

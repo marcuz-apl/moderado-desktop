@@ -4,6 +4,8 @@ Cross-platform desktop application for running autonomous AI coding agent sessio
 
 Moderado Desktop follows the Cline Desktop interaction model — parallel sessions, Plan/Act dual modes, explicit tool approval, and git-backed checkpoints — while remaining **provider-agnostic**: Moderado Gateway (first-party), NVIDIA NIM, OpenRouter, llama.cpp (local), Ollama (local), LM Studio (local), and any generic OpenAI-compatible endpoint.
 
+**Latest release: v0.4.49** (2026-11-06). See the [release notes](./docs/release-notes.md) for what changed since v0.4.43 and the install workarounds for unsigned builds.
+
 ## Current build
 
 The app supports persistent Work and Code sessions, schedules, transcript imports, Plan/Act mode, and the OpenAI-compatible provider matrix. Tasks and sessions have per-conversation Auto-Approve settings; Code starts with all five categories enabled; Work starts with read, edit, and web enabled, and you can turn any category off to require approval. File changes retain their diff preview. On Windows, commands run in a Windows AppContainer against a disposable copy of the project; only the resulting workspace changes are copied back. MCP servers (stdio or Streamable HTTP) configured in `~/.moderado/mcp.json` are available to Code/Act sessions through the Use MCP servers approval category, with an optional per-server tool allow-list. Code sessions also get `git_diff`, `find_references`, `get_definition`, and language-server `diagnostics` tools. API keys remain in the OS keychain.
@@ -14,7 +16,9 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 - **Plan/Act dual mode**: Plan mode is strictly read-only; Act mode enables mutating tools. Each mode can use a different model. The switch applies in both Work and Code, so a document can be outlined before anything is written.
 - **Work and Code modes**: Work tasks own a conversation and a managed Documents folder for questions, attachments, and editable UTF-8 documents. Code projects own a chosen codebase folder with multiple independent sessions. Both use jailed file tools and checkpoints. The icon rail is identical in both modes — the mode only changes what a session may do and what the panels show — and the app reopens in the mode you last used.
 - **Appearance**: a sun/moon button beside the Plan/Act selector switches the theme. Until you click it, the theme follows local time — light from 07:00 to 18:59 — and re-checks every minute while the app is open; a click fixes a theme, and Settings → Appearance → Theme puts it back on Auto. Settings → Appearance also sets a display size from 90% to 150%, which scales text, controls and layout across the window.
-- **Settings page and manual**: the gear opens Settings as a full-width page rather than a 260px panel, so the connection form gets room; a book icon above it opens **Docs** — Getting started, Reference, and License — rendered from `docs/manual.md` through the same Markdown renderer as assistant replies.
+- **Settings page and manual**: the gear opens Settings as a full-width page rather than a 260px panel, so the connection form gets room; a book icon above it opens **Docs** — Getting started, Reference, and License — rendered from `docs/manual.md` through the same Markdown renderer as assistant replies. Both pages keep the session header visible above them.
+- **Nine interface languages**: English, Français, 简体中文, 繁體中文, 日本語, 한국어, Español, Deutsch, Русский. Round-tripping back to English restores every label; conversations, file names and user-typed task names are never translated.
+- **Reading and message actions**: Shift + wheel resizes the conversation text on the fly (75–175%, Shift + middle click resets); sent questions have Copy and Re-run, turn summaries have Copy. Re-run resubmits the original prompt and attachments without discarding a draft.
 - **Project navigation**: New creates a named folder; Open registers an existing codebase. Sessions appear beneath each project. Deleting a session preserves the project; removing a project preserves its files and history for reopening. Mode switching restores its last conversation and unsent draft.
 - **Per-session Auto-Approve**: Code sessions default to Read files, Edit files, Fetch web content, Execute command, and Use MCP servers enabled. Turn off read, web, edit, or command access to require a contextual approval; MCP tools are gated the same way.
 - **Command sandbox**: Windows commands receive only a disposable AppContainer copy of the project, have bounded output and runtime, and cannot access files outside that copy. The app checks for concurrent workspace changes before copying results back.
@@ -90,6 +94,7 @@ src-tauri/src/
   agent/runner.rs # Agent loop and conversation history
   provider.rs  # Provider catalog and OpenAI-compatible streaming client
   provider/settings.rs # Local provider settings without secrets
+  keychain.rs  # OS keychain entries, one per provider
   db.rs        # Schema ownership, numbered migrations, and connection setup
   sessions.rs  # SQLite sessions, histories, and checkpoint metadata
   schedules.rs # Persistent schedules and due-run claiming
@@ -114,6 +119,9 @@ src/renderer/  # TypeScript UI and styles
 - [Work and Code modes](./docs/work-code-modes.md) — design for the two session kinds and attachments
 - [Milestone plan](./docs/task_plan.md) — implementation scope and verification for each milestone
 - [Progress notes](./docs/progress.md) — completed work and review outcomes
+- [Release notes](./docs/release-notes.md) — published releases and upgrade notes
+- [Release checklist](./docs/release.md) — tagging, artifacts, signing and auto-update status
+- [Office and document capability plan](./docs/office-capability-plan.md) — deferred design note for skills and artifact work
 - [Findings](./docs/findings.md) — implementation research and decisions
 - [AGENTS.md](./AGENTS.md) — coding guidelines and operating manual for AI agents and contributors
 

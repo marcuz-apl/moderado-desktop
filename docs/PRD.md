@@ -4,6 +4,8 @@
 > **Status**: Proposed
 > **Owner**: Moderado
 > **Reference product**: Cline Desktop (open-source agent harness for open-weight models)
+>
+> **Implementation status**: this is the original v0.1 proposal, kept as the requirements baseline. The shipped product is described in [release-notes.md](./release-notes.md) and [progress.md](./progress.md). A capability marketplace / skills layer remains deferred under NG1 — see [office-capability-plan.md](./office-capability-plan.md).
 
 ---
 
@@ -50,6 +52,7 @@ All providers are normalized to one internal `ChatCompletion` contract (OpenAI-c
 | Moderado Gateway | OpenAI-compatible HTTPS | API key (org-scoped) | Default provider; model list fetched from `/v1/models`. |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key | `integrate.api.nvidia.com` base URL. |
 | OpenRouter | OpenAI-compatible HTTPS | API key | Supports provider routing hints. |
+| llama.cpp (local) | OpenAI-compatible `http://127.0.0.1:9931/v1` | none | `llama-server`; auto-detect running instance. |
 | Ollama (local) | OpenAI-compatible `http://127.0.0.1:11434` | none | Auto-detect running instance. |
 | LM Studio (local) | OpenAI-compatible `http://127.0.0.1:1234` | none | Auto-detect running server. |
 | Custom OpenAI-compatible | User-supplied base URL | Optional key | Validated against `/v1/models` before save. |
@@ -59,6 +62,7 @@ Requirements:
 - R2 — Per-mode model binding: separate model for Plan mode and Act mode, switchable on the fly.
 - R3 — API keys stored in the OS keychain (never in plaintext config).
 - R4 — Local providers must work with the app fully offline.
+- R5 — Loopback is spelled `127.0.0.1`, never `localhost`: on a dual-stack host `localhost` can resolve to a different server than the local CLI uses. An explicit `[::1]` stays IPv6 (see `AGENTS.md` P5).
 
 ## 6. Functional Requirements
 
