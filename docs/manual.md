@@ -12,7 +12,9 @@ Open **Settings** from the gear icon.
 - **API key** — stored in the OS keychain, never in a config file or the transcript.
 - **Models** — choose a Plan model and an Act model. Use **Load models** to read the provider's list.
 
-llama.cpp, Ollama, and LM Studio need no key and work offline. Each is marked available or offline in the provider list at startup; llama.cpp's server (`llama-server`) is expected on `http://localhost:9931/v1`.
+llama.cpp, Ollama, and LM Studio need no key and work offline. Each is marked available or offline in the provider list at startup; llama.cpp's server (`llama-server`) is expected on `http://127.0.0.1:9931/v1`.
+
+The local endpoints are written as `127.0.0.1` rather than `localhost` on purpose. On a dual-stack machine `localhost` resolves to `::1` first, so if anything is listening there the app talks to that server instead of the one your command line uses — two Ollama installs sharing port 11434 will do it. Enter `[::1]` explicitly if your server only answers on IPv6.
 
 ### 2. Choose a mode
 

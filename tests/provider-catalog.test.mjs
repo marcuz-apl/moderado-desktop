@@ -20,7 +20,7 @@ test('llama.cpp sits between OpenRouter and Ollama on port 9931', async () => {
   ]);
   const block = catalog.slice(catalog.indexOf('id: ProviderId::LlamaCpp'), catalog.indexOf('id: ProviderId::Ollama'));
   assert.match(block, /name: "llama\.cpp"/, 'the Settings label is exactly llama.cpp');
-  assert.match(block, /default_base_url: "http:\/\/localhost:9931\/v1"/, 'the preset uses the requested port');
+  assert.match(block, /default_base_url: "http:\/\/127\.0\.0\.1:9931\/v1"/, 'the preset uses the requested port on IPv4 loopback');
   assert.match(block, /local: true/, 'a local runtime needs no API key');
   assert.match(block, /keyless: false/, 'only the Gateway has free stealth models');
   assert.match(block, /apply_key_url: Some\("https:\/\/github\.com\/ggml-org\/llama\.cpp\/releases"\)/);
@@ -49,6 +49,6 @@ test('the renderer, agent fixture matrix, and docs know about llama.cpp', async 
   assert.match(main, /'lm_studio' \| 'open_ai_compatible'/, 'the custom endpoint id matches serde');
   assert.match(runner, /ProviderId::LlamaCpp,\s*include_str!\("\.\.\/\.\.\/tests\/fixtures\/llama_cpp\.sse"\)/);
   assert.match(fixture, /write_file/);
-  assert.match(readme, /\| llama\.cpp \(local\) \| `http:\/\/localhost:9931\/v1` \| none \|/);
+  assert.match(readme, /\| llama\.cpp \(local\) \| `http:\/\/127\.0\.0\.1:9931\/v1` \| none \|/);
   assert.match(manual, /llama\.cpp, Ollama, and LM Studio need no key/);
 });

@@ -37,9 +37,9 @@ The app supports persistent Work and Code sessions, schedules, transcript import
 | Moderado Gateway (default) | OpenAI-compatible HTTPS | Optional — two free stealth models work keyless; a key unlocks the full catalog |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key |
 | OpenRouter | OpenAI-compatible HTTPS | API key |
-| llama.cpp (local) | `http://localhost:9931/v1` | none |
-| Ollama (local) | `http://localhost:11434` | none |
-| LM Studio (local) | `http://localhost:1234` | none |
+| llama.cpp (local) | `http://127.0.0.1:9931/v1` | none |
+| Ollama (local) | `http://127.0.0.1:11434` | none |
+| LM Studio (local) | `http://127.0.0.1:1234` | none |
 | Custom | User-supplied base URL | optional key |
 
 All providers normalize to a single `ChatCompletion` contract. API keys are stored in the OS keychain and never written to plaintext config or logs. Every provider in Settings links to where you get it: a key page for Moderado Gateway, NVIDIA NIM, and OpenRouter, and a download page for the local llama.cpp, Ollama, and LM Studio runtimes, which need no key. The local runtimes are probed at startup and marked available or offline in the provider list. The Moderado Gateway also serves two pinned stealth models without any key; they lead the model list tagged **free, no key**, while its other free routes still require a key.

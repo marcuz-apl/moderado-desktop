@@ -50,8 +50,8 @@ All providers are normalized to one internal `ChatCompletion` contract (OpenAI-c
 | Moderado Gateway | OpenAI-compatible HTTPS | API key (org-scoped) | Default provider; model list fetched from `/v1/models`. |
 | NVIDIA NIM | OpenAI-compatible HTTPS | API key | `integrate.api.nvidia.com` base URL. |
 | OpenRouter | OpenAI-compatible HTTPS | API key | Supports provider routing hints. |
-| Ollama (local) | OpenAI-compatible `http://localhost:11434` | none | Auto-detect running instance. |
-| LM Studio (local) | OpenAI-compatible `http://localhost:1234` | none | Auto-detect running server. |
+| Ollama (local) | OpenAI-compatible `http://127.0.0.1:11434` | none | Auto-detect running instance. |
+| LM Studio (local) | OpenAI-compatible `http://127.0.0.1:1234` | none | Auto-detect running server. |
 | Custom OpenAI-compatible | User-supplied base URL | Optional key | Validated against `/v1/models` before save. |
 
 Requirements:

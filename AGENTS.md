@@ -52,7 +52,7 @@ All providers are normalized to a single `ChatCompletion` contract (OpenAI-compa
 | --- | --- |
 | Moderado Gateway | Default; org-scoped API key; model list from `/v1/models`. |
 | NVIDIA NIM, OpenRouter | OpenAI-compatible HTTPS + API key. |
-| llama.cpp (`http://localhost:9931`), Ollama (`http://localhost:11434`), LM Studio (`http://localhost:1234`) | Local, no auth; probe availability at startup. |
+| llama.cpp (`http://127.0.0.1:9931`), Ollama (`http://127.0.0.1:11434`), LM Studio (`http://127.0.0.1:1234`) | Local, no auth; probe availability at startup. |
 | Custom endpoint | User-supplied base URL + optional key; validate against `/v1/models` before saving. |
 
 Rules:
@@ -60,6 +60,7 @@ Rules:
 - **P2** — API keys live in the OS keychain, never in plaintext config, logs, or session transcripts. The keychain account is `ProviderId::slug()`, never the base URL: a provider has one endpoint, and keying on the URL orphaned the secret whenever the endpoint changed.
 - **P3** — Local providers must work fully offline; provider tests use recorded fixtures or a local mock server, never live endpoints.
 - **P4** — Adding a provider = one adapter + fixture tests + model-list mapping. No provider-specific branches anywhere else in the codebase.
+- **P5** — Loopback is spelled `127.0.0.1`, never `localhost`. On a dual-stack host `localhost` resolves to `::1` first, so when anything answers there the request silently goes to the wrong server — a native Ollama and one under WSL can share port 11434 that way, and the app then lists that daemon's models. An IPv4-only server only survives by connection fallback, which is luck, not design. `completion_url` rewrites the host so the app talks to the same server as the user's CLI; an explicit `[::1]` stays IPv6.
 
 ## 5. Agent Behavior & Tool Discipline
 

@@ -70,7 +70,7 @@ pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
         id: ProviderId::LlamaCpp,
         name: "llama.cpp",
-        default_base_url: "http://localhost:9931/v1",
+        default_base_url: "http://127.0.0.1:9931/v1",
         local: true,
         keyless: false,
         apply_key_url: Some("https://github.com/ggml-org/llama.cpp/releases"),
@@ -79,7 +79,7 @@ pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
         id: ProviderId::Ollama,
         name: "Ollama - Local",
-        default_base_url: "http://localhost:11434/v1",
+        default_base_url: "http://127.0.0.1:11434/v1",
         local: true,
         keyless: false,
         apply_key_url: Some("https://ollama.com/download"),
@@ -88,7 +88,7 @@ pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
         id: ProviderId::LmStudio,
         name: "LM Studio - Local",
-        default_base_url: "http://localhost:1234/v1",
+        default_base_url: "http://127.0.0.1:1234/v1",
         local: true,
         keyless: false,
         apply_key_url: Some("https://lmstudio.ai/download"),
@@ -299,6 +299,15 @@ pub fn completion_url(base: &str) -> Result<reqwest::Url, String> {
         || url.password().is_some()
     {
         return Err("Provider URL cannot contain credentials, query, or fragment".into());
+    }
+    // `localhost` resolves to `::1` first on a dual-stack host. When something
+    // answers there, the request silently goes to the wrong server: a native
+    // Ollama and one under WSL share port 11434 exactly that way. Spelling
+    // loopback in IPv4 pins the app to the server the user's CLI talks to; an
+    // explicit `[::1]` still means IPv6.
+    if url.host_str() == Some("localhost") {
+        url.set_host(Some("127.0.0.1"))
+            .map_err(|_| "Invalid provider URL")?;
     }
     let path = format!("{}/chat/completions", url.path().trim_end_matches('/'));
     url.set_path(&path);
@@ -665,7 +674,7 @@ mod tests {
         );
         let preset = ProviderId::LlamaCpp.preset();
         assert_eq!(preset.name, "llama.cpp");
-        assert_eq!(preset.default_base_url, "http://localhost:9931/v1");
+        assert_eq!(preset.default_base_url, "http://127.0.0.1:9931/v1");
         assert!(preset.local, "llama.cpp runs on this machine");
         assert!(!preset.keyless, "only the Gateway has free stealth models");
         assert!(completion_url(preset.default_base_url).is_ok());
@@ -805,6 +814,36 @@ mod tests {
         assert!(completion_url("https://example.com/v1").is_ok());
     }
 
+    #[test]
+    fn loopback_is_spelled_in_ipv4_so_the_app_and_the_cli_agree() {
+        // `localhost` resolves to `::1` first, and when a different server
+        // answers there the request never reaches the runtime the user started.
+        // The rewrite makes the choice explicit instead of leaning on the
+        // connection fallback that saves the IPv4-only case by accident.
+        let url = completion_url("http://localhost:11434/v1").unwrap();
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert_eq!(url.port(), Some(11434));
+        assert_eq!(url.path(), "/v1/chat/completions");
+
+        // An explicit IPv6 loopback is a deliberate choice and stays put.
+        let v6 = completion_url("http://[::1]:11434/v1").unwrap();
+        assert_eq!(v6.host_str(), Some("[::1]"));
+
+        // Remote providers keep their host untouched.
+        let remote = completion_url("https://openrouter.ai/api/v1").unwrap();
+        assert_eq!(remote.host_str(), Some("openrouter.ai"));
+
+        // Every local preset ships the IPv4 spelling, so a fresh install never
+        // inherits the ambiguity.
+        for preset in local_presets() {
+            assert!(
+                preset.default_base_url.contains("127.0.0.1"),
+                "{} must spell loopback in IPv4, not localhost",
+                preset.name
+            );
+        }
+    }
+
     #[tokio::test]
     async fn discovers_models_from_gateway_endpoint() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -819,6 +858,8 @@ mod tests {
             let body = r#"{"data":[{"id":"model-b"},{"id":"model-a"}]}"#;
             write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
         });
+        // The mock binds IPv4 only, exactly like LM Studio and `llama-server`,
+        // so this also covers the fallback when `::1` has nothing to answer.
         let models = list_models(&format!("http://127.0.0.1:{port}/v1"), "")
             .await
             .unwrap();

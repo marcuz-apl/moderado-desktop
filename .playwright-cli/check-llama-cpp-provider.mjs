@@ -8,9 +8,9 @@ const CATALOG = [
   { id: 'moderado', name: 'Moderado', defaultBaseUrl: 'https://modr.alfazen.org/v1', local: false, keyless: true, applyKeyUrl: 'https://modr.alfazen.org/account?mode=signin', applyKeyLabel: 'Get API key' },
   { id: 'nvidia_nim', name: 'Nvidia NIM', defaultBaseUrl: 'https://integrate.api.nvidia.com/v1', local: false, keyless: false, applyKeyUrl: 'https://build.nvidia.com/settings/api-keys', applyKeyLabel: 'Get API key' },
   { id: 'open_router', name: 'OpenRouter', defaultBaseUrl: 'https://openrouter.ai/api/v1', local: false, keyless: false, applyKeyUrl: 'https://openrouter.ai/settings/keys', applyKeyLabel: 'Get API key' },
-  { id: 'llama_cpp', name: 'llama.cpp', defaultBaseUrl: 'http://localhost:9931/v1', local: true, keyless: false, applyKeyUrl: 'https://github.com/ggml-org/llama.cpp/releases', applyKeyLabel: 'Get llama.cpp' },
-  { id: 'ollama', name: 'Ollama - Local', defaultBaseUrl: 'http://localhost:11434/v1', local: true, keyless: false, applyKeyUrl: 'https://ollama.com/download', applyKeyLabel: 'Get Ollama' },
-  { id: 'lm_studio', name: 'LM Studio - Local', defaultBaseUrl: 'http://localhost:1234/v1', local: true, keyless: false, applyKeyUrl: 'https://lmstudio.ai/download', applyKeyLabel: 'Get LM Studio' },
+  { id: 'llama_cpp', name: 'llama.cpp', defaultBaseUrl: 'http://127.0.0.1:9931/v1', local: true, keyless: false, applyKeyUrl: 'https://github.com/ggml-org/llama.cpp/releases', applyKeyLabel: 'Get llama.cpp' },
+  { id: 'ollama', name: 'Ollama - Local', defaultBaseUrl: 'http://127.0.0.1:11434/v1', local: true, keyless: false, applyKeyUrl: 'https://ollama.com/download', applyKeyLabel: 'Get Ollama' },
+  { id: 'lm_studio', name: 'LM Studio - Local', defaultBaseUrl: 'http://127.0.0.1:1234/v1', local: true, keyless: false, applyKeyUrl: 'https://lmstudio.ai/download', applyKeyLabel: 'Get LM Studio' },
   { id: 'open_ai_compatible', name: 'Other OpenAI Compatible Endpoints', defaultBaseUrl: '', local: false, keyless: false, applyKeyUrl: null, applyKeyLabel: '' },
 ];
 
@@ -21,7 +21,7 @@ page.on('pageerror', (error) => errors.push(error.message));
 
 await page.addInitScript((presets) => {
   localStorage.removeItem('moderado-navigation');
-  const settings = { providerId: 'ollama', baseUrl: 'http://localhost:11434/v1', planModel: 'planner', actModel: 'writer' };
+  const settings = { providerId: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', planModel: 'planner', actModel: 'writer' };
   const policy = { readFiles: true, editFiles: true, fetchWebContent: true, executeCommand: true, useMcpServers: true };
   const record = (id, name, kind, workspace, updatedAt) => ({ id, name, kind, workspace, taskId: 'wt0', updatedAt, settings, autoApprove: { ...policy }, history: [] });
   const session = record('w1', 'Session 1', 'work', 'C:\\Documents\\Moderado-Desktop\\work-session0', 8);
@@ -86,7 +86,7 @@ try {
   if (JSON.stringify(ids.map(snake)) !== JSON.stringify(CATALOG.map((preset) => preset.id))) {
     throw new Error(`Rust catalog ${ids.join(',')} does not match the mocked catalog`);
   }
-  if (!provider.includes('default_base_url: "http://localhost:9931/v1"')) throw new Error('the Rust preset does not use port 9931');
+  if (!provider.includes('default_base_url: "http://127.0.0.1:9931/v1"')) throw new Error('the Rust preset does not use port 9931');
   if (!provider.includes('name: "llama.cpp"')) throw new Error('the Rust preset is not named llama.cpp');
   if (!main.includes("'open_router' | 'llama_cpp' | 'ollama'")) throw new Error('the renderer ProviderId union is stale');
   console.log('PASS the Rust catalog and renderer type agree on the seven-provider order');
@@ -108,7 +108,7 @@ try {
   await page.selectOption('#provider-select', 'llama_cpp');
   await page.waitForTimeout(150);
   const local = await state();
-  if (local.endpoint !== 'http://localhost:9931/v1') throw new Error(`llama.cpp endpoint is ${local.endpoint}`);
+  if (local.endpoint !== 'http://127.0.0.1:9931/v1') throw new Error(`llama.cpp endpoint is ${local.endpoint}`);
   if (!local.keyDisabled) throw new Error('a local runtime should disable the API key box');
   if (local.applyText !== 'Get llama.cpp' || local.applyHref !== 'https://github.com/ggml-org/llama.cpp/releases' || !local.applyVisible) {
     throw new Error(`llama.cpp link is ${local.applyText} -> ${local.applyHref}`);
@@ -125,7 +125,7 @@ try {
   await page.selectOption('#provider-select', 'llama_cpp');
   await page.waitForTimeout(150);
   const back = await state();
-  if (back.endpoint !== 'http://localhost:9931/v1') throw new Error(`reselecting llama.cpp lost its endpoint: ${back.endpoint}`);
+  if (back.endpoint !== 'http://127.0.0.1:9931/v1') throw new Error(`reselecting llama.cpp lost its endpoint: ${back.endpoint}`);
   console.log('PASS switching to a remote provider and back keeps the llama.cpp draft');
 
   await page.screenshot({ path: '.playwright-cli/provider-llama-cpp.png', fullPage: true });
