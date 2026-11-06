@@ -438,13 +438,13 @@
 - Both mode-change paths set it: `applyLeftView()` (mode buttons, startup, view changes) and `applyKindUi()` (session selection). The second matters because `selectSession()` assigns `activeKind = record.kind` but does **not** call `applyLeftView()` — clicking a Code session from the Work Library would otherwise leave the icon hidden. The existing `aria-disabled`, tooltip, click guard, and Git-pane → Library fallback stay in place as a second line of defense.
 - New browser check `.playwright-cli/check-git-rail.mjs` 5/5: hidden in Work with the other three rail icons still visible, visible in Code, session-selection changes in both directions, and switching away from the open Git pane restores the Library. All six earlier browser checks re-run green; 145 node tests, tsc, eslint clean.
 
-## The version belongs in the native window title (0.4.45)
+## The version belongs in the native window title (0.4.46)
 
-- A brief experiment replaced the `.shell-head` brand text with `v0.4.45`. The user rejected it as a "very bad look" and it was reverted: **the version must not appear in the in-app chrome**. The left pane header is back to "Moderado Desktop", with no badge, tooltip, or `data-no-i18n` workaround.
-- The version is now appended to the **native window title only**: `Moderado Desktop · v0.4.45`. A `window_title(version)` helper in `src-tauri/src/lib.rs` builds it from `env!("CARGO_PKG_VERSION")`, and the Tauri `setup` hook applies it with `set_title`. `tauri.conf.json` keeps "Moderado Desktop" as the initial title of the hidden window, so there is no flash and no hardcoded version string to maintain by hand — the commit hook already mirrors the semver into `Cargo.toml`.
+- A brief experiment replaced the `.shell-head` brand text with the version string. The user rejected it as a "very bad look" and it was reverted: **the version must not appear in the in-app chrome**. The left pane header is back to "Moderado Desktop", with no badge, tooltip, or `data-no-i18n` workaround.
+- The version is now appended to the **native window title only**: `Moderado Desktop · v0.4.49`. A `window_title(version)` helper in `src-tauri/src/lib.rs` builds it from `env!("CARGO_PKG_VERSION")`, and the Tauri `setup` hook applies it with `set_title`. `tauri.conf.json` keeps "Moderado Desktop" as the initial title of the hidden window, so there is no flash and no hardcoded version string to maintain by hand — the commit hook already mirrors the semver into `Cargo.toml`.
 - HTML `<title>`, the left pane brand, and **Settings → About** are untouched. A Rust unit test covers `window_title`; `.playwright-cli/check-version-placement.mjs` 4/4 asserts the Rust wiring, the restored brand, About's version line, language switches, and collapse/expand. All eight browser checks, the full node and Rust suites, tsc, eslint, and clippy `-D warnings` are green.
 
-## llama.cpp joins the provider matrix (0.4.45)
+## llama.cpp joins the provider matrix (0.4.47)
 
 - **Settings → Provider** now lists `llama.cpp` between `OpenRouter` and `Ollama - Local`. Its preset points at `http://localhost:9931/v1` (the port the user runs `llama-server` on), is marked local so the API key box is disabled, and links to the upstream releases page instead of an API-key page.
 - Added `ProviderId::LlamaCpp` to the Rust catalog and `'llama_cpp'` to the renderer union. The union also drops the stale `'other_openai_compatible'` literal: serde actually serializes that variant as `open_ai_compatible`, which is what the catalog and saved settings use.
@@ -452,17 +452,33 @@
 - Added the `llama_cpp.sse` fixture to the shared end-to-end agent task, a Rust test pinning catalog order/id/URL/keyless flags, a Rust test pinning the probed local set and id serialization, a node source test, and `.playwright-cli/check-llama-cpp-provider.mjs` for the live dropdown behavior.
 - README, `AGENTS.md` provider rules, and the in-app manual now document the third local runtime and its port.
 
-## Message actions and a bigger Idle/Stop glyph (0.4.45)
+## Message actions and a bigger Idle/Stop glyph (0.4.48)
 
 - The composer's **Idle / Stop** button keeps its 34px frame, but the triangle and square inside it now render at 22px with slightly fuller geometry, so the state is easier to read at a glance.
 - Every **Turn summary** card gets a small **Copy** button; every **sent question** gets **Copy** and **Re-run** buttons. Copy uses the async clipboard API with a hidden-textarea fallback and flashes a "Copied" state; Re-run re-submits the exact original prompt and attachments without clearing the composer draft, and queues the prompt if a turn is already running.
 - Action labels are localized through `t()` behind `data-no-i18n` (conversations are never translated) and refreshed on every language switch; all eight non-English packs gained `Copy` / `Re-run` / `Copied`.
 - Documented in the in-app manual; covered by `tests/message-actions.test.mjs` and `.playwright-cli/check-message-actions.mjs`.
 
-## Shift + wheel resizes the conversation text (0.4.45)
+## Shift + wheel resizes the conversation text (0.4.49)
 
 - Holding **Shift** and scrolling the mouse wheel over the central workspace now changes the context (conversation) font size on the fly: 5% steps, clamped to 75–175%. **Shift + middle click** resets to 100% and also suppresses the Windows middle-click autoscroll cursor. Holding the middle button while wheeling works as well.
 - The gesture multiplies the existing Settings **Text size** preset (`textScaleFor`) instead of replacing it. `applyContextScale()` writes an inline `--text-scale` on `.transcript`, so messages, activity rows and the empty state scale while the composer, sidebar and controls keep their size. The value persists under `moderado-context-scale`.
 - Scroll without Shift keeps its normal behavior everywhere, and the gesture is scoped to `.main`. A status readout shows the current percentage.
 - `appearance.ts` gained `textScaleFor`, `parseContextScale` and `stepContextScale`; the Settings Appearance hint, in-app manual and all eight non-English packs document the gesture.
 - Covered by `tests/context-scale.test.mjs`, pure-function tests in `tests/appearance.test.mjs`, and `.playwright-cli/check-context-scale.mjs`.
+
+## Version replay: feat commits now move the patch digit (0.4.49)
+
+- The versioning code always intended `feat:` commits to move `p` (`detect_bump_type` returns `patch`), but `pre-commit` hardcoded `build` and `prepare-commit-msg` only printed a warning. Four warnings were ignored, so five builds shipped as `v0.4.45`. History was rebuilt with the correct identifiers, preserving each commit's tree, message and author/committer dates:
+
+  | Commit | Identifier |
+  | --- | --- |
+  | `feat: show the build version in the left pane header` | `v0.4.46+2611058` |
+  | `fix: revert in-app version badge and append the version to the window title` | `v0.4.46+2611059` |
+  | `feat: add llama.cpp local provider on port 9931` | `v0.4.47+261105a` |
+  | `feat: bigger Idle/Stop glyph and copy/re-run message actions` | `v0.4.48+2611061` |
+  | `feat: Shift + wheel resizes conversation text on the fly` | `v0.4.49+2611062` |
+
+- `npm run commit -- "<type>: <subject>"` is now the supported commit path: it exports `MODERADO_BUMP_KIND=patch` for `feat:` subjects, and `pre-commit` applies it. Git does not expose the message to `pre-commit` (the only hook that can still change the staged tree), so the wrapper bridges that gap. A new `commit-msg` hook rejects any raw `feat:` commit whose semver still matches `HEAD`, which makes the rule enforceable instead of advisory.
+- Replay mode `MODERADO_VERSION_REPLAY=<identifier>` pins an exact identifier, so history can be rebuilt without the hook advancing the dated build counter. `next_identifier` also now propagates `bump_semver` failures instead of emitting a semver-less identifier.
+- `tests/versioning.test.mjs` covers automatic patch bumps, manual `version:patch`, rejected raw feat commits, the 99 cap, replay mode, counter rollover, and manifest mirroring.

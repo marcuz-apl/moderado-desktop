@@ -5,12 +5,17 @@ HOOKDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 old=$(read_version)
 validate_identifier "$old"
 
-# Git writes the commit message after this hook runs, so the message cannot
-# decide the bump here. Only the build counter advances; the patch digit moves
-# through `npm run version:patch` before a feature commit. Staging has to
-# happen in this hook: index changes made in prepare-commit-msg or commit-msg
-# are left staged and do not reach the commit.
-new=$(next_identifier "$old" "$(utc_yymmdd)" build) || exit 1
+# Git writes the commit message after this hook runs, so scripts/commit.mjs
+# supplies the bump kind as MODERADO_BUMP_KIND=patch for feat commits. Staging
+# has to happen here: index changes made in prepare-commit-msg or commit-msg
+# are left staged and do not reach the commit. MODERADO_VERSION_REPLAY pins an
+# exact identifier when rebuilding history (the build counter must not move).
+if [ -n "${MODERADO_VERSION_REPLAY:-}" ]; then
+  new=$MODERADO_VERSION_REPLAY
+  validate_identifier "$new"
+else
+  new=$(next_identifier "$old" "$(utc_yymmdd)" "${MODERADO_BUMP_KIND:-build}") || exit 1
+fi
 
 printf '%s\n' "$new" > "$VERSION_FILE"
 git add -- "$VERSION_FILE"

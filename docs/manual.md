@@ -2,7 +2,7 @@
 
 Moderado Desktop runs coding and document sessions against the model provider you choose. Everything stays on this machine except the calls you configure.
 
-The window title bar shows the version of this build after the product name (for example `Moderado Desktop · v0.4.45`). **Settings → About** also lists the version.
+The window title bar shows the version of this build after the product name (for example `Moderado Desktop · v0.4.49`). **Settings → About** also lists the version.
 
 ### 1. Connect a model
 

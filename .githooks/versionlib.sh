@@ -77,8 +77,9 @@ next_identifier() {
   bdate=${build%?}
   bctr=${build#??????}
 
-  # Apply semantic bump if requested
-  ver=$(bump_semver "$ver" "$bump")
+  # Apply semantic bump if requested; bump_semver dies in a subshell here, so
+  # its failure has to be propagated or the identifier would lose its semver.
+  ver=$(bump_semver "$ver" "$bump") || return 1
 
   if [ "$bdate" != "$today" ]; then
     nctr=1

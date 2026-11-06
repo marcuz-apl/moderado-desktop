@@ -37,7 +37,8 @@ src/renderer/    # TypeScript UI
 - `npm test`: Run automated test suites (must pass offline)
 - `npm run build`: Compile the TypeScript frontend and Rust app
 - `npm run lint`: Lint TypeScript and Rust
-- `npm run version:patch|minor|major`: Move the semver in `VERSION` before a `feat:` commit. Commits only advance the `+YYMMDD<n>` build counter, and the commit hook copies the semver into `package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`. A release is a `v*` tag, not a version number.
+- `npm run commit -- "<type>: <subject>"`: **the supported way to commit.** A `feat:` (or `feat(scope):`) subject increments the patch digit `p`; every other type keeps the semver and only advances the `+YYMMDD<n>` build counter. The wrapper passes `MODERADO_BUMP_KIND` to the pre-commit hook because Git exposes the message only after that hook runs. A raw `git commit -m "feat: ..."` is **rejected** by `commit-msg` unless `npm run version:patch` was run first; a fix/docs/chore commit may use raw git. `npm run version:minor|major` remain explicit, manual moves.
+- The hook mirrors the semver from `VERSION` into `package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`. `MODERADO_VERSION_REPLAY=<identifier>` pins an exact identifier (used only when rebuilding history). A release is a `v*` tag, not a version number.
 
 **Definition of done for any change**: typecheck clean, lint clean, tests green offline, relevant behavior covered by a test.
 

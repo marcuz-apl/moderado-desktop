@@ -7,14 +7,14 @@ msgfile=$1
 ver=$(read_version) || exit 1
 validate_identifier "$ver"
 
-# A feat commit is the only thing that should move the patch digit, but the
-# message is not available when pre-commit stages VERSION, so it cannot be
-# automatic. Point at the explicit bump instead of silently keeping the digit.
+# The patch bump is decided by scripts/commit.mjs before git runs, and
+# commit-msg rejects any feat commit that skipped it. Report the bump here so
+# the change is visible instead of silent. Replay pins its own identifier.
 subject=$(awk '!/^#/ && NF { print; exit }' "$msgfile")
-if [ "$(detect_bump_type "$subject")" = "patch" ]; then
+if [ -z "${MODERADO_VERSION_REPLAY:-}" ] && [ "$(detect_bump_type "$subject")" = "patch" ]; then
   prev=$(git show HEAD:VERSION 2>/dev/null | tr -d '\r\n ')
-  if [ -n "$prev" ] && [ "${prev%%+*}" = "${ver%%+*}" ]; then
-    echo "moderado-versioning: feat commit kept ${ver%%+*}; run 'npm run version:patch' before committing to bump it." >&2
+  if [ -n "$prev" ] && [ "${prev%%+*}" != "${ver%%+*}" ]; then
+    echo "moderado-versioning: patch bumped to ${ver%%+*}" >&2
   fi
 fi
 

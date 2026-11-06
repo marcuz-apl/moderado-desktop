@@ -1,0 +1,28 @@
+#!/bin/sh
+HOOKDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$HOOKDIR/versionlib.sh"
+
+msgfile=$1
+[ -f "$msgfile" ] || exit 0
+# A history replay declares its identifier explicitly; the invariant is
+# already guaranteed by the replay table.
+[ -z "${MODERADO_VERSION_REPLAY:-}" ] || exit 0
+
+# prepare-commit-msg already stamped the subject with the identifier, so strip
+# that prefix before classifying the conventional-commit type.
+subject=$(awk '
+  !/^#/ && NF {
+    sub(/^v[0-9]+\.[0-9]+\.[0-9]+[+-][0-9][0-9][0-9][0-9][0-9][0-9][0-9a-z] /, "")
+    print
+    exit
+  }
+' "$msgfile")
+[ "$(detect_bump_type "$subject")" = "patch" ] || exit 0
+
+# pre-commit has already written and staged the identifier for this commit.
+# If its semver still matches HEAD, the feat commit missed its patch bump.
+cur=$(read_version) || exit 1
+prev=$(git show HEAD:VERSION 2>/dev/null | tr -d '\r\n ')
+if [ -n "$prev" ] && [ "${cur%%+*}" = "${prev%%+*}" ]; then
+  die "feat commit did not bump the patch digit. Use 'npm run commit -- \"feat: ...\"' or run 'npm run version:patch' before committing."
+fi
