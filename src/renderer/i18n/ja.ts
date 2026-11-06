@@ -41,6 +41,8 @@ export const ja: Record<string, string> = {
   'AGENT SESSION': 'エージェントセッション',
   'New Session': '新規セッション',
   'Select a task': 'タスクを選択',
+  'Select a project': 'プロジェクトを選択',
+  'No repository': 'リポジトリがありません',
   'Workspace conversation': 'ワークスペースの会話',
   'Managed task folder': '管理タスクフォルダー',
   'Task files': 'タスクのファイル',

@@ -41,6 +41,8 @@ export const ko: Record<string, string> = {
   'AGENT SESSION': '에이전트 세션',
   'New Session': '새 세션',
   'Select a task': '작업 선택',
+  'Select a project': '프로젝트 선택',
+  'No repository': '저장소 없음',
   'Workspace conversation': '작업 공간 대화',
   'Managed task folder': '관리 작업 폴더',
   'Task files': '작업 파일',

@@ -50,9 +50,11 @@ export function t(phrase: string): string {
 
 // Each translated node remembers the English source it came from, so switching
 // language twice never translates a translation. The record is also refreshed
-// when render code replaces the text with new English.
-const textSources = new Map<Text, string>();
-const attributeSources = new Map<Element, Map<string, string>>();
+// when render code replaces the text with new English. Weak keys matter: the
+// transcript is rebuilt with replaceChildren, and a strong map would keep every
+// discarded node alive for the life of the window.
+const textSources = new WeakMap<Text, string>();
+const attributeSources = new WeakMap<Element, Map<string, string>>();
 
 const ATTRIBUTES = ['title', 'aria-label', 'placeholder'] as const;
 /** Prose, code, and live conversation keep the language they were written in.
@@ -62,8 +64,11 @@ const ATTRIBUTES = ['title', 'aria-label', 'placeholder'] as const;
 const OPAQUE = 'script,style,code,pre,textarea,.message,.markdown-body,.terminal-host,.mention-menu,[data-no-i18n]';
 /** A textarea's own placeholder is interface copy; only its contents are opaque. */
 const OPAQUE_ATTRIBUTES = 'script,style,code,pre,.message,.markdown-body,.terminal-host,.mention-menu,[data-no-i18n]';
-/** Lists rebuild from data, so their English labels are set by the render code. */
-const USER_CONTENT = '#library-list,#project-tree,#source-changes,#commit-history,#checkpoint-list,#schedule-list,.monitor-list,#attachment-chips,#selected-model,#model-usage,#workspace-context';
+/** Lists rebuild from data, so their English labels are set by the render code.
+ * The title and the folder heading show names the user typed; translating those
+ * would rename a task called "Settings". Their placeholder copy is written
+ * through t() instead. */
+const USER_CONTENT = '#library-list,#project-tree,#source-changes,#commit-history,#checkpoint-list,#schedule-list,.monitor-list,#attachment-chips,#selected-model,#model-usage,#workspace-context,#session-title,#project-root-name';
 const KEEP = `${OPAQUE},${USER_CONTENT}`;
 const KEEP_ATTRIBUTES = `${OPAQUE_ATTRIBUTES},${USER_CONTENT}`;
 

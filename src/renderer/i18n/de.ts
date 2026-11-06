@@ -41,6 +41,8 @@ export const de: Record<string, string> = {
   'AGENT SESSION': 'AGENTEN-SITZUNG',
   'New Session': 'Neue Sitzung',
   'Select a task': 'Aufgabe auswählen',
+  'Select a project': 'Projekt auswählen',
+  'No repository': 'Kein Repository',
   'Workspace conversation': 'Arbeitsbereich-Konversation',
   'Managed task folder': 'Verwalter Aufgabenordner',
   'Task files': 'Aufgabendateien',

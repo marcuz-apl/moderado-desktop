@@ -12,6 +12,7 @@
     "build": "tsc --noEmit && tauri build --no-bundle",
     "dev": "tauri dev",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml && node scripts/run-node-tests.mjs",
+    "test:browser": "vite build && node .playwright-cli/run-static-checks.cjs",
     "version:patch": "node scripts/bump-version.mjs patch",
     "version:minor": "node scripts/bump-version.mjs minor",
     "version:major": "node scripts/bump-version.mjs major",
@@ -30,6 +31,7 @@
     "@eslint/js": "^9.39.0",
     "@tauri-apps/cli": "^2.8.0",
     "eslint": "^9.39.0",
+    "playwright-core": "^1.65.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.46.0",
     "vite": "^7.1.0"

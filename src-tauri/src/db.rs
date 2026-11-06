@@ -62,6 +62,16 @@ pub fn open(path: &Path) -> Result<Connection, String> {
 
 pub fn connect(path: &Path) -> Result<Connection, String> {
     let db = Connection::open(path).map_err(|error| format!("Could not open database: {error}"))?;
+    // Every store opens its own connection and the scheduler polls while the
+    // window writes, so readers and writers overlap constantly. WAL lets a
+    // reader proceed during a write instead of failing on the lock. The pragma
+    // reports the mode it settled on, so a silent fallback is caught here.
+    let mode: String = db
+        .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+        .map_err(|error| format!("Could not enable write-ahead logging: {error}"))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        return Err(format!("Could not enable write-ahead logging (journal mode is {mode})"));
+    }
     db.busy_timeout(Duration::from_secs(5))
         .map_err(|error| error.to_string())?;
     db.pragma_update(None, "foreign_keys", "ON")

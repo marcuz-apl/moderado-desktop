@@ -21,6 +21,16 @@ const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 
+/// Directories a command never needs and that make copying a workspace
+/// unaffordable: version control, package caches, and build output. Both
+/// backends skip the same names, so a workspace behaves identically whichever
+/// sandbox runs it.
+const EXCLUDED_DIRS: [&str; 6] = [".git", "node_modules", "target", ".venv", "__pycache__", ".next"];
+
+fn is_excluded_dir(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|name| EXCLUDED_DIRS.contains(&name))
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandRequest {
@@ -112,7 +122,7 @@ mod windows {
     use super::*;
     use std::ffi::OsStr;
     use std::fs::{self, File};
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::FromRawHandle;
@@ -127,16 +137,36 @@ mod windows {
     use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
     use windows_sys::Win32::System::Environment::{FreeEnvironmentStringsW, GetEnvironmentStringsW};
     use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use sha2::{Digest as _, Sha256};
 
     struct Handle(HANDLE);
-    impl Drop for Handle { fn drop(&mut self) { unsafe { if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE { CloseHandle(self.0); } } } }
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from a successful Create* call and is
+            // owned by this guard, so closing it exactly once is correct.
+            unsafe { if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE { CloseHandle(self.0); } }
+        }
+    }
+
+    /// Owns an AppContainer SID allocated by the security APIs and frees it on
+    /// every return path, including the many early failures below.
+    struct Sid(windows_sys::Win32::Security::PSID);
+    impl Drop for Sid {
+        fn drop(&mut self) {
+            // SAFETY: the pointer came from CreateAppContainerProfile or
+            // DeriveAppContainerSidFromAppContainerName, which allocate with
+            // LocalAlloc, and this guard frees it once.
+            unsafe { if !self.0.is_null() { LocalFree(self.0); } }
+        }
+    }
 
     struct ProcessOutput { stdout: String, stderr: String, exit_code: Option<i32>, timed_out: bool, output_truncated: bool, cancelled: bool }
 
     pub fn execute(root: PathBuf, cwd: PathBuf, request: CommandRequest, timeout: Duration, cancelled: Arc<AtomicBool>) -> Result<CommandResult, String> {
         let profile_name = format!("ModeradoCommand-{}", crate::sessions::new_id());
         let (profile_sid, profile) = get_sid_and_folder(&profile_name)?;
-        unsafe { LocalFree(profile_sid); }
+        // The folder path is all this function needs; the guard frees the SID.
+        drop(profile_sid);
         let sandbox_root = profile.join(crate::sessions::new_id());
         fs::create_dir(&sandbox_root).map_err(|error| format!("Could not create command workspace: {error}"))?;
         let operation = (|| {
@@ -152,65 +182,156 @@ mod windows {
         })();
         let _ = fs::remove_dir_all(&sandbox_root);
         let profile_w = wide(OsStr::new(&profile_name));
+        // SAFETY: profile_w is NUL-terminated and outlives the call; a failed
+        // delete only leaves an empty profile behind.
         unsafe { windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile(profile_w.as_ptr()); }
         operation
     }
 
     fn wide(value: &OsStr) -> Vec<u16> { value.encode_wide().chain(std::iter::once(0)).collect() }
 
+    /// # Safety
+    /// `ptr` must point at a NUL-terminated wide string.
     unsafe fn nul_len(ptr: *const u16) -> usize { let mut len = 0; while *ptr.add(len) != 0 { len += 1; } len }
 
-    fn copy_workspace(root: &Path, destination: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, String> {
-        let mut result = BTreeMap::new();
-        copy_dir(root, root, destination, &mut result, &mut 0u64)?;
+    /// One workspace file as the command started from it. Keeping a digest
+    /// instead of the bytes is what makes a large workspace affordable; the
+    /// length and timestamp let the common "nothing changed" case be confirmed
+    /// without reading the file at all.
+    #[derive(Clone)]
+    struct Fingerprint {
+        len: u64,
+        modified: Option<std::time::SystemTime>,
+        digest: [u8; 32],
+    }
+
+    type Snapshot = BTreeMap<PathBuf, Fingerprint>;
+
+    #[derive(Default)]
+    struct Budget {
+        bytes: u64,
+        files: usize,
+    }
+
+    impl Budget {
+        fn next_file(&mut self) -> Result<(), String> {
+            self.files += 1;
+            if self.files > MAX_WORKSPACE_FILES {
+                return Err("Workspace exceeds the command sandbox size limit".into());
+            }
+            Ok(())
+        }
+
+        fn charge(&mut self, bytes: u64) -> Result<(), String> {
+            self.bytes = self.bytes.saturating_add(bytes);
+            if self.bytes > MAX_WORKSPACE_BYTES {
+                return Err("Workspace exceeds the command sandbox size limit".into());
+            }
+            Ok(())
+        }
+    }
+
+    fn digest_of(path: &Path, budget: &mut Budget) -> Result<[u8; 32], String> {
+        let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 {
+                break;
+            }
+            budget.charge(count as u64)?;
+            hasher.update(&buffer[..count]);
+        }
+        Ok(hasher.finalize().into())
+    }
+
+    /// Copies one file into the sandbox while hashing it, so the baseline
+    /// costs a single pass and no memory proportional to the workspace.
+    fn copy_and_digest(source: &Path, target: &Path, budget: &mut Budget) -> Result<[u8; 32], String> {
+        let mut reader = fs::File::open(source).map_err(|error| error.to_string())?;
+        let mut writer = fs::File::create(target).map_err(|error| error.to_string())?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = reader.read(&mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 {
+                break;
+            }
+            budget.charge(count as u64)?;
+            hasher.update(&buffer[..count]);
+            writer.write_all(&buffer[..count]).map_err(|error| error.to_string())?;
+        }
+        Ok(hasher.finalize().into())
+    }
+
+    fn copy_workspace(root: &Path, destination: &Path) -> Result<Snapshot, String> {
+        let mut result = Snapshot::new();
+        let mut budget = Budget::default();
+        copy_dir(root, root, destination, &mut result, &mut budget)?;
         Ok(result)
     }
 
-    fn copy_dir(root: &Path, source: &Path, target: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>, bytes: &mut u64) -> Result<(), String> {
+    fn copy_dir(root: &Path, source: &Path, target: &Path, files: &mut Snapshot, budget: &mut Budget) -> Result<(), String> {
         for entry in fs::read_dir(source).map_err(|error| format!("Could not scan workspace: {error}"))? {
             let entry = entry.map_err(|error| error.to_string())?;
             let metadata = fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
-            if metadata.file_type().is_symlink() { return Err(format!("Command sandbox does not support symbolic links: {}", entry.path().display())); }
-            let target_path = target.join(entry.file_name());
+            // A link can point outside the workspace, and the Linux backend
+            // skips them too, so the sandbox never receives one.
+            if metadata.file_type().is_symlink() { continue; }
+            let name = entry.file_name();
+            let target_path = target.join(&name);
             if metadata.is_dir() {
+                if is_excluded_dir(&name) { continue; }
                 fs::create_dir(&target_path).map_err(|error| error.to_string())?;
-                copy_dir(root, &entry.path(), &target_path, files, bytes)?;
+                copy_dir(root, &entry.path(), &target_path, files, budget)?;
             } else if metadata.is_file() {
-                *bytes = bytes.saturating_add(metadata.len());
-                if *bytes > MAX_WORKSPACE_BYTES || files.len() >= MAX_WORKSPACE_FILES { return Err("Workspace exceeds the command sandbox size limit".into()); }
-                let content = fs::read(entry.path()).map_err(|error| error.to_string())?;
-                fs::write(&target_path, &content).map_err(|error| error.to_string())?;
-                files.insert(entry.path().strip_prefix(root).map_err(|_| "Workspace entry escaped root")?.to_owned(), content);
-            } else { return Err(format!("Unsupported workspace item: {}", entry.path().display())); }
-        }
-        Ok(())
-    }
-
-    fn snapshot(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, String> {
-        let mut map = BTreeMap::new();
-        snapshot_dir(root, root, &mut map, &mut 0u64)?;
-        Ok(map)
-    }
-
-    fn snapshot_dir(root: &Path, directory: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>, bytes: &mut u64) -> Result<(), String> {
-        for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let meta = fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
-            if meta.file_type().is_symlink() { return Err(format!("Command created a symbolic link: {}", entry.path().display())); }
-            if meta.is_dir() { snapshot_dir(root, &entry.path(), files, bytes)?; }
-            else if meta.is_file() {
-                *bytes = bytes.saturating_add(meta.len());
-                if *bytes > MAX_WORKSPACE_BYTES || files.len() >= MAX_WORKSPACE_FILES { return Err("Command output exceeds the sandbox size limit".into()); }
-                files.insert(entry.path().strip_prefix(root).map_err(|_| "Command output escaped its workspace")?.to_owned(), fs::read(entry.path()).map_err(|error| error.to_string())?);
+                budget.next_file()?;
+                let relative = entry.path().strip_prefix(root).map_err(|_| "Workspace entry escaped root")?.to_owned();
+                let digest = copy_and_digest(&entry.path(), &target_path, budget)?;
+                files.insert(relative, Fingerprint { len: metadata.len(), modified: metadata.modified().ok(), digest });
             }
         }
         Ok(())
     }
 
-    fn apply_workspace_diff(root: &Path, sandbox: &Path, before: &BTreeMap<PathBuf, Vec<u8>>, after: &BTreeMap<PathBuf, Vec<u8>>) -> Result<(), String> {
+    fn snapshot(root: &Path) -> Result<Snapshot, String> {
+        let mut map = Snapshot::new();
+        let mut budget = Budget::default();
+        snapshot_dir(root, root, &mut map, &mut budget)?;
+        Ok(map)
+    }
+
+    fn snapshot_dir(root: &Path, directory: &Path, files: &mut Snapshot, budget: &mut Budget) -> Result<(), String> {
+        for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let meta = fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
+            if meta.file_type().is_symlink() { continue; }
+            let name = entry.file_name();
+            if meta.is_dir() {
+                if is_excluded_dir(&name) { continue; }
+                snapshot_dir(root, &entry.path(), files, budget)?;
+            } else if meta.is_file() {
+                budget.next_file()?;
+                let relative = entry.path().strip_prefix(root).map_err(|_| "Command output escaped its workspace")?.to_owned();
+                let digest = digest_of(&entry.path(), budget)?;
+                files.insert(relative, Fingerprint { len: meta.len(), modified: meta.modified().ok(), digest });
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_workspace_diff(root: &Path, sandbox: &Path, before: &Snapshot, after: &Snapshot) -> Result<(), String> {
+        let mut budget = Budget::default();
         for (relative, original) in before {
             let destination = safe_destination(root, relative)?;
-            if fs::read(&destination).map_err(|error| format!("Workspace changed during command: {error}"))? != *original { return Err(format!("Workspace file changed while command was running: {}", relative.display())); }
+            let metadata = fs::metadata(&destination).map_err(|error| format!("Workspace changed during command: {error}"))?;
+            // An untouched file keeps its length and timestamp, so the digest
+            // only has to be recomputed when one of them moved.
+            if metadata.len() == original.len && metadata.modified().ok() == original.modified { continue; }
+            if digest_of(&destination, &mut budget)? != original.digest {
+                return Err(format!("Workspace file changed while command was running: {}", relative.display()));
+            }
         }
         for relative in after.keys().filter(|path| !before.contains_key(*path)) {
             if safe_destination(root, relative)?.exists() { return Err(format!("Workspace file appeared while command was running: {}", relative.display())); }
@@ -218,8 +339,8 @@ mod windows {
         for relative in before.keys().filter(|path| !after.contains_key(*path)) {
             fs::remove_file(safe_destination(root, relative)?).map_err(|error| error.to_string())?;
         }
-        for (relative, content) in after {
-            if before.get(relative) == Some(content) { continue; }
+        for (relative, fingerprint) in after {
+            if before.get(relative).is_some_and(|original| original.digest == fingerprint.digest) { continue; }
             let destination = safe_destination(root, relative)?;
             let parent = destination.parent().ok_or("Invalid command output path")?;
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -246,8 +367,8 @@ mod windows {
         Ok(destination)
     }
 
-    fn diff_names(before: &BTreeMap<PathBuf, Vec<u8>>, after: &BTreeMap<PathBuf, Vec<u8>>) -> Vec<String> {
-        let mut names: Vec<String> = before.iter().filter(|(path, bytes)| after.get(*path) != Some(*bytes)).map(|(path, _)| path.to_string_lossy().into_owned()).collect();
+    fn diff_names(before: &Snapshot, after: &Snapshot) -> Vec<String> {
+        let mut names: Vec<String> = before.iter().filter(|(path, value)| after.get(*path).is_none_or(|other| other.digest != value.digest)).map(|(path, _)| path.to_string_lossy().into_owned()).collect();
         names.extend(after.keys().filter(|path| !before.contains_key(*path)).map(|path| path.to_string_lossy().into_owned()));
         names.sort(); names
     }
@@ -280,6 +401,8 @@ mod windows {
         let raw_handle = handle as usize;
         thread::spawn(move || {
             let handle = raw_handle as HANDLE;
+            // SAFETY: the parent gave up its copy of the read end and never
+            // touches this handle again, so the File takes sole ownership.
             let mut file = unsafe { File::from_raw_handle(handle) };
             let mut output = Vec::with_capacity(8192); let mut buffer = [0u8; 8192]; let mut truncated = false;
             loop { match file.read(&mut buffer) { Ok(0) | Err(_) => break, Ok(count) => { let remaining = MAX_OUTPUT_BYTES.saturating_sub(output.len()); output.extend_from_slice(&buffer[..count.min(remaining)]); truncated |= count > remaining; } } }
@@ -296,24 +419,38 @@ mod windows {
         let security = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: std::ptr::null_mut(), bInheritHandle: 1 };
         let (mut out_read, mut out_write) = (std::ptr::null_mut(), std::ptr::null_mut());
         let (mut err_read, mut err_write) = (std::ptr::null_mut(), std::ptr::null_mut());
+        // SAFETY: both out-pointers are valid stack slots and `security` is a
+        // fully initialized SECURITY_ATTRIBUTES; on failure nothing is created.
         if unsafe { CreatePipe(&mut out_read, &mut out_write, &security, 0) } == 0 || unsafe { CreatePipe(&mut err_read, &mut err_write, &security, 0) } == 0 { return Err(format!("Could not create command output pipes: {}", unsafe { GetLastError() })); }
+        // SAFETY: the read ends were just returned by CreatePipe, and clearing
+        // the inherit flag on them is what keeps the child from holding them.
         if unsafe { SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0) } == 0 || unsafe { SetHandleInformation(err_read, HANDLE_FLAG_INHERIT, 0) } == 0 { return Err("Could not secure command output pipes".into()); }
         let nul = wide(OsStr::new("NUL"));
+        // SAFETY: `nul` is NUL-terminated and outlives the call; GENERIC_READ
+        // on NUL gives the child an immediately-closed stdin.
         let stdin = unsafe { CreateFileW(nul.as_ptr(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, std::ptr::null_mut()) };
         if stdin.is_null() || stdin == INVALID_HANDLE_VALUE { return Err("Could not open the sandboxed command input".into()); }
         let _stdin = Handle(stdin);
 
+        // SAFETY: the documented two-call pattern; the first call passes a null
+        // list only to learn the required size.
         let mut attributes_size = 0usize;
         unsafe { InitializeProcThreadAttributeList(std::ptr::null_mut(), 2, 0, &mut attributes_size); }
         if attributes_size == 0 { return Err("Windows does not support the required AppContainer process attributes".into()); }
         let mut attribute_storage = vec![0usize; attributes_size.div_ceil(std::mem::size_of::<usize>())];
         let attributes = attribute_storage.as_mut_ptr().cast::<core::ffi::c_void>();
+        // SAFETY: the buffer is sized from the value the first call reported
+        // and stays alive in `attribute_storage` until the guard deletes it.
         if unsafe { InitializeProcThreadAttributeList(attributes, 2, 0, &mut attributes_size) } == 0 { return Err("Could not initialize AppContainer process attributes".into()); }
         struct AttrGuard(*mut core::ffi::c_void); impl Drop for AttrGuard { fn drop(&mut self) { unsafe { DeleteProcThreadAttributeList(self.0); } } }
         let _attr_guard = AttrGuard(attributes);
-        let mut capabilities = SECURITY_CAPABILITIES { AppContainerSid: sid, Capabilities: std::ptr::null_mut(), CapabilityCount: 0, Reserved: 0 };
+        let mut capabilities = SECURITY_CAPABILITIES { AppContainerSid: sid.0, Capabilities: std::ptr::null_mut(), CapabilityCount: 0, Reserved: 0 };
+        // SAFETY: the attribute list is initialized for exactly two entries,
+        // and `capabilities` outlives the CreateProcessW call below.
         if unsafe { UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize, (&mut capabilities as *mut SECURITY_CAPABILITIES).cast(), std::mem::size_of::<SECURITY_CAPABILITIES>(), std::ptr::null_mut(), std::ptr::null()) } == 0 { return Err("Could not configure AppContainer isolation".into()); }
         let mut inherited_handles = [stdin, out_write, err_write];
+        // SAFETY: the handle list is exactly the three handles the child needs,
+        // all of which are open for the duration of CreateProcessW.
         if unsafe { UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize, inherited_handles.as_mut_ptr().cast(), std::mem::size_of_val(&inherited_handles), std::ptr::null_mut(), std::ptr::null()) } == 0 { return Err("Could not restrict inherited command handles".into()); }
 
         let mut startup = STARTUPINFOEXW::default();
@@ -328,51 +465,85 @@ mod windows {
         let cwd_w = wide(cwd.as_os_str());
         let mut command = std::iter::once(program.to_string_lossy().into_owned()).chain(args.iter().cloned()).map(|arg| quote_arg(&arg)).collect::<Vec<_>>().join(" ").encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let child_env = sanitized_environment(sandbox)?;
+        // SAFETY: every pointer is NUL-terminated or points at a live struct,
+        // the command line is writable for the call, and CREATE_SUSPENDED means
+        // the process cannot run before the job object contains it.
         if unsafe { CreateProcessW(program_w.as_ptr(), command.as_mut_ptr(), std::ptr::null(), std::ptr::null(), 1, EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, child_env.as_ptr().cast(), cwd_w.as_ptr(), (&startup as *const STARTUPINFOEXW).cast(), &mut process) } == 0 { return Err(format!("Sandboxed command could not start: Windows error {}", unsafe { GetLastError() })); }
         let _process = Handle(process.hProcess); let _thread = Handle(process.hThread);
+        // SAFETY: the child owns its inherited copies now; the parent closes
+        // its own write ends so the pipe reaches EOF when the child exits.
         unsafe { CloseHandle(out_write); CloseHandle(err_write); }
         let stdout_thread = read_pipe(out_read); let stderr_thread = read_pipe(err_read);
+        // SAFETY: no security attributes are needed, so both arguments are null.
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if job.is_null() { unsafe { TerminateProcess(process.hProcess, 1); } return Err("Could not create a child-process job for command containment".into()); }
         let _job = Handle(job);
         let mut job_limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         job_limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: the limit struct is initialized for the extended-limit class
+        // and the process handle is the one CreateProcessW just returned.
         if unsafe { SetInformationJobObject(job, JobObjectExtendedLimitInformation, (&job_limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(), std::mem::size_of_val(&job_limits) as u32) } == 0 || unsafe { AssignProcessToJobObject(job, process.hProcess) } == 0 { unsafe { TerminateProcess(process.hProcess, 1); } return Err("Could not contain child processes in a Windows job".into()); }
+        // SAFETY: the process was created suspended, so this is what starts it.
         if unsafe { ResumeThread(process.hThread) } == u32::MAX { unsafe { TerminateProcess(process.hProcess, 1); } return Err("Could not start the sandboxed command".into()); }
         let deadline = Instant::now() + timeout; let (mut timed_out, mut was_cancelled) = (false, false);
         loop {
             if cancelled.load(Ordering::Acquire) { was_cancelled = true; unsafe { TerminateProcess(process.hProcess, 1); } break; }
             if Instant::now() >= deadline { timed_out = true; unsafe { TerminateProcess(process.hProcess, 1); } break; }
+            // SAFETY: polling a live process handle with a finite timeout.
             match unsafe { WaitForSingleObject(process.hProcess, 40) } { WAIT_OBJECT_0 => break, WAIT_TIMEOUT => {}, _ => { unsafe { TerminateProcess(process.hProcess, 1); } return Err("Could not wait for sandboxed command".into()); } }
         }
+        // SAFETY: give a killed process a bounded moment to be reaped so the
+        // pipe readers can finish; the handle stays valid until _process drops.
         unsafe { WaitForSingleObject(process.hProcess, 5000); }
         let mut exit_code = 1u32; let _ = unsafe { GetExitCodeProcess(process.hProcess, &mut exit_code) };
         drop(_job);
         let (out, trunc_out) = stdout_thread.join().map_err(|_| "Could not read command output")?;
         let (err, trunc_err) = stderr_thread.join().map_err(|_| "Could not read command errors")?;
         let stdout = String::from_utf8_lossy(&out).into_owned(); let stderr = String::from_utf8_lossy(&err).into_owned();
-        unsafe { LocalFree(sid); }
         Ok(ProcessOutput { stdout, stderr, exit_code: Some(exit_code as i32), timed_out, output_truncated: trunc_out || trunc_err, cancelled: was_cancelled })
     }
 
-    fn get_sid_and_folder(profile_name: &str) -> Result<(windows_sys::Win32::Security::PSID, PathBuf), String> {
+    fn get_sid_and_folder(profile_name: &str) -> Result<(Sid, PathBuf), String> {
         let profile = wide(OsStr::new(profile_name)); let label = wide(OsStr::new("Moderado Desktop Command Sandbox"));
-        let mut sid = std::ptr::null_mut(); let result = unsafe { CreateAppContainerProfile(profile.as_ptr(), label.as_ptr(), label.as_ptr(), std::ptr::null(), 0, &mut sid) };
-        if result < 0 { let derived = unsafe { DeriveAppContainerSidFromAppContainerName(profile.as_ptr(), &mut sid) }; if derived < 0 { return Err(format!("Could not initialize AppContainer (HRESULT 0x{:08x})", result as u32)); } }
-        let mut sid_string = std::ptr::null_mut(); if unsafe { ConvertSidToStringSidW(sid, &mut sid_string) } == 0 { unsafe { LocalFree(sid); } return Err("Could not resolve AppContainer storage".into()); }
-        let mut path_ptr = std::ptr::null_mut(); let hr = unsafe { GetAppContainerFolderPath(sid_string, &mut path_ptr) };
+        let mut raw = std::ptr::null_mut();
+        // SAFETY: both strings are NUL-terminated and outlive the call, and the
+        // SID out-parameter is a valid stack slot.
+        let result = unsafe { CreateAppContainerProfile(profile.as_ptr(), label.as_ptr(), label.as_ptr(), std::ptr::null(), 0, &mut raw) };
+        if result < 0 {
+            // SAFETY: same contract; deriving only reads the profile name.
+            let derived = unsafe { DeriveAppContainerSidFromAppContainerName(profile.as_ptr(), &mut raw) };
+            if derived < 0 { return Err(format!("Could not initialize AppContainer (HRESULT 0x{:08x})", result as u32)); }
+        }
+        // Every path below this point frees the SID exactly once, including the
+        // ones that return early because the profile folder could not be made.
+        let sid = Sid(raw);
+        let mut sid_string = std::ptr::null_mut();
+        // SAFETY: `sid` wraps the SID returned above and the out-pointer is valid.
+        if unsafe { ConvertSidToStringSidW(sid.0, &mut sid_string) } == 0 { return Err("Could not resolve AppContainer storage".into()); }
+        let mut path_ptr = std::ptr::null_mut();
+        // SAFETY: `sid_string` is the NUL-terminated string the call above wrote.
+        let hr = unsafe { GetAppContainerFolderPath(sid_string, &mut path_ptr) };
+        // SAFETY: ConvertSidToStringSidW allocates its result with LocalAlloc.
         unsafe { LocalFree(sid_string.cast()); }
-        if hr < 0 || path_ptr.is_null() { unsafe { LocalFree(sid); } return Err(format!("Could not resolve AppContainer storage (HRESULT 0x{:08x})", hr as u32)); }
+        if hr < 0 || path_ptr.is_null() { return Err(format!("Could not resolve AppContainer storage (HRESULT 0x{:08x})", hr as u32)); }
+        // SAFETY: path_ptr is NUL-terminated and owned by this function.
         let path = unsafe { std::ffi::OsString::from_wide(std::slice::from_raw_parts(path_ptr, nul_len(path_ptr))) };
+        // SAFETY: GetAppContainerFolderPath allocates its result with LocalAlloc.
         unsafe { LocalFree(path_ptr.cast()); }
-        let path = PathBuf::from(path); fs::create_dir_all(&path).map_err(|error| error.to_string())?; Ok((sid, path))
+        let path = PathBuf::from(path);
+        fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+        Ok((sid, path))
     }
 
     fn sanitized_environment(temp: &Path) -> Result<Vec<u16>, String> {
+        // SAFETY: the returned block is a process-owned snapshot of the
+        // environment and is released exactly once, below.
         let block = unsafe { GetEnvironmentStringsW() };
         if block.is_null() { return Err("Could not read the process environment".into()); }
         let mut entries = Vec::<String>::new();
         let mut offset = 0usize;
+        // SAFETY: the block is a sequence of NUL-terminated entries terminated
+        // by an empty entry, and every read stays inside it until that point.
         unsafe {
             loop {
                 let start = block.add(offset);
@@ -748,7 +919,7 @@ mod linux {
                 }
                 let name = entry.file_name();
                 if metadata.is_dir() {
-                    if matches!(name.to_str(), Some(".git" | "node_modules" | "target")) {
+                    if is_excluded_dir(&name) {
                         continue;
                     }
                     stack.push(entry.path());
@@ -824,6 +995,42 @@ mod tests {
         assert!(!result.stdout.contains("must remain private"));
         assert!(result.changed_files.iter().any(|path| path == "output.txt"));
         std::fs::remove_file(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn command_sandbox_leaves_dependency_and_build_folders_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::write(workspace.join("keep.txt"), "kept").unwrap();
+        for folder in ["node_modules", "target"] {
+            std::fs::create_dir(workspace.join(folder)).unwrap();
+            std::fs::write(workspace.join(folder).join("bulk.txt"), "bulk").unwrap();
+        }
+        // Reading the paths directly proves what reached the copy without
+        // depending on directory enumeration inside the AppContainer.
+        let read = |path: &'static str| {
+            let workspace = workspace.clone();
+            async move {
+                let request = CommandRequest {
+                    program: "cmd.exe".into(),
+                    args: vec!["/c".into(), "type".into(), path.into()],
+                    working_directory: String::new(),
+                    timeout_ms: Some(20_000),
+                };
+                execute_sandboxed(&workspace, request).await.unwrap()
+            }
+        };
+        let kept = read("keep.txt").await;
+        assert_eq!(kept.stdout.trim(), "kept", "a normal file must be copied in");
+        for excluded in ["node_modules\\bulk.txt", "target\\bulk.txt"] {
+            let result = read(excluded).await;
+            assert!(!result.stdout.contains("bulk"), "{excluded} must not be copied into the sandbox");
+        }
+        // The exclusions only apply to the copy; the real workspace is untouched.
+        assert!(workspace.join("node_modules").join("bulk.txt").is_file());
+        assert!(workspace.join("target").join("bulk.txt").is_file());
     }
 
     #[cfg(target_os = "linux")]

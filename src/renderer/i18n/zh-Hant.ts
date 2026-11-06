@@ -41,6 +41,8 @@ export const zhHant: Record<string, string> = {
   'AGENT SESSION': '智慧代理會話',
   'New Session': '新增會話',
   'Select a task': '選擇工作',
+  'Select a project': '選擇專案',
+  'No repository': '無版本庫',
   'Workspace conversation': '工作區會話',
   'Managed task folder': '受管理工作資料夾',
   'Task files': '工作檔案',

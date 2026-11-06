@@ -2,7 +2,14 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/schemas/
-.playwright-cli/
+# The browser checks belong to the test suite and are version controlled; only
+# their screenshots, logs and one-off exploration scripts are local noise.
+.playwright-cli/*.png
+.playwright-cli/*.log
+.playwright-cli/*.yml
+.playwright-cli/debug-*.mjs
+.playwright-cli/dev-*.mjs
+.playwright-cli/verify-modes.mjs
 .worktrees/
 .workbuddy-ai/
 .superpowers/

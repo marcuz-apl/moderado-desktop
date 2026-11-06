@@ -41,6 +41,8 @@ export const es: Record<string, string> = {
   'AGENT SESSION': 'SESIÓN DE AGENTE',
   'New Session': 'Nueva sesión',
   'Select a task': 'Selecciona una tarea',
+  'Select a project': 'Selecciona un proyecto',
+  'No repository': 'Sin repositorio',
   'Workspace conversation': 'Conversación del espacio de trabajo',
   'Managed task folder': 'Carpeta de tarea gestionada',
   'Task files': 'Archivos de la tarea',

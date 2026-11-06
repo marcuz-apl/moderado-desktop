@@ -35,6 +35,7 @@ src/renderer/    # TypeScript UI
 ## 3. Development Commands & Verification
 
 - `npm test`: Run automated test suites (must pass offline)
+- `npm run test:browser`: Build the frontend and drive it in real Chrome with the checks in `.playwright-cli/`. They are part of the repository and CI runs them, so a renderer change needs a check here, not just a node test.
 - `npm run build`: Compile the TypeScript frontend and Rust app
 - `npm run lint`: Lint TypeScript and Rust
 - `npm run commit -- "<type>: <subject>"`: **the supported way to commit.** A `feat:` (or `feat(scope):`) subject increments the patch digit `p`; every other type keeps the semver and only advances the `+YYMMDD<n>` build counter. The wrapper passes `MODERADO_BUMP_KIND` to the pre-commit hook because Git exposes the message only after that hook runs. A raw `git commit -m "feat: ..."` is **rejected** by `commit-msg` unless `npm run version:patch` was run first; a fix/docs/chore commit may use raw git. `npm run version:minor|major` remain explicit, manual moves.

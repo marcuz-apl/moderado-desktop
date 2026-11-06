@@ -1467,13 +1467,17 @@ async fn execute_turn(
         result = turn => Some(result),
         _ = cancel.changed() => None,
     };
-    state.store.save_state(&session_id, &settings, &messages)?;
     match result {
+        // A finished turn already persisted its final history through the
+        // callback above, so writing the same blob again only doubles the cost.
         Some(Ok(())) => {
             let _ = app.emit("turn-event", TurnEvent::Done { session_id });
             Ok(())
         }
         Some(Err(error)) => {
+            // The error can land between a history push and its persist, so
+            // save what the turn actually holds before reporting it.
+            state.store.save_state(&session_id, &settings, &messages)?;
             let _ = app.emit(
                 "turn-event",
                 TurnEvent::Error {

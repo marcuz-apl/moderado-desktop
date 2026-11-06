@@ -296,6 +296,7 @@ languageSelect.addEventListener('change', () => {
 function refreshLanguageUi(): void {
   applyKindUi();
   renderSessions();
+  refreshDraftTitle();
   updateFolderContext();
   updateControls();
   applyAccount();
@@ -947,13 +948,24 @@ function acceptMention(position: number): void {
 function currentFolder(): string | null {
   return activeKind === 'code' ? selectedProjectWorkspace : workTasks.find((task) => task.id === selectedWorkTaskId)?.workspace ?? activeSession()?.workspace ?? null;
 }
+/** The draft title is interface copy, so it follows the language; a real
+ * session title is a user name and is left exactly as written. */
+function refreshDraftTitle(): void {
+  if (activeSession()) return;
+  $('session-title').textContent = t(activeKind === 'work' && !selectedWorkTaskId ? 'Select a task' : 'New Session');
+}
+
 function updateFolderContext(): void {
   const folder = currentFolder();
   const project = projects.find((item) => item.workspace === folder);
   const task = workTasks.find((item) => item.id === selectedWorkTaskId);
   $('workspace-context').textContent = folderContextLabel(activeKind, folder, project?.name, task?.name);
   $('workspace-context').title = folder ? displayPath(folder) : '';
-  $('project-root-name').textContent = activeKind === 'work' ? task?.name ?? (folder ? projectNameFromWorkspace(folder, 'Task files') : 'No task selected') : project?.name ?? (folder ? projectNameFromWorkspace(folder, 'Project files') : 'No project selected');
+  // A task or project name is user text and is never translated; only the
+  // placeholder is interface copy, so it is written through t() here.
+  const named = activeKind === 'work' ? task?.name : project?.name;
+  const derived = folder ? projectNameFromWorkspace(folder, t(activeKind === 'work' ? 'Task files' : 'Project files')) : t(activeKind === 'work' ? 'No task selected' : 'No project selected');
+  $('project-root-name').textContent = named ?? derived;
   $('project-root-name').title = folder ? displayPath(folder) : '';
   const pathLine = $('project-path');
   pathLine.textContent = folder ? displayPath(folder) : '';
@@ -966,7 +978,7 @@ function enterDraft(kind: SessionKind, workspace: string | null = selectedProjec
   if (kind === 'work' && activeLeftView === 'git') activeLeftView = 'library';
   if (kind === 'code') selectedProjectWorkspace = workspace;
   rememberNavigation();
-  $('session-title').textContent = kind === 'work' && !selectedWorkTaskId ? 'Select a task' : 'New Session';
+  refreshDraftTitle();
   renderTranscript(); restoreComposerDraft(); applyKindUi(); updateFolderContext(); updateSelectedModel(); renderSessions(); updateControls();
   projectEntries.clear(); expandedFolders.clear();
   if (viewingFiles()) void refreshProjectTree();

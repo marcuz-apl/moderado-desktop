@@ -41,6 +41,8 @@ export const zhHans: Record<string, string> = {
   'AGENT SESSION': '智能体会话',
   'New Session': '新建会话',
   'Select a task': '选择任务',
+  'Select a project': '选择项目',
+  'No repository': '无代码仓库',
   'Workspace conversation': '工作区会话',
   'Managed task folder': '托管任务文件夹',
   'Task files': '任务文件',

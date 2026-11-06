@@ -41,6 +41,8 @@ export const ru: Record<string, string> = {
   'AGENT SESSION': 'СЕССИЯ АГЕНТА',
   'New Session': 'Новая сессия',
   'Select a task': 'Выберите задачу',
+  'Select a project': 'Выберите проект',
+  'No repository': 'Нет репозитория',
   'Workspace conversation': 'Беседа рабочей области',
   'Managed task folder': 'Управляемая папка задачи',
   'Task files': 'Файлы задачи',

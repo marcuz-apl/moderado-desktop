@@ -65,6 +65,8 @@ Any panel can be widened: drag the panel's right edge, or focus the edge and pre
 
 The terminal is your own shell — the Windows PowerShell, or `$SHELL` elsewhere — running as your user, outside the agent's sandbox. That is the point of it: the agent's commands stay sandboxed and approval-gated, while the terminal is you typing. It keeps running when you switch views or close the panel, and restarts when you open a different project.
 
+The agent's commands run against a copy of the workspace that leaves out version control and package/build folders (`.git`, `node_modules`, `target`, `.venv`, `__pycache__`, `.next`). That keeps a large project affordable to sandbox, and it means a command cannot see or change those folders — use the terminal, or the Git panel, for anything that needs them.
+
 ### Keyboard
 
 | Key | Action |

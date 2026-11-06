@@ -513,12 +513,16 @@ impl SessionStore {
         Ok(())
     }
 
+    /// The rail only ever shows a recent window; a long session can accumulate
+    /// thousands of checkpoints and rendering them all stalls the panel.
+    pub const CHECKPOINT_LIST_LIMIT: i64 = 100;
+
     pub fn list_checkpoints(&self, session_id: &str) -> Result<Vec<CheckpointRecord>, String> {
         let db = self.connect()?;
-        let mut query = db.prepare("SELECT id,session_id,git_ref,path,created_at FROM checkpoints WHERE session_id=?1 ORDER BY created_at DESC,id DESC")
+        let mut query = db.prepare("SELECT id,session_id,git_ref,path,created_at FROM checkpoints WHERE session_id=?1 ORDER BY created_at DESC,id DESC LIMIT ?2")
             .map_err(|error| error.to_string())?;
         let rows = query
-            .query_map([session_id], |row| {
+            .query_map(params![session_id, Self::CHECKPOINT_LIST_LIMIT], |row| {
                 Ok(CheckpointRecord {
                     id: row.get(0)?,
                     session_id: row.get(1)?,
@@ -532,11 +536,27 @@ impl SessionStore {
             .collect()
     }
 
+    /// Restoring an older checkpoint must still work after the rail stopped
+    /// listing it, so this looks the record up directly instead of searching
+    /// the truncated list.
     pub fn get_checkpoint(&self, session_id: &str, id: &str) -> Result<CheckpointRecord, String> {
-        self.list_checkpoints(session_id)?
-            .into_iter()
-            .find(|item| item.id == id)
-            .ok_or("Checkpoint not found".into())
+        self.connect()?
+            .query_row(
+                "SELECT id,session_id,git_ref,path,created_at FROM checkpoints WHERE session_id=?1 AND id=?2",
+                params![session_id, id],
+                |row| {
+                    Ok(CheckpointRecord {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        git_ref: row.get(2)?,
+                        path: row.get(3)?,
+                        created_at: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "Checkpoint not found".into())
     }
 
     pub fn append_restore_marker(
