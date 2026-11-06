@@ -38,3 +38,14 @@ test('the runner discovers every check when it is given none', async () => {
   assert.match(runner, /readdirSync\(__dirname\)/);
   assert.match(runner, /check-\.\*\\\.mjs/);
 });
+
+test('the stylesheet keeps one declaration per line', async () => {
+  const lines = (await read('src/renderer/style.css')).split(/\r?\n/);
+  // The file was once minified, with rules packed onto lines thousands of
+  // characters long, so changing one property rewrote a line no reviewer could
+  // read. Nothing enforces the shape of a stylesheet, so this does.
+  const longest = lines.reduce((worst, line) => (line.length > worst ? line.length : worst), 0);
+  assert.ok(longest <= 120, `longest stylesheet line is ${longest} characters`);
+  const packed = lines.find((line) => (line.match(/;/g) ?? []).length > 1);
+  assert.equal(packed, undefined, `declarations share a line: ${packed?.trim()}`);
+});

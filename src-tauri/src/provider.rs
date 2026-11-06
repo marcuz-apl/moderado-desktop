@@ -118,6 +118,21 @@ impl ProviderId {
         completion_url(value)?;
         Ok(value.to_owned())
     }
+
+    /// Stable identifier used as the keychain account. Spelled out rather than
+    /// derived from serde so renaming a variant cannot silently re-file every
+    /// stored key under a new account.
+    pub fn slug(self) -> &'static str {
+        match self {
+            ProviderId::Moderado => "moderado",
+            ProviderId::NvidiaNim => "nvidia_nim",
+            ProviderId::OpenRouter => "open_router",
+            ProviderId::LlamaCpp => "llama_cpp",
+            ProviderId::Ollama => "ollama",
+            ProviderId::LmStudio => "lm_studio",
+            ProviderId::OpenAiCompatible => "openai_compatible",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

@@ -181,6 +181,8 @@ const providerDrafts = new Map<ProviderId, Omit<ProviderSettings, 'providerId'>>
 const conversationBindings = new Map<string, string>();
 const btwHistory = new Map<string, Array<{ question: string; answer: string }>>();
 
+// Status and appearance ---------------------------------------------------------
+
 function setStatus(message: string): void {
   status.textContent = message;
   translateTree(status);
@@ -293,6 +295,8 @@ languageSelect.addEventListener('change', () => {
   refreshLanguageUi();
 });
 /** Rebuilds the copy that render code writes, in the newly chosen language. */
+// Language ----------------------------------------------------------------------
+
 function refreshLanguageUi(): void {
   applyKindUi();
   renderSessions();
@@ -399,6 +403,8 @@ function setGatewayMode(next: GatewayMode, persistDraft = true): void {
   }
 }
 
+// Provider and model selection --------------------------------------------------
+
 function selectProvider(id: ProviderId): void {
   if (providers.length === 0) return;
   if (initialized) providerDrafts.set(activeProvider, currentSettings());
@@ -451,6 +457,8 @@ async function saveEnteredKey(settings: ProviderSettings): Promise<void> {
   await invoke('save_provider_key', { providerId: settings.providerId, baseUrl: settings.baseUrl, apiKey: keyField.value });
   keyField.value = '';
 }
+
+// Transcript messages -----------------------------------------------------------
 
 function historyToView(history: HistoryMessage[]): DisplayMessage[] {
   return history.flatMap((message) => {
@@ -638,6 +646,8 @@ function emptyStateNode(): Node {
   return node;
 }
 
+// Transcript rendering ----------------------------------------------------------
+
 function renderTranscript(keepReadingPosition = false): void {
   const previousScrollTop = transcript.scrollTop;
   const stickToBottom = !keepReadingPosition || shouldAutoScroll(transcript.scrollTop, transcript.scrollHeight, transcript.clientHeight);
@@ -664,6 +674,8 @@ function addDisplay(sessionId: string, role: string, content: string, append = f
   }
   if (stickToBottom) transcript.scrollTop = transcript.scrollHeight;
 }
+
+// Library pane ------------------------------------------------------------------
 
 function sessionRow(session: SessionSummary, group: string): HTMLElement {
   const row = document.createElement('div');
@@ -769,6 +781,8 @@ function renderSessions(): void {
   if (!entries.length) $('library-list').textContent = 'Create a task or open a project to begin.';
   applyLibraryActions();
 }
+
+// Navigation and drafts ---------------------------------------------------------
 
 function applyKindUi(): void {
   const work = activeKind === 'work';
@@ -1050,6 +1064,8 @@ async function refreshSession(id: string, replaceView = false): Promise<SessionR
   return record;
 }
 
+// Selecting a session -----------------------------------------------------------
+
 async function selectSession(id: string, saveDraft = true): Promise<void> {
   if (saveDraft) saveComposerDraft();
   const revision = ++selectionRevision; selectingContext = true; updateControls();
@@ -1198,6 +1214,8 @@ async function refreshCheckpoints(): Promise<void> {
   } catch (error) { if (id === activeSessionId) setStatus(String(error)); }
 }
 
+// Schedules and the task monitor ------------------------------------------------
+
 async function refreshSchedules(): Promise<void> {
   const list = $('schedule-list');
   const id = activeSessionId;
@@ -1344,6 +1362,8 @@ function clearRunning(id: string): void {
   runInfo.delete(id);
   renderTaskMonitor();
 }
+
+// Pages and the left view -------------------------------------------------------
 
 function setPageMode(page: AppPage | null): void {
   activePage = page;
@@ -1535,6 +1555,8 @@ function runTool(action: ToolAction): void {
     void invoke('open_system_terminal', browserArgs()).catch((error) => setStatus(String(error)));
   }
 }
+
+// Project tree and the explorer -------------------------------------------------
 
 async function selectProject(workspace: string): Promise<void> {
   if (!projects.some((project) => project.workspace === workspace)) { setStatus('Open this project first.'); return; }
@@ -1778,6 +1800,8 @@ $<HTMLFormElement>('project-entry-form').addEventListener('submit', async (event
 /** Git identity and credential readiness. Code only: a Work task folder is not a repo. */
 type Pty = { terminal: Terminal; fit: FitAddon; key: string; started: boolean };
 /** The value the backend also keys write/resize/close with. */
+// Terminal ----------------------------------------------------------------------
+
 function terminalKey(): string {
   // Must mirror `terminal_open`: the session when this mode sends one, else the
   // project. A Code session deliberately sends no session id, so its shell is
@@ -1893,6 +1917,8 @@ async function ensureTerminal(): Promise<void> {
   requestAnimationFrame(() => { if (terminalOpen) pty?.terminal.focus(); });
 }
 
+// Source control and checkpoints ------------------------------------------------
+
 async function refreshGitIdentity(): Promise<void> {
   const block = $('profile-git');
   const actions = $('git-actions');
@@ -2003,6 +2029,8 @@ function showChanges(before: string, after: string): void {
   }));
 }
 
+// Approvals ---------------------------------------------------------------------
+
 function enqueueApproval(request: ApprovalEvent): void {
   if (currentApproval?.sessionId === request.sessionId && currentApproval.id === request.id) return;
   if (approvalQueue.some((item) => item.sessionId === request.sessionId && item.id === request.id)) return;
@@ -2053,6 +2081,8 @@ async function answerApproval(accepted: boolean): Promise<void> {
   } catch (error) { setStatus(String(error)); }
   showNextApproval();
 }
+
+// Startup and the account -------------------------------------------------------
 
 async function initialize(): Promise<void> {
   try {
@@ -2234,6 +2264,8 @@ $<HTMLSelectElement>('act-model').addEventListener('change', updateSelectedModel
 document.querySelectorAll<HTMLButtonElement>('[data-gateway-mode]').forEach((button) => {
   button.addEventListener('click', () => setGatewayMode(button.dataset.gatewayMode as GatewayMode));
 });
+// Rail and sidebar --------------------------------------------------------------
+
 function moveRailFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {
   const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rail-tabs .rail-tab'))
     .filter((button) => button.getAttribute('aria-disabled') !== 'true');
@@ -2438,6 +2470,8 @@ type McpServerConfig = { id: string; transport: 'stdio' | 'http'; command: strin
 type McpServerStatus = { id: string; transport: string; connected: boolean; toolCount: number; error?: string | null };
 type McpToolInfo = { serverId: string; name: string; publicName: string; description: string };
 
+// MCP and LSP settings ----------------------------------------------------------
+
 function mcpField(label: string, input: HTMLElement): HTMLLabelElement {
   const wrap = document.createElement('label');
   wrap.className = 'mcp-field';
@@ -2598,6 +2632,8 @@ $('save-lsp-config').addEventListener('click', async () => {
   }
 });
 
+// Projects and work tasks -------------------------------------------------------
+
 async function createSession(settings: ProviderSettings, kind: SessionKind = activeKind, workspace: string | null = selectedProjectWorkspace, taskId: string | null = selectedWorkTaskId): Promise<string> {
   if (!initialized || creatingSession) throw new Error('Session setup is already in progress.');
   if (kind === 'code' && !workspace) throw new Error('Create or open a project first.');
@@ -2730,6 +2766,8 @@ function localDateTime(date: Date): string {
   const two = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
 }
+
+// Event wiring ------------------------------------------------------------------
 
 $('new-schedule').addEventListener('click', () => {
   const session = activeSession();
@@ -2980,6 +3018,8 @@ prompt.addEventListener('blur', () => closeMention());
 const queuedTurnKey = (): string => `queued-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Waiting questions sit above the composer, each with a Steer button in front. */
+// Queued turns and submitting ---------------------------------------------------
+
 function renderQueuedTurns(): void {
   const host = $('queued-turns');
   const queue = activeSessionId ? queuedTurns.get(activeSessionId) ?? [] : [];

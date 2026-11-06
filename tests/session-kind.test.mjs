@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { DEFAULT_LEFT_VIEW, DEFAULT_SESSION_KIND, displayPath, GIT_VIEWS, LEFT_VIEWS, needsWorkspacePicker, newSessionLabel, nextSessionKind, parseGitView, parseLeftView, parseSessionKind, projectNameFromWorkspace, projectsForSessions, scheduleWriteApprovalChoiceVisible, sessionsForProject, startupSessionKind, visibleSessions } from '../src/renderer/sessions-view.ts';
+import { readStylesheet } from './style.mjs';
 
 const sessions = [
   { id: 'a', kind: 'work' },
@@ -106,7 +107,7 @@ test('the merged shell header holds Work/Code and the topbar does not', async ()
   const [html, main, style] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+    readStylesheet(),
   ]);
   assert.match(html, /class="left-shell">[\s\S]*class="shell-head">[\s\S]*class="kind-segment"[\s\S]*id="kind-work"[\s\S]*id="kind-code"/);
   assert.match(html, /class="brand"><span class="brand-word">Moderado Desktop<\/span><\/div>/, 'the OS icon is the only brand mark');
@@ -148,7 +149,7 @@ test('both modes share one Left Pane and one rail', async () => {
 test('Git is Code-only, so Work hides its rail icon and never opens the pane', async () => {
   const [main, style, theme] = await Promise.all([
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+    readStylesheet(),
     readFile(new URL('../src/renderer/theme.css', import.meta.url), 'utf8'),
   ]);
   assert.match(main, /const gitAvailable = \(\): boolean => activeKind === 'code';/, 'only Code owns a repository');
@@ -172,7 +173,7 @@ test('Library lists tasks and projects in one badged list', async () => {
   const [html, main, style] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+    readStylesheet(),
   ]);
   const panel = html.match(/data-left-view="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
   assert.match(panel, /<h2 id="library-title">Library<\/h2>/);
@@ -228,7 +229,7 @@ test('a Work/Code switch never resets or persists the rail view', async () => {
 test('project operations stay under Projects and session navigation remains nested without session actions', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   const panel = html.match(/data-left-view="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
   assert.match(panel, /class="project-operations"[\s\S]*id="new-project"[^>]*>New Project<[\s\S]*id="open-project"[\s\S]*id="rename-project"[\s\S]*id="delete-project"[^>]*>Delete</);
   assert.match(main, /className = work \? 'task-sessions' : 'project-sessions'/);
@@ -242,7 +243,7 @@ test('project operations stay under Projects and session navigation remains nest
 test('Work task actions stay in Tasks while session controls stay in the workspace', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   const taskPanel = html.match(/data-left-view="library">([\s\S]*?)<\/section>/)?.[1] ?? '';
   const workspace = html.match(/class="session-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
   assert.match(taskPanel, /class="task-operations"[\s\S]*id="workspace-button"[\s\S]*id="rename-task"[\s\S]*id="delete-task"/);
@@ -255,7 +256,7 @@ test('Work task actions stay in Tasks while session controls stay in the workspa
 });
 
 test('Library rows sit tight against their task/project name and at half the former inter-row spacing', async () => {
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   assert.match(style, /\.task-sessions\{padding:0 0 3px 34px\}/);
   assert.match(style, /\.project-sessions\{padding:0 0 3px 23px\}/);
   assert.match(style, /\.task-heading:has\(\+ \.task-sessions\)>\.session-item,\.project-heading:has\(\+ \.project-sessions\)>\.session-item\{padding-bottom:4px\}/);
@@ -315,7 +316,7 @@ test('all five Auto-Approve options default on and MCP is usable in Code mode', 
 
 test('Auto-Approve controls sit directly above the message composer', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<section class="page"/)?.[1] ?? '';
   assert.match(composer, /id="auto-approve-group"/);
   assert.ok(composer.indexOf('id="auto-approve-group"') < composer.indexOf('id="composer"'));
@@ -329,7 +330,7 @@ test('Auto-Approve controls sit directly above the message composer', async () =
 test('the composer offers a plus in both modes and a file menu in Code', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/renderer/main.ts', import.meta.url), 'utf8');
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   assert.match(html, /id="attach-files" class="composer-attach"[^>]*aria-label="Attach files"[^>]*><svg/);
   assert.doesNotMatch(html, /id="attach-files"[^>]*\bhidden\b/, 'the plus is present in both modes');
   assert.match(html, /id="mention-menu"[^>]*role="listbox"[^>]*hidden/);
@@ -346,7 +347,7 @@ test('the composer offers a plus in both modes and a file menu in Code', async (
 
 test('composer footer pairs the model with the shortcut hint and always shows stop', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   const bottom = html.match(/<div class="composer-bottom">([\s\S]*?)<\/form>/)?.[1] ?? '';
   assert.match(bottom, /id="selected-model"/);
   assert.match(bottom, /class="composer-shortcuts"/);
@@ -360,7 +361,7 @@ test('composer footer pairs the model with the shortcut hint and always shows st
 
 test('token usage sits beside Auto-approve, outside the composer box', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const style = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const style = await readStylesheet();
   const composer = html.match(/<div class="composer-wrap">([\s\S]*?)<section class="page"/)?.[1] ?? '';
   const topbar = composer.match(/<div class="composer-topbar">([\s\S]*?)<form id="composer">/)?.[1] ?? '';
   assert.match(topbar, /id="auto-approve-group"/);

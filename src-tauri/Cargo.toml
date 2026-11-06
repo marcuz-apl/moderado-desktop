@@ -31,8 +31,22 @@ dirs = "5"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# Both Windows bindings are already in the graph through Tauri (windows 0.62
+# arrives via tao/wry, windows-sys 0.61 via cap-std and dirs), so declaring them
+# directly adds no crate versions — only features. windows-sys carries the
+# sandbox calls in command.rs; windows is needed because `WebviewWindow::hwnd`
+# hands back its HWND newtype, which the DWM call in lib.rs takes as-is.
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Pipes", "Win32_System_JobObjects", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_Environment"] }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
+[profile.release]
+# The shipped binary is built once per release and run every day, so trade build
+# time for a smaller, faster executable. Thin LTO keeps the link step minutes
+# rather than tens of minutes; strip drops the symbol table nothing reads.
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+strip = true
 
 [dev-dependencies]
 tempfile = "3"

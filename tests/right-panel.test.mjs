@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { readStylesheet } from './style.mjs';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -18,7 +19,7 @@ test('the shell is a rail, a Left Pane, and a Right Pane', async () => {
 });
 
 test('the side panel can be widened by dragging its edge', async () => {
-  const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src/renderer/style.css')]);
+  const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), readStylesheet()]);
   assert.match(html, /id="sidebar-resizer"[^>]*role="separator"/);
   // The width is a variable so a drag is one property write, not a layout rewrite.
   assert.match(style, /\.left-shell\{grid-area:1\/1;display:grid;grid-template-columns:52px var\(--sidebar-width,var\(--pane-width\)\)/);
@@ -34,14 +35,14 @@ test('the side panel can be widened by dragging its edge', async () => {
 });
 
 test('both panes are 260px at 1440 and grow with the window', async () => {
-  const style = await read('src/renderer/style.css');
+  const style = await readStylesheet();
   // 260 / 1440 = 18.0556vw: the panes keep that share above 1440px and stay 260px below it.
   assert.match(style, /:root\{[^}]*--pane-width:max\(260px,18\.0556vw\)/);
   assert.match(style, /\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\) var\(--pane-width\)\}/);
 });
 
 test('the Left Pane collapses to the rail and remembers the choice', async () => {
-  const [main, style] = await Promise.all([read('src/renderer/main.ts'), read('src/renderer/style.css')]);
+  const [main, style] = await Promise.all([read('src/renderer/main.ts'), readStylesheet()]);
   assert.match(style, /\.app\.sidebar-collapsed \.left-shell\{grid-template-columns:52px 0\}/, 'only the pane closes; the rail stays');
   assert.match(style, /\.app\.sidebar-collapsed \.sidebar,[\s\S]*?display:none/, 'the pane content leaves no empty strip');
   assert.match(main, /localStorage\.setItem\(sidebarCollapsedKey, String\(collapsed\)\)/);
@@ -117,7 +118,7 @@ test('the light terminal maps ANSI gray and white to readable ink', async () => 
 });
 
 test('the Right Pane is the Task Monitor behind three controls', async () => {
-  const [html, style, main] = await Promise.all([read('index.html'), read('src/renderer/style.css'), read('src/renderer/main.ts')]);
+  const [html, style, main] = await Promise.all([read('index.html'), readStylesheet(), read('src/renderer/main.ts')]);
   assert.match(html, /<aside id="task-monitor" class="task-monitor"[^>]*hidden/);
   const start = html.indexOf('id="task-monitor"');
   const monitor = html.slice(start, html.indexOf('</aside>', start));
@@ -156,7 +157,7 @@ test('the edge tab mirrors the monitor open state, which survives a restart', as
 });
 
 test('the shell degrades without hiding the rail', async () => {
-  const [style, theme] = await Promise.all([read('src/renderer/style.css'), read('src/renderer/theme.css')]);
+  const [style, theme] = await Promise.all([readStylesheet(), read('src/renderer/theme.css')]);
   assert.match(style, /@media\(max-width:1199px\)\{\s*\.app\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/);
   // The overlay starts below the topbar, so Plan/Act and the theme toggle stay clickable.
   assert.match(style, /@media\(max-width:1199px\)\{[\s\S]*?\.task-monitor\{position:absolute;right:0;top:56px;bottom:0;width:min\(var\(--pane-width\),calc\(100vw - 60px\)\)/);

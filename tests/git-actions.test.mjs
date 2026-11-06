@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { readStylesheet } from './style.mjs';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('commit and push live in the Changes tab, gated on a remote', async () => {
-  const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), read('src/renderer/style.css')]);
+  const [html, main, style] = await Promise.all([read('index.html'), read('src/renderer/main.ts'), readStylesheet()]);
   const changes = html.slice(html.indexOf('data-git-view="changes"'), html.indexOf('data-git-view="checkpoints"'));
   assert.match(changes, /id="git-commit-message"/);
   assert.match(changes, /id="git-commit"[\s\S]*id="git-push"/);

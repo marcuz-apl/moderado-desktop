@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { readStylesheet } from './style.mjs';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const readHtml = () => read('index.html');
@@ -34,7 +35,7 @@ test('the manual is Getting started, then Reference, then License', async () => 
 });
 
 test('the About card keeps the product name, version, and one intro line', async () => {
-  const [html, style, theme] = await Promise.all([readHtml(), read('src/renderer/style.css'), read('src/renderer/theme.css')]);
+  const [html, style, theme] = await Promise.all([readHtml(), readStylesheet(), read('src/renderer/theme.css')]);
   const start = html.indexOf('class="settings-group about-group');
   const about = html.slice(start, html.indexOf('</div>', start));
   assert.match(about, /about-card/);
@@ -72,7 +73,7 @@ test('the rail bottom opens Docs and Settings, and User lives in the Left Pane',
 });
 
 test('page mode keeps the rail, collapses both panes, and drops the conversation', async () => {
-  const style = await read('src/renderer/style.css');
+  const style = await readStylesheet();
   assert.match(style, /\.app\.page-mode\{grid-template-columns:auto minmax\(0,1fr\)\}/);
   // Without this guard, page mode at 1200px and wider keeps the hidden monitor's column.
   assert.match(style, /\.app\.page-mode\.task-monitor-open\{grid-template-columns:auto minmax\(0,1fr\)\}/, 'page mode wins over an open monitor');
@@ -86,7 +87,7 @@ test('page mode keeps the rail, collapses both panes, and drops the conversation
 });
 
 test('settings pairs its cards on shared rows so their heights match', async () => {
-  const [html, style] = await Promise.all([readHtml(), read('src/renderer/style.css')]);
+  const [html, style] = await Promise.all([readHtml(), readStylesheet()]);
   const settings = html.slice(html.indexOf('id="page-settings"'), html.indexOf('id="page-docs"'));
   // Connection | MCP over Language | Appearance over About. MCP sits in the top
   // row so adding servers grows into the taller row instead of past the fold.
@@ -104,14 +105,14 @@ test('settings pairs its cards on shared rows so their heights match', async () 
 });
 
 test('the Settings and Docs body text share one size', async () => {
-  const style = await read('src/renderer/style.css');
+  const style = await readStylesheet();
   assert.match(style, /\.markdown-body\{white-space:normal;font-size:calc\(13px\*var\(--text-scale\)\);line-height:1\.65/, 'Docs body matches the settings scale');
   assert.match(style, /\.markdown-body h2\{font-size:calc\(16px\*var\(--text-scale\)\)\}/);
   assert.match(style, /\.page \.settings-group \.hint\{font-size:calc\(12px\*var\(--text-scale\)\)\}/, 'settings hints step up toward the Docs size');
 });
 
 test('Settings and Docs end with a footer carrying the current year', async () => {
-  const [html, main, style, theme] = await Promise.all([readHtml(), readMain(), read('src/renderer/style.css'), read('src/renderer/theme.css')]);
+  const [html, main, style, theme] = await Promise.all([readHtml(), readMain(), readStylesheet(), read('src/renderer/theme.css')]);
   for (const id of ['page-settings', 'page-docs']) {
     const start = html.indexOf(`id="${id}"`);
     const page = html.slice(start, html.indexOf('</section>', start));
@@ -143,7 +144,7 @@ test('the Connection card saves model selections under the model pickers and edi
 });
 
 test('the Connection card centers both model buttons and enlarges their text', async () => {
-  const style = await read('src/renderer/style.css');
+  const style = await readStylesheet();
   assert.match(style, /\.connection-card \.settings-row\{justify-content:center\}/);
   assert.match(style, /\.connection-card \.settings-row button\{flex:0 1 auto;padding:8px 14px;text-align:center;font-size:calc\(14px\*var\(--text-scale\)\)\}/);
   // Other settings rows keep their full-width, left-aligned buttons.
@@ -187,7 +188,7 @@ test('rail buttons open pages and the Back buttons leave them', async () => {
 });
 
 test('a sent question is indented by six tabs and colored apart from the turn summary', async () => {
-  const style = await read('src/renderer/style.css');
+  const style = await readStylesheet();
   // Six 40px tab stops push the You bubble in from the transcript's edge
   // without swallowing the message width on a laptop screen.
   assert.match(style, /\.message\.you\{padding-left:calc\(6\*40px\)\}/);
@@ -200,7 +201,7 @@ test('a sent question is indented by six tabs and colored apart from the turn su
 });
 
 test('questions typed during a turn wait in a Steer queue above the composer', async () => {
-  const [html, main, style] = await Promise.all([readHtml(), readMain(), read('src/renderer/style.css')]);
+  const [html, main, style] = await Promise.all([readHtml(), readMain(), readStylesheet()]);
   assert.match(html, /<div id="queued-turns" class="queued-turns" aria-label="Queued questions" aria-live="polite" hidden><\/div>/);
   assert.match(style, /\.queued-steer\{/);
   // Sending stays available while a turn runs; only setup gates it now.

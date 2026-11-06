@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { readStylesheet } from './style.mjs';
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_TEXT_SIZE,
@@ -51,7 +52,7 @@ test('textScaleFor mirrors the CSS presets', async () => {
   assert.equal(textScaleFor('small'), 0.9);
   assert.equal(textScaleFor('medium'), 1);
   assert.equal(textScaleFor('large'), 1.15);
-  const css = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const css = await readStylesheet();
   assert.match(css, /:root\[data-text-size="small"\]\{--text-scale:\.9\}/);
   assert.match(css, /:root\[data-text-size="large"\]\{--text-scale:1\.15\}/);
 });
@@ -90,7 +91,7 @@ test('the settings panel offers language, font family, text size, and UI scale',
 });
 
 test('the stylesheet turns appearance choices into one set of variables', async () => {
-  const css = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const css = await readStylesheet();
   assert.match(css, /:root\{--font-ui:/);
   assert.match(css, /--text-scale:1/);
   assert.match(css, /:root\[data-font="arial"\]\{--font-ui:Arial,Helvetica,sans-serif\}/);

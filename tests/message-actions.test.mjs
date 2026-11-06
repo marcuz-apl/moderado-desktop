@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { readStylesheet } from './style.mjs';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('the Idle/Stop glyph grows without changing the button frame', async () => {
-  const [html, css] = await Promise.all([read('index.html'), read('src/renderer/style.css')]);
+  const [html, css] = await Promise.all([read('index.html'), readStylesheet()]);
   const button = html.match(/<button id="stop"[\s\S]*?<\/button>/)?.[0] ?? '';
   assert.match(button, /class="stop-play"[\s\S]*?d="M3\.2 1\.9 10 6 3\.2 10\.1Z"/, 'the idle triangle fills more of its viewBox');
   assert.match(button, /class="stop-square"[\s\S]*?width="7\.6" height="7\.6"/, 'the stop square fills more of its viewBox');
@@ -14,7 +15,7 @@ test('the Idle/Stop glyph grows without changing the button frame', async () => 
 });
 
 test('turn summaries get a copy action and sent questions get copy plus re-run', async () => {
-  const [main, css] = await Promise.all([read('src/renderer/main.ts'), read('src/renderer/style.css')]);
+  const [main, css] = await Promise.all([read('src/renderer/main.ts'), readStylesheet()]);
   assert.match(main, /if \(message\.role === 'Turn summary' \|\| message\.role === 'You'\) card\.append\(messageActions\(message\)\)/);
   assert.match(main, /if \(message\.role === 'You'\) \{[\s\S]*?messageActionButton\('rerun'\)/);
   assert.match(main, /button\.dataset\.noI18n = ''/, 'action labels stay out of conversation translation');

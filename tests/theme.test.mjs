@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { nextThemePreference, parseThemePreference, resolveTheme } from '../src/renderer/theme.ts';
+import { readStylesheet } from './style.mjs';
 
 test('auto theme follows local morning and evening boundaries', () => {
   assert.equal(resolveTheme('auto', new Date(2026, 9, 26, 6, 59)), 'dark');
@@ -81,7 +82,7 @@ function outranks(candidate, target) {
 test('every dark surface on the settings page has a light counterpart', async () => {
   const [theme, style, html] = await Promise.all([
     readTheme(),
-    readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8'),
+    readStylesheet(),
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
   ]);
   const page = html.slice(html.indexOf('id="page-settings"'), html.indexOf('id="page-docs"'));

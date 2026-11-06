@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { folderContextLabel, sessionLabel, sessionStamp } from '../src/renderer/sessions-view.ts';
+import { readStylesheet } from './style.mjs';
 
 const stamp = new Date(2020, 9, 29, 10, 23, 54).getTime() / 1000;
 
@@ -62,7 +63,7 @@ test('the topbar markup keeps the label attached to the session title', async ()
 });
 
 test('the topbar lays the label and the stamp out on one row', async () => {
-  const css = await readFile(new URL('../src/renderer/style.css', import.meta.url), 'utf8');
+  const css = await readStylesheet();
   assert.match(css, /\.topbar \.topbar-title\{display:flex;align-items:baseline;gap:10px/);
   assert.match(css, /\.topbar \.topbar-title \.eyebrow\{[^}]*font-size:calc\(12px\*var\(--text-scale\)\)/);
   assert.match(css, /\.topbar \.topbar-title \.eyebrow::after\{content:":"\}/);

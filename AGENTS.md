@@ -23,6 +23,7 @@ src-tauri/src/
   lib.rs         # Tauri commands and session lifecycle
   agent.rs       # Tool dispatcher, approval gate, Plan/Act enforcement
   provider.rs    # OpenAI-compatible streaming client
+  keychain.rs    # API keys in the OS keychain, one entry per provider
   db.rs          # Schema ownership, numbered migrations, connection setup
   workspace.rs   # Workspace jail and file operations
 src/renderer/    # TypeScript UI
@@ -56,7 +57,7 @@ All providers are normalized to a single `ChatCompletion` contract (OpenAI-compa
 
 Rules:
 - **P1** — Streaming (SSE) is mandatory; reassemble streaming tool-call deltas into complete tool invocations before dispatch.
-- **P2** — API keys live in the OS keychain, never in plaintext config, logs, or session transcripts.
+- **P2** — API keys live in the OS keychain, never in plaintext config, logs, or session transcripts. The keychain account is `ProviderId::slug()`, never the base URL: a provider has one endpoint, and keying on the URL orphaned the secret whenever the endpoint changed.
 - **P3** — Local providers must work fully offline; provider tests use recorded fixtures or a local mock server, never live endpoints.
 - **P4** — Adding a provider = one adapter + fixture tests + model-list mapping. No provider-specific branches anywhere else in the codebase.
 

@@ -6,6 +6,7 @@ pub mod checkpoints;
 pub mod command;
 pub mod db;
 pub mod external;
+pub mod keychain;
 pub mod lsp;
 pub mod mcp;
 pub mod provider;
@@ -145,6 +146,8 @@ struct ApprovalExpired {
     session_id: String,
     id: u64,
 }
+
+// Sessions, projects, and work tasks --------------------------------------------
 
 #[tauri::command]
 async fn create_session(
@@ -340,6 +343,8 @@ fn save_auto_approve(
     state.store.update_auto_approve(&session_id, policy)
 }
 
+// Workspace, editor, and files --------------------------------------------------
+
 fn browser_workspace(state: &AppState, session_id: Option<String>, project_workspace: Option<String>, work_task_id: Option<String>) -> Result<PathBuf, String> {
     if let Some(workspace) = project_workspace {
         return Ok(PathBuf::from(state.store.get_project(&workspace)?.workspace));
@@ -515,6 +520,8 @@ fn delete_project_entry(
     workspace::delete_project_entry(&root, &path)
 }
 
+// Source control ----------------------------------------------------------------
+
 #[tauri::command]
 fn get_source_control(
     state: tauri::State<'_, AppState>,
@@ -581,6 +588,8 @@ fn git_push(
     source_control::push(&root)
 }
 
+// Terminal ----------------------------------------------------------------------
+
 /// Opens (or restarts) the terminal for this session, in its project folder.
 /// This is the user's own shell, not the agent's sandboxed command path.
 /// Returns the id the shell is stored under; the frontend keys every later
@@ -627,6 +636,8 @@ fn terminal_resize(
 fn terminal_close(terminals: tauri::State<'_, terminal::TerminalState>, session_id: String) {
     terminal::close(&terminals, &session_id);
 }
+
+// Session maintenance -----------------------------------------------------------
 
 #[tauri::command]
 fn rename_session(
@@ -707,6 +718,8 @@ fn delete_session(
     Ok(())
 }
 
+// Schedules ---------------------------------------------------------------------
+
 #[tauri::command]
 fn create_schedule(
     state: tauri::State<'_, AppState>,
@@ -776,6 +789,8 @@ fn retry_schedule(
         .schedules
         .retry(&session_id, &schedule_id, schedules::unix_now())
 }
+
+// Transcript import and checkpoints ---------------------------------------------
 
 #[tauri::command]
 async fn import_transcript(
@@ -884,6 +899,8 @@ async fn restore_checkpoint(
     Ok(restored)
 }
 
+// Approvals ---------------------------------------------------------------------
+
 #[tauri::command]
 fn respond_approval(
     state: tauri::State<'_, AppState>,
@@ -955,6 +972,8 @@ fn list_pending_approvals(state: tauri::State<'_, AppState>) -> Result<Vec<Appro
     Ok(events)
 }
 
+// Provider settings and API keys ------------------------------------------------
+
 #[tauri::command]
 async fn save_provider_key(
     provider_id: ProviderId,
@@ -968,36 +987,22 @@ async fn save_provider_key(
     if api_key.is_empty() {
         return Err("API key cannot be empty".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let entry = keyring::Entry::new("com.moderado.desktop", &base_url)
-            .map_err(|_| "Could not access OS keychain")?;
-        entry
-            .set_password(&api_key)
-            .map_err(|_| "Could not save API key to OS keychain".into())
-    })
-    .await
-    .map_err(|_| "Keychain task failed")?
+    tauri::async_runtime::spawn_blocking(move || keychain::save(provider_id, &base_url, &api_key))
+        .await
+        .map_err(|_| "Keychain task failed")?
 }
 
-async fn provider_key(base_url: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let entry = keyring::Entry::new("com.moderado.desktop", &base_url)
-            .map_err(|_| "Could not access OS keychain")?;
-        match entry.get_password() {
-            Ok(value) => Ok(value),
-            Err(keyring::Error::NoEntry) => Ok(String::new()),
-            Err(_) => Err("Could not read API key from OS keychain".into()),
-        }
-    })
-    .await
-    .map_err(|_| "Keychain task failed")?
+async fn provider_key(provider_id: ProviderId, base_url: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || keychain::read(provider_id, &base_url))
+        .await
+        .map_err(|_| "Keychain task failed")?
 }
 
 async fn configured_key(provider_id: ProviderId, base_url: &str) -> Result<String, String> {
     if provider_id.preset().local {
         Ok(String::new())
     } else {
-        provider_key(base_url.to_owned()).await
+        provider_key(provider_id, base_url.to_owned()).await
     }
 }
 
@@ -1010,6 +1015,8 @@ async fn discover_models(
     let key = configured_key(provider_id, &base_url).await?;
     provider::list_model_catalog(&base_url, &key).await
 }
+
+// MCP and LSP configuration -----------------------------------------------------
 
 #[tauri::command]
 fn load_mcp_config() -> Result<mcp::McpConfig, String> {
@@ -1083,6 +1090,8 @@ async fn save_provider_settings(
     }
     Ok(saved)
 }
+
+// Running a turn ----------------------------------------------------------------
 
 #[tauri::command]
 async fn stop_turn(state: tauri::State<'_, AppState>, session_id: String) -> Result<(), String> {
@@ -1501,6 +1510,8 @@ async fn execute_turn(
     }
 }
 
+// Scheduled runs ----------------------------------------------------------------
+
 async fn run_due_schedule(app: tauri::AppHandle, schedule: Schedule) {
     let _ = app.emit(
         "schedule-started",
@@ -1590,6 +1601,8 @@ async fn poll_schedules(app: tauri::AppHandle) {
         }
     }
 }
+
+// Window chrome and the app shell -----------------------------------------------
 
 /// The OS window title keeps the product name and appends the package version,
 /// so Alt-Tab, the taskbar, and screenshots show which build is running.
