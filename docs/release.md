@@ -20,11 +20,11 @@
 
 | OS | Artifacts |
 | --- | --- |
-| Windows | MSI and NSIS `.exe` |
-| macOS | `.dmg` (and `.app`) |
-| Linux | `.AppImage` and `.deb` |
+| Windows | `.msi` and NSIS `-setup.exe` |
+| macOS | `.dmg` and `.app.tar.gz` (aarch64) |
+| Linux | `.AppImage`, `.deb`, and `.rpm` |
 
-Bundle metadata (publisher, category, descriptions, copyright) lives in `src-tauri/tauri.conf.json`.
+v0.4.49 published exactly these seven assets. The `.app.tar.gz` is Tauri's updater bundle — it is produced even though the updater is not configured (see below). Bundle metadata (publisher, category, descriptions, copyright) lives in `src-tauri/tauri.conf.json`.
 
 ## Signing (deferred — releases ship unsigned)
 

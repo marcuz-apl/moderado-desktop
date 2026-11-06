@@ -43,9 +43,11 @@ The second published release. It covers the 20 commits since [v0.4.43](https://g
 
 | OS | Artifacts |
 | --- | --- |
-| Windows | MSI and NSIS `.exe` |
-| macOS | `.dmg` (and `.app`) |
-| Linux | `.AppImage` and `.deb` |
+| Windows | `Moderado.Desktop_0.4.49_x64_en-US.msi` and `..._x64-setup.exe` (NSIS) |
+| macOS | `..._aarch64.dmg` and `..._aarch64.app.tar.gz` |
+| Linux | `..._amd64.AppImage`, `..._amd64.deb`, `..._x86_64.rpm` |
+
+Seven assets in total. The macOS `.app.tar.gz` is Tauri's updater bundle; it ships even though auto-update is not configured yet.
 
 Builds are **unsigned** by decision on 2026-11-04. Windows SmartScreen asks for **More info → Run anyway**; macOS Gatekeeper blocks the first launch, so right-click → **Open** once (or `xattr -dr com.apple.quarantine "/Applications/Moderado Desktop.app"`); Linux needs no workaround. See [release.md](./release.md#signing-deferred--releases-ship-unsigned) for the rationale and the signing plan.
 
